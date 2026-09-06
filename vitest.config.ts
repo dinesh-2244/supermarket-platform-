@@ -17,6 +17,19 @@ export default defineConfig({
           include: ['src/**/__tests__/**/*.test.ts', 'tests/unit/**/*.test.ts'],
         },
       },
+      {
+        resolve: { alias: { '@': srcAlias } },
+        test: {
+          name: 'integration',
+          environment: 'node',
+          include: ['tests/integration/**/*.test.ts'],
+          setupFiles: ['tests/integration/setup.ts'],
+          // Integration tests share one database; run them in a single worker.
+          poolOptions: { forks: { singleFork: true } },
+          testTimeout: 30_000,
+          hookTimeout: 60_000,
+        },
+      },
     ],
     coverage: {
       provider: 'v8',
