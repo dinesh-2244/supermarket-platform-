@@ -33,6 +33,9 @@ jobs:
       - name: Unit tests + coverage gate
         run: npm run test:coverage
 
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
       - name: Build
         run: npm run build
         env:
