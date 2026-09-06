@@ -1,0 +1,81 @@
+# Local production parity: app + Postgres + Caddy (§23).
+#
+#   cp .env.example .env      # then fill in the secrets
+#   docker compose -f docker/docker-compose.yml up --build
+#
+# The app is served through Caddy on http://localhost:8080. Postgres is also
+# published on 5432 so `npm run test:integration` can reach it from the host.
+
+name: supermarket-platform
+
+services:
+  postgres:
+    image: postgres:16.10-alpine@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-supermarket}
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-supermarket}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Runs once per `up` and exits: migrations are a gated pre-deploy step, never
+  # something the app does on boot.
+  migrate:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: 'no'
+    command: ['node', 'node_modules/prisma/build/index.js', 'migrate', 'deploy']
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/supermarket}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/supermarket}
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set — see .env.example}
+      AUTH_URL: ${AUTH_URL:-http://localhost:8080}
+      DEFAULT_CURRENCY: INR
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    expose:
+      - '3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  caddy:
+    image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:-}
+    ports:
+      - '8080:80'
+      - '8443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:

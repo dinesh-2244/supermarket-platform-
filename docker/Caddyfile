@@ -1,0 +1,23 @@
+# Local prod-parity reverse proxy. Set DOMAIN to a real hostname in staging or
+# production and Caddy issues and renews the certificate automatically (§23).
+{$DOMAIN::80} {
+	encode zstd gzip
+
+	# The app is the only upstream; Caddy terminates TLS and nothing else.
+	reverse_proxy app:3000 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP {remote_host}
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
