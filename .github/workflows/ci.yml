@@ -30,6 +30,9 @@ jobs:
         run: npm run lint
       - name: Format check
         run: npm run format
+      - name: Unit tests
+        run: npm run test
+
       - name: Build
         run: npm run build
         env:

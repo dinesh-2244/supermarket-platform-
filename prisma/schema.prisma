@@ -1,0 +1,9 @@
+// Datasource + generator only. The domain models land in P1-3 (Prisma schema).
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
