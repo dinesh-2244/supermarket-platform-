@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clearEventHandlersForTests, emit, on } from '../event-bus/index.js';
+import { clearEventHandlersForTests, emit, on } from '../event-bus/index';
 
 afterEach(() => {
   clearEventHandlersForTests();

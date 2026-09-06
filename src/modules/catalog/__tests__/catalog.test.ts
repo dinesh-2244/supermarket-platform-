@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { moduleDescriptor } from '../index.js';
+import { moduleDescriptor } from '../index';
 
 describe('catalog module', () => {
   it('declares the ownership and dependencies from architecture §4', () => {

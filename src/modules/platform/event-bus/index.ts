@@ -1,4 +1,4 @@
-import { childLogger } from '../logger/index.js';
+import { childLogger } from '../logger/index';
 
 /**
  * Domain events (§4). Synchronous and in-process: a handler runs on the emitting

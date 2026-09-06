@@ -40,7 +40,7 @@ describe('module boundaries', () => {
     const results = await lintFixture(
       'src/modules/orders/__boundary_fixture__.ts',
       [
-        "import { executor } from '../inventory/repo.js';",
+        "import { executor } from '../inventory/repo';",
         '',
         'export const leak = executor;',
         '',
@@ -58,7 +58,7 @@ describe('module boundaries', () => {
     const results = await lintFixture(
       'src/modules/cart/__boundary_fixture__.ts',
       [
-        "import { descriptor } from '../pricing/domain/index.js';",
+        "import { descriptor } from '../pricing/domain/index';",
         '',
         'export const leak = descriptor;',
         '',
@@ -72,7 +72,7 @@ describe('module boundaries', () => {
     const results = await lintFixture(
       'src/app/__boundary_fixture__/route.ts',
       [
-        "import { executor } from '@/modules/inventory/repo.js';",
+        "import { executor } from '@/modules/inventory/repo';",
         '',
         'export const GET = () => new Response(String(typeof executor));',
         '',
@@ -100,7 +100,7 @@ describe('module boundaries', () => {
     const results = await lintFixture(
       'src/lib/__boundary_fixture__.ts',
       [
-        "import { moduleDescriptor } from '@/modules/orders/index.js';",
+        "import { moduleDescriptor } from '@/modules/orders/index';",
         '',
         'export const leak = moduleDescriptor;',
         '',
@@ -114,8 +114,8 @@ describe('module boundaries', () => {
     const results = await lintFixture(
       'src/modules/checkout/__boundary_fixture__.ts',
       [
-        "import { moduleDescriptor } from '../orders/index.js';",
-        "import { newId } from '../platform/index.js';",
+        "import { moduleDescriptor } from '../orders/index';",
+        "import { newId } from '../platform/index';",
         '',
         'export const legal = () => `${moduleDescriptor().name}:${newId()}`;',
         '',

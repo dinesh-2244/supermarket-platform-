@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import pino, { type Logger } from 'pino';
-import { getConfig } from '../config/index.js';
+import { getConfig } from '../config/index';
 
 export interface RequestContext {
   readonly requestId: string;

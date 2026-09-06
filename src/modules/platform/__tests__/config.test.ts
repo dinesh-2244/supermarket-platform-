@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ConfigError, type EnvSource, loadConfig } from '../config/index.js';
+import { ConfigError, type EnvSource, loadConfig } from '../config/index';
 
 const VALID = {
   APP_ENV: 'ci',

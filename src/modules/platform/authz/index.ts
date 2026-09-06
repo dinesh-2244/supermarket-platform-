@@ -1,4 +1,4 @@
-import { AuthzError } from '../errors/index.js';
+import { AuthzError } from '../errors/index';
 
 export type UserRole = 'SUPER_ADMIN' | 'STORE_MANAGER' | 'STORE_STAFF';
 

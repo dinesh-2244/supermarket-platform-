@@ -38,10 +38,10 @@ export default defineConfig({
       exclude: ['src/modules/**/index.ts', 'src/modules/**/__tests__/**'],
       // Gate is wired now and ratchets up as Phase 2 fills the modules in (§19).
       thresholds: {
-        lines: 20,
-        functions: 20,
-        branches: 20,
-        statements: 20,
+        lines: 45,
+        statements: 45,
+        functions: 80,
+        branches: 80,
       },
     },
   },

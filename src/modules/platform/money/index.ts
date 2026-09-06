@@ -1,4 +1,4 @@
-import { ValidationError } from '../errors/index.js';
+import { ValidationError } from '../errors/index';
 
 /**
  * Integer paise. Floats are banned for currency (§17); the brand makes an

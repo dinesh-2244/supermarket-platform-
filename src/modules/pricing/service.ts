@@ -4,7 +4,7 @@
  *
  * Phase 1 is a skeleton — this module emits price.changed once its use-cases exist.
  */
-import { descriptor, type ModuleDescriptor } from './domain/index.js';
+import { descriptor, type ModuleDescriptor } from './domain/index';
 
 /** What this module owns and is allowed to depend on (§4). */
 export function moduleDescriptor(): ModuleDescriptor {

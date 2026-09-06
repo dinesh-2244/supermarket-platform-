@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { add, format, fromRupees, min, mul, paise, percentBp, subtract } from '../money/index.js';
-import { ValidationError } from '../errors/index.js';
+import { add, format, fromRupees, min, mul, paise, percentBp, subtract } from '../money/index';
+import { ValidationError } from '../errors/index';
 
 describe('platform/money', () => {
   it('rejects non-integer paise', () => {

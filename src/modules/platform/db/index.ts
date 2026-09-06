@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
-import { getConfig } from '../config/index.js';
-import { childLogger } from '../logger/index.js';
+import { getConfig } from '../config/index';
+import { childLogger } from '../logger/index';
 
 /**
  * A transaction handle. Every write that must be audited (`websiteStock` →

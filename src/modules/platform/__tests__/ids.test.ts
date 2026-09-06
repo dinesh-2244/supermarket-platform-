@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cartToken, newId, orderNumber, trackingToken } from '../ids/index.js';
+import { cartToken, newId, orderNumber, trackingToken } from '../ids/index';
 
 describe('platform/ids', () => {
   it('generates unique ids', () => {

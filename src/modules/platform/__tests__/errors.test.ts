@@ -7,7 +7,7 @@ import {
   ValidationError,
   isAppError,
   toErrorResponse,
-} from '../errors/index.js';
+} from '../errors/index';
 
 describe('platform/errors', () => {
   it.each([

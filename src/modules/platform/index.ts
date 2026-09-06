@@ -11,7 +11,7 @@ export {
   isProduction,
   loadConfig,
   resetConfigForTests,
-} from './config/index.js';
+} from './config/index';
 
 export {
   childLogger,
@@ -19,7 +19,7 @@ export {
   getRequestContext,
   type RequestContext,
   withRequestContext,
-} from './logger/index.js';
+} from './logger/index';
 
 export {
   checkDbHealth,
@@ -33,7 +33,7 @@ export {
   type TransactionOptions,
   type Tx,
   withTransaction,
-} from './db/index.js';
+} from './db/index';
 
 export {
   AppError,
@@ -47,7 +47,7 @@ export {
   NotFoundError,
   toErrorResponse,
   ValidationError,
-} from './errors/index.js';
+} from './errors/index';
 
 export {
   clearEventHandlersForTests,
@@ -57,7 +57,7 @@ export {
   type EventHandler,
   on,
   registerEventHandlers,
-} from './event-bus/index.js';
+} from './event-bus/index';
 
 export {
   add,
@@ -71,9 +71,9 @@ export {
   percentBp,
   subtract,
   ZERO,
-} from './money/index.js';
+} from './money/index';
 
-export { cartToken, newId, orderNumber, requestId, trackingToken } from './ids/index.js';
+export { cartToken, newId, orderNumber, requestId, trackingToken } from './ids/index';
 
 export {
   type Action,
@@ -85,7 +85,7 @@ export {
   type Principal,
   type Resource,
   type UserRole,
-} from './authz/index.js';
+} from './authz/index';
 
 export {
   captureException,
@@ -94,4 +94,4 @@ export {
   type ObservabilityProvider,
   resetObservabilityProvider,
   setObservabilityProvider,
-} from './observability/index.js';
+} from './observability/index';

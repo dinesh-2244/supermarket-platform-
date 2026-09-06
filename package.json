@@ -22,7 +22,8 @@
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
-    "db:reset": "prisma migrate reset --force"
+    "db:reset": "prisma migrate reset --force",
+    "test:coverage": "vitest run --project unit --coverage"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

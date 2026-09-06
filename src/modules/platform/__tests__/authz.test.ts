@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { allowedStoreIds, assertAuthorized, authorize, isUnscoped } from '../authz/index.js';
-import { AuthzError } from '../errors/index.js';
+import { allowedStoreIds, assertAuthorized, authorize, isUnscoped } from '../authz/index';
+import { AuthzError } from '../errors/index';
 
 const superAdmin = { kind: 'user', userId: 'u1', role: 'SUPER_ADMIN', storeId: null } as const;
 const manager = { kind: 'user', userId: 'u2', role: 'STORE_MANAGER', storeId: 'store-1' } as const;

@@ -1,6 +1,6 @@
-import { getConfig } from '../config/index.js';
-import { childLogger } from '../logger/index.js';
-import { getRequestContext } from '../logger/index.js';
+import { getConfig } from '../config/index';
+import { childLogger } from '../logger/index';
+import { getRequestContext } from '../logger/index';
 
 export type ErrorContext = Readonly<Record<string, unknown>>;
 
