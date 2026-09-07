@@ -1,0 +1,101 @@
+# Local production parity: app + Postgres + Caddy (§23).
+#
+#   cp .env.example .env      # then fill in AUTH_SECRET
+#   docker compose -f docker/docker-compose.yml up --build
+#
+# The app is served through Caddy on http://localhost:8080.
+#
+# **Container connection settings are derived here, not read from `.env`.**
+# `.env` is the *host* profile: its DATABASE_URL points at 127.0.0.1:5432 (the
+# published Postgres port) and its AUTH_URL at the `npm run dev` origin. Inside
+# a container, `localhost` is that container — an app that trusted `.env` would
+# try to reach a database inside its own network namespace and the public origin
+# would be a port Caddy is not on. So the URLs below are built from the
+# POSTGRES_* variables against the `postgres` service name, and the public origin
+# defaults to Caddy's port. Only genuinely shared values (secrets, log level, the
+# database credentials themselves) come from the environment.
+
+name: supermarket-platform
+
+x-database-url: &database-url
+  DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-supermarket}
+
+services:
+  postgres:
+    image: postgres:16.10-alpine@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-supermarket}
+    ports:
+      # Published for the host: `npm run dev`, `npm run test:integration` and
+      # `.env`'s DATABASE_URL all reach the database through this.
+      - '127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-supermarket}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Runs once per `up` and exits: migrations are a gated pre-deploy step, never
+  # something the app does on boot. Built from the Dockerfile's `migrate` target,
+  # which carries the complete locked dependency tree the Prisma CLI needs.
+  migrate:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: migrate
+    restart: 'no'
+    environment:
+      <<: *database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: runner
+    restart: unless-stopped
+    environment:
+      <<: *database-url
+      APP_ENV: ${APP_ENV:-local}
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set — see .env.example}
+      # The origin a browser actually reaches, i.e. Caddy — not the app's own
+      # port and never the `npm run dev` origin from .env.
+      AUTH_URL: ${PUBLIC_URL:-http://localhost:${CADDY_HTTP_PORT:-8080}}
+      DEFAULT_CURRENCY: INR
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    expose:
+      - '3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  caddy:
+    image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    restart: unless-stopped
+    environment:
+      # `:80` — not empty. An empty site address makes Caddy parse the Caddyfile's
+      # site block as a global options block and crash-loop on startup.
+      DOMAIN: ${DOMAIN:-:80}
+    ports:
+      - '${CADDY_HTTP_PORT:-8080}:80'
+      - '${CADDY_HTTPS_PORT:-8443}:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:

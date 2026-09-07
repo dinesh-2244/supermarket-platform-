@@ -1,0 +1,715 @@
+// Supermarket platform — database schema.
+// Source of truth: docs/phase-0-architecture.md §3 (v2). Money is always integer
+// paise; audit tables (StockLedger, OrderStatusHistory, PriceChange, AuditLog) are
+// append-only and are written in the same transaction as the change they record.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  SUPER_ADMIN
+  STORE_MANAGER
+  STORE_STAFF
+}
+
+enum ActorType {
+  USER
+  CUSTOMER
+  SYSTEM
+}
+
+enum PosMode {
+  MANUAL
+  ADAPTER
+}
+
+enum SubstitutionPolicy {
+  NONE
+  ASK_CUSTOMER
+  STAFF_DISCRETION
+}
+
+/// Every website-stock movement carries one of these reasons (§7, R3/R11/R12).
+enum StockLedgerReason {
+  MANUAL_ADJUST
+  CSV_IMPORT
+  RECONCILE
+  ORDER_PLACED
+  PICK_SHORT_RESTORE
+  ADMIN_CORRECTION
+  POS_SYNC
+}
+
+enum CartStatus {
+  ACTIVE
+  CONVERTED
+  ABANDONED
+}
+
+enum PaymentMethod {
+  COD
+  UPI_ON_DELIVERY
+}
+
+/// Order lifecycle (§11). There is deliberately **no customer-cancel value** (R4):
+/// only an audited store/admin correction can end an order early, via
+/// CANCELLED_BY_STORE.
+enum OrderStatus {
+  PLACED
+  ACCEPTED
+  PICKING
+  PICKED
+  BILLED_IN_POS
+  PACKED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CLOSED
+  CANCELLED_BY_STORE
+  DELIVERY_FAILED
+  CLOSED_UNDELIVERED
+}
+
+enum OrderLineStatus {
+  PENDING
+  PICKED
+  SHORT
+  SUBSTITUTED
+  UNAVAILABLE
+}
+
+enum PickTaskStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+}
+
+enum DeliveryStatus {
+  PENDING
+  OUT
+  DELIVERED
+  FAILED
+}
+
+enum DeliveryPaymentMethod {
+  CASH
+  UPI
+}
+
+enum OtpPurpose {
+  LOGIN
+  VERIFY_PHONE
+}
+
+// ---------------------------------------------------------------------------
+// Stores & delivery zones
+// ---------------------------------------------------------------------------
+
+model Store {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  timezone    String   @default("Asia/Kolkata")
+  addressJson Json
+  geoLat      Float?
+  geoLng      Float?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  settings       StoreSettings?
+  deliveryZones  DeliveryZone[]
+  storeProducts  StoreProduct[]
+  inventoryItems InventoryItem[]
+  stockLedger    StockLedger[]
+  posSkuMaps     PosSkuMap[]
+  users          User[]
+  carts          Cart[]
+  orders         Order[]
+
+  @@index([isActive])
+}
+
+/// Per-store business settings live here, never in env (§22).
+model StoreSettings {
+  id                       String             @id @default(uuid())
+  storeId                  String             @unique
+  deliveryFeePaise         Int                @default(0)
+  minOrderPaise            Int                @default(0)
+  slotLengthMinutes        Int                @default(60)
+  slotCapacity             Int                @default(10)
+  substitutionPolicy       SubstitutionPolicy @default(ASK_CUSTOMER)
+  posMode                  PosMode            @default(MANUAL)
+  /// Price-variance tolerance (R6): effective threshold is the LOWER of
+  /// `estimatedTotal * priceVariancePercentBp / 10000` and this absolute cap.
+  priceVariancePercentBp   Int                @default(500)
+  priceVarianceAbsCapPaise Int                @default(5000)
+  isAcceptingOrders        Boolean            @default(true)
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+}
+
+/// A zone belongs to exactly one store (§15).
+model DeliveryZone {
+  id        String   @id @default(uuid())
+  storeId   String
+  name      String
+  isActive  Boolean  @default(true)
+  sortKey   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  areas DeliveryArea[]
+
+  @@unique([storeId, name])
+  @@index([storeId, isActive])
+}
+
+/// A named locality. `pincode` is a stored attribute and validation input — it is
+/// deliberately NOT unique and NOT the routing key: two areas, even under
+/// different stores, may share one pincode (R8 / ADR-0004).
+model DeliveryArea {
+  id         String   @id @default(uuid())
+  zoneId     String
+  name       String
+  pincode    String?
+  matchHints Json?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  zone      DeliveryZone      @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  addresses CustomerAddress[]
+
+  @@unique([zoneId, name])
+  @@index([pincode])
+  @@index([zoneId, isActive])
+}
+
+/// Out-of-zone demand signal captured at checkout (§15).
+model ServiceabilityRequest {
+  id        String   @id @default(uuid())
+  rawInput  String
+  pincode   String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([pincode])
+}
+
+// ---------------------------------------------------------------------------
+// Catalog & pricing
+// ---------------------------------------------------------------------------
+
+model Category {
+  id       String  @id @default(uuid())
+  name     String
+  slug     String  @unique
+  parentId String?
+  sortKey  Int     @default(0)
+  isActive Boolean @default(true)
+
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+  products Product[]
+
+  @@index([parentId, sortKey])
+}
+
+/// One shared global master row per real product — never duplicated per store
+/// (R1 / ADR-0003). Per-store listing + price lives in StoreProduct, stock in
+/// InventoryItem.
+model Product {
+  id             String   @id @default(uuid())
+  sku            String   @unique
+  name           String
+  slug           String   @unique
+  description    String?
+  brand          String?
+  packSize       String
+  categoryId     String
+  attributesJson Json?
+  aisleSortKey   Int      @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  category       Category        @relation(fields: [categoryId], references: [id])
+  images         ProductImage[]
+  storeProducts  StoreProduct[]
+  inventoryItems InventoryItem[]
+  stockLedger    StockLedger[]
+  posSkuMaps     PosSkuMap[]
+  cartItems      CartItem[]
+  orderLines     OrderLine[]     @relation("OrderLineProduct")
+  substitutedIn  OrderLine[]     @relation("OrderLineSubstitute")
+
+  @@index([categoryId, isActive])
+  @@index([aisleSortKey])
+}
+
+model ProductImage {
+  id        String  @id @default(uuid())
+  productId String
+  url       String
+  sortKey   Int     @default(0)
+  alt       String?
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, sortKey])
+}
+
+/// Per-store listing and current price.
+model StoreProduct {
+  id                String    @id @default(uuid())
+  storeId           String
+  productId         String
+  isListed          Boolean   @default(true)
+  mrpPaise          Int
+  sellingPricePaise Int
+  listedAt          DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  store        Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  product      Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  priceChanges PriceChange[]
+
+  @@unique([storeId, productId])
+  @@index([storeId, isListed])
+}
+
+/// Append-only price history.
+model PriceChange {
+  id                   String   @id @default(uuid())
+  storeProductId       String
+  oldSellingPricePaise Int
+  newSellingPricePaise Int
+  oldMrpPaise          Int
+  newMrpPaise          Int
+  actorUserId          String?
+  reason               String?
+  createdAt            DateTime @default(now())
+
+  storeProduct StoreProduct @relation(fields: [storeProductId], references: [id], onDelete: Cascade)
+  actorUser    User?        @relation(fields: [actorUserId], references: [id])
+
+  @@index([storeProductId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Inventory & audit
+// ---------------------------------------------------------------------------
+
+/// `websiteStock` is the single quantity — "Available to Sell" (R3/R5). There is
+/// deliberately no `reservedQty`: stock is decremented outright when an order is
+/// placed, and restored by a ledger-recorded correction if it is not picked.
+model InventoryItem {
+  id            String    @id @default(uuid())
+  storeId       String
+  productId     String
+  websiteStock  Int       @default(0)
+  lastCountedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  store   Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, productId])
+  @@index([storeId])
+}
+
+/// Append-only stock movement log. `balanceAfter` always equals the resulting
+/// `InventoryItem.websiteStock`, and the row is written in the same transaction
+/// as the change it records (§3).
+model StockLedger {
+  id           String            @id @default(uuid())
+  storeId      String
+  productId    String
+  delta        Int
+  reason       StockLedgerReason
+  refType      String?
+  refId        String?
+  balanceAfter Int
+  actorType    ActorType
+  actorId      String?
+  note         String?
+  createdAt    DateTime          @default(now())
+
+  store   Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, productId, createdAt])
+  @@index([refType, refId])
+}
+
+/// Reserved for future POS inventory sync (R14 / ADR-0007). Unused in V1.
+model PosSkuMap {
+  id        String   @id @default(uuid())
+  storeId   String
+  productId String
+  posSku    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store   Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, posSku])
+  @@unique([storeId, productId])
+}
+
+// ---------------------------------------------------------------------------
+// Identity (staff / admin) — Auth.js with database sessions
+// ---------------------------------------------------------------------------
+
+model User {
+  id              String    @id @default(uuid())
+  email           String    @unique
+  passwordHash    String
+  name            String
+  role            UserRole
+  /// Null only for SUPER_ADMIN, who is not scoped to a store.
+  storeId         String?
+  isActive        Boolean   @default(true)
+  twoFactorSecret String?
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  store        Store?              @relation(fields: [storeId], references: [id])
+  sessions     Session[]
+  accounts     Account[]
+  priceChanges PriceChange[]
+  pickTasks    PickTask[]
+  posHandoffs  PosBillingHandoff[]
+
+  @@index([storeId, role])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+/// Generic audit trail for sensitive mutations: price edits, stock adjustments,
+/// user changes, admin order corrections (§21).
+model AuditLog {
+  id         String    @id @default(uuid())
+  actorType  ActorType
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  beforeJson Json?
+  afterJson  Json?
+  ip         String?
+  createdAt  DateTime  @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Customers (guest-first, R2)
+// ---------------------------------------------------------------------------
+
+/// Upserted from checkout by phone. `email` and `passwordHash` are nullable —
+/// an account is optional and never blocks ordering.
+model Customer {
+  id           String   @id @default(uuid())
+  phone        String   @unique
+  name         String
+  email        String?  @unique
+  passwordHash String?
+  isBlocked    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  addresses CustomerAddress[]
+  carts     Cart[]
+  orders    Order[]
+}
+
+model CustomerAddress {
+  id         String   @id @default(uuid())
+  customerId String
+  label      String?
+  line1      String
+  line2      String?
+  landmark   String?
+  areaId     String?
+  pincode    String?
+  geoLat     Float?
+  geoLng     Float?
+  isDefault  Boolean  @default(false)
+  isDeleted  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  customer Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  area     DeliveryArea? @relation(fields: [areaId], references: [id])
+
+  @@index([customerId, isDeleted])
+}
+
+/// Schema present, feature-flagged OFF for the pilot (`customer_otp_login`).
+model OtpChallenge {
+  id         String     @id @default(uuid())
+  phone      String
+  codeHash   String
+  purpose    OtpPurpose
+  expiresAt  DateTime
+  attempts   Int        @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime   @default(now())
+
+  @@index([phone, purpose, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Cart (no login required, §10)
+// ---------------------------------------------------------------------------
+
+model Cart {
+  id         String     @id @default(uuid())
+  cartToken  String     @unique
+  customerId String?
+  storeId    String
+  status     CartStatus @default(ACTIVE)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  customer Customer?  @relation(fields: [customerId], references: [id])
+  store    Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  items    CartItem[]
+
+  @@index([status, updatedAt])
+  @@index([customerId])
+}
+
+model CartItem {
+  id                     String   @id @default(uuid())
+  cartId                 String
+  productId              String
+  qty                    Int
+  unitPriceSnapshotPaise Int
+  addedAt                DateTime @default(now())
+
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([cartId, productId])
+}
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+model Order {
+  id            String @id @default(uuid())
+  orderNumber   String @unique
+  /// Opaque token for the guest order-status page (§11).
+  trackingToken String @unique
+  customerId    String
+  storeId       String
+
+  // Snapshots — later catalog/price/address edits never mutate a placed order.
+  contactNameSnapshot         String
+  contactPhoneSnapshot        String
+  deliveryAddressSnapshotJson Json
+
+  deliverySlotStart DateTime
+  deliverySlotEnd   DateTime
+  paymentMethod     PaymentMethod
+  status            OrderStatus   @default(PLACED)
+
+  subtotalPaise       Int
+  deliveryFeePaise    Int
+  estimatedTotalPaise Int
+
+  posBillNumber                  String?
+  posFinalTotalPaise             Int?
+  /// Set when the POS total exceeds the estimate by more than the store's
+  /// tolerance (R6). A flagged order cannot leave PACKED until confirmed.
+  priceVarianceFlagged           Boolean @default(false)
+  customerConfirmedRevisedAmount Boolean @default(false)
+  revisedAmountConfirmedBy       String?
+
+  placedAt         DateTime  @default(now())
+  acceptedAt       DateTime?
+  pickingStartedAt DateTime?
+  pickedAt         DateTime?
+  billedAt         DateTime?
+  packedAt         DateTime?
+  dispatchedAt     DateTime?
+  deliveredAt      DateTime?
+  closedAt         DateTime?
+  correctedAt      DateTime?
+  correctionReason String?
+  updatedAt        DateTime  @updatedAt
+
+  customer       Customer             @relation(fields: [customerId], references: [id])
+  store          Store                @relation(fields: [storeId], references: [id])
+  lines          OrderLine[]
+  statusHistory  OrderStatusHistory[]
+  pickTask       PickTask?
+  posHandoff     PosBillingHandoff?
+  deliveryRecord DeliveryRecord?
+
+  @@index([storeId, status, placedAt])
+  @@index([customerId, placedAt])
+  @@index([priceVarianceFlagged])
+}
+
+model OrderLine {
+  id                  String          @id @default(uuid())
+  orderId             String
+  productId           String
+  nameSnapshot        String
+  packSizeSnapshot    String
+  unitPricePaise      Int
+  qtyOrdered          Int
+  qtyPicked           Int?
+  lineStatus          OrderLineStatus @default(PENDING)
+  substituteProductId String?
+  /// How much of `qtyOrdered` has already been given back to website stock, so a
+  /// short-pick restore and a later admin correction cannot double-restore (R11).
+  stockRestoredQty    Int             @default(0)
+
+  order             Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product           Product  @relation("OrderLineProduct", fields: [productId], references: [id])
+  substituteProduct Product? @relation("OrderLineSubstitute", fields: [substituteProductId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+/// Append-only. Written in the same transaction as the status change (§11).
+model OrderStatusHistory {
+  id         String       @id @default(uuid())
+  orderId    String
+  fromStatus OrderStatus?
+  toStatus   OrderStatus
+  actorType  ActorType
+  actorId    String?
+  note       String?
+  createdAt  DateTime     @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Fulfillment
+// ---------------------------------------------------------------------------
+
+model PickTask {
+  id             String         @id @default(uuid())
+  orderId        String         @unique
+  assignedUserId String?
+  status         PickTaskStatus @default(OPEN)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  order        Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  assignedUser User? @relation(fields: [assignedUserId], references: [id])
+
+  @@index([status, createdAt])
+}
+
+model PosBillingHandoff {
+  id                 String   @id @default(uuid())
+  orderId            String   @unique
+  posBillNumber      String
+  posFinalTotalPaise Int
+  billedByUserId     String
+  billedAt           DateTime @default(now())
+  discrepancyNote    String?
+
+  order        Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  billedByUser User  @relation(fields: [billedByUserId], references: [id])
+}
+
+model DeliveryRecord {
+  id                   String                 @id @default(uuid())
+  orderId              String                 @unique
+  assigneeName         String?
+  status               DeliveryStatus         @default(PENDING)
+  outAt                DateTime?
+  deliveredAt          DateTime?
+  paymentMethodUsed    DeliveryPaymentMethod?
+  amountCollectedPaise Int?
+  upiRef               String?
+  /// Optional — proof photos are not a V1 dependency (R9).
+  proofPhotoUrl        String?
+  failureReason        String?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+/// DB-backed feature flags (§22). No third-party flag service.
+model FeatureFlag {
+  key         String   @id
+  enabled     Boolean  @default(false)
+  description String?
+  updatedAt   DateTime @updatedAt
+}

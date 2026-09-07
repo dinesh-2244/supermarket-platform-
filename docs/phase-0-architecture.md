@@ -3,12 +3,19 @@
 **Project:** Two-store hyperlocal supermarket platform
 **Author:** Michael (lead coordinator / architect)
 **Status:** **APPROVED 2026-09-06** with the overrides in the Revision Log below.
+Amended **2026-09-07** (v2.1, POS capability dependency — §16.1).
 Phase 1 may begin against **this** document — not the v1 reservation-at-POS model.
 **Repo:** `/Users/dineshkanisetti/Documents/supermarket-platform`
 
 ---
 
 ## Revision Log
+
+### v2.1 — 2026-09-07 — POS integration is capability-dependent
+
+| # | Change from v2 | Section(s) |
+|---|---|---|
+| R14a | **POS integration is capability-dependent** on the not-yet-chosen vendor. Nothing about it may be assumed — no API, API documentation, webhooks, stock endpoints, billing endpoints, write access or database access. The website must be **fully functional with no POS integration**; only a **vendor-neutral** boundary is kept. Integration options are ranked in strict order of preference (official API → official webhooks/events → scheduled polling → CSV/Excel → officially supported read-only DB/connector → manual reconciliation). **No vendor-specific adapter** until the POS is selected, its official documentation reviewed, its supported endpoints/fields confirmed, and its authentication and rate limits understood. Core architecture does not change with the POS choice; `PosSkuMap`, the POS-neutral interfaces, the manual/CSV fallback and `StoreSettings.posMode` are kept regardless. | §16.1, R12, R14, ADR-0007 |
 
 ### v2 — 2026-09-06 — human approval + overrides
 
@@ -25,9 +32,9 @@ Phase 1 may begin against **this** document — not the v1 reservation-at-POS mo
 | R9 | **Delivery proof photo is optional** and must not be a Phase 1 dependency. `DeliveryRecord` = delivery-person name (optional), Cash/UPI, amount collected, optional UPI reference, delivered timestamp, optional proof photo. | §12 |
 | R10 | **Postgres hosting not decided in Phase 1.** Dev = local/containerized Postgres. Prod = managed preferred, but no vendor lock and no budget ceiling chosen now; decided near staging. Not a Phase 1 blocker. | §23, ADR-0008 |
 | R11 | **Short-pick handling explicit** — if the website deducted more than staff can physically pick, restore the difference to website stock with a `StockLedger` correction; only the actually picked quantity is billed in POS. | §7, §12 |
-| R12 | **Walk-in drift accepted for V1.** Website stock goes temporarily stale after POS walk-in sales until POS integration exists. V1 must ship manual adjustment, bulk CSV/Excel import, reconciliation, last-updated timestamps, and audit history. No live POS adapter in Phase 1; keep the `PosInventoryFeed` boundary for later. | §7, §16 |
+| R12 | **Walk-in drift accepted for V1.** Website stock goes temporarily stale after POS walk-in sales until POS integration exists. V1 must ship manual adjustment, bulk CSV/Excel import, reconciliation, last-updated timestamps, and audit history — and these stay the permanent baseline, because POS integration is capability-dependent and may never be possible (§16.1). No live POS adapter in Phase 1; keep the `PosInventoryFeed` boundary for later. | §7, §16 |
 | R13 | UPI is **UPI on delivery only**, no gateway; manual daily reconciliation acceptable for the pilot. | §12, §20 |
-| R14 | POS stays fully separate in V1; keep only the boundary/interfaces for future POS inventory sync, SKU mapping, automatic stock import, optional billing integration. No vendor-specific POS code yet. | §16, ADR-0007 |
+| R14 | POS stays fully separate in V1; keep only a **vendor-neutral** boundary/interface for future POS inventory sync, SKU mapping, automatic stock import, optional billing integration. **POS integration is capability-dependent** on the not-yet-chosen vendor — assume no API, docs, webhooks, stock/billing endpoints, write access or DB access — and the website must be fully functional without it. Integration options are ranked (API → webhooks → polling → CSV/Excel → read-only connector → manual reconciliation); no vendor adapter until the POS is selected, its docs reviewed, its endpoints/fields confirmed and its auth/rate limits understood. No vendor-specific POS code yet. | §16.1, ADR-0007 |
 
 Resolved risks (see §D): D-1, D-3, D-7, D-8, D-9, D-10, D-11. Still-open/accepted: D-2, D-5, D-6.
 
@@ -558,6 +565,46 @@ reconciliation** by finance — accepted for the pilot (R13).
 ## 16. Future POS integration interface and boundary
 
 **Built now:** the seams. **Not built now:** any vendor adapter.
+
+### 16.1 Capability dependency (R14)
+
+POS integration is capability-dependent. The platform will integrate only with functionality officially exposed and documented by the selected POS vendor. The website remains operational without POS integration.
+
+The POS product has not been chosen, and that choice — not this design — decides
+what an integration can do. **Assume none of the following exists:** an API, API
+documentation, webhooks, stock endpoints, billing endpoints, write access, database
+access. Several POS products sold into this segment expose none of them, and a
+design that presumed otherwise would make the storefront hostage to a purchase
+decision the business has not made.
+
+Consequently: **the website must remain fully functional with no POS integration.**
+Manual stock adjustment, bulk CSV/Excel import and reconciliation (§7, §13) are not
+a stopgap awaiting an adapter — they are the permanent baseline, and they stay
+supported however capable the eventual POS turns out to be.
+
+Only a **vendor-neutral** boundary is kept. When a POS is chosen, integration takes
+the **highest option in this order that the vendor actually supports**:
+
+1. **Official documented POS API**, if available and suitable.
+2. **Official webhooks / event feeds**, if available.
+3. **Scheduled stock/API polling**, if supported.
+4. **CSV / Excel import/export.**
+5. **Officially supported read-only database / connector access.**
+6. **Manual reconciliation** — the final fallback, and the one that always works.
+
+**No vendor-specific POS adapter is built until all four of these hold:**
+
+1. the POS software is **selected**;
+2. its **official documentation is reviewed**;
+3. the **supported endpoints and data fields are confirmed**;
+4. **authentication and rate limits are understood**.
+
+**The core website architecture does not change based on which POS is chosen.** What
+survives every outcome, including "no integration is possible": `PosSkuMap`, the
+POS-neutral adapter interfaces below, the manual/CSV fallback, and per-store
+`StoreSettings.posMode`.
+
+### 16.2 The boundary
 
 - **Anti-corruption layer** in `inventory/pos/` and `fulfillment/pos/`. Core modules
   depend only on these interfaces:

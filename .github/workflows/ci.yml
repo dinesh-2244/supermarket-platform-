@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22.20.0'
+
+jobs:
+  static:
+    name: typecheck + lint + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint (includes module-boundary rules)
+        run: npm run lint
+      - name: Format check
+        run: npm run format
+      - name: Unit tests + coverage gate
+        run: npm run test:coverage
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      - name: Build
+        run: npm run build
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/supermarket
+          AUTH_SECRET: ci-build-secret-not-a-real-secret-000000
+          AUTH_URL: http://localhost:3000
+          APP_ENV: ci
+
+  integration:
+    name: integration tests (real Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: supermarket_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: ci
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/supermarket_test
+      AUTH_SECRET: ci-integration-secret-not-a-real-secret-0
+      AUTH_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Migrate
+        run: npx prisma migrate deploy
+      - name: Seed
+        run: npm run db:seed
+      - name: Integration tests
+        run: npm run test:integration

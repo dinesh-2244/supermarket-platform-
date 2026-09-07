@@ -166,6 +166,15 @@ attributable and audited. Support handles genuine cancellation cases operational
 integration (inventory sync, SKU mapping, automatic stock import, optional billing)
 must not require redesigning core modules.
 
+The POS product has **not been chosen**, and choosing it is what decides whether an
+integration is possible at all. Nothing about that vendor may be assumed in advance —
+not an API, not API documentation, not webhooks, not stock endpoints, not billing
+endpoints, not write access, not database access. Some POS products in this segment
+expose none of them. Designing around a capability that turns out not to exist would
+put the platform's core on a dependency the business cannot guarantee.
+
+POS integration is capability-dependent. The platform will integrate only with functionality officially exposed and documented by the selected POS vendor. The website remains operational without POS integration.
+
 **Decision.** An anti-corruption layer in `inventory/pos/` and `fulfillment/pos/`.
 Core modules depend only on interfaces:
 - `PosBillingGateway.recordFinalBill(orderId, { billNumber, finalTotalPaise,
@@ -180,9 +189,37 @@ adapter = new files under `*/pos/` + `PosSkuMap` rows + a scheduled snapshot pul
 writing `POS_SYNC` ledger rows — **no core module or table changes**. Contract tests
 are written against the interfaces in Phase 5.
 
-**Consequences.** POS vendor choice is deferred with zero core impact. Walk-in drift
-is tolerated meanwhile (ADR-0005). Slight upfront cost: interfaces + a no-op impl +
-`PosSkuMap` shipped unused.
+The boundary is **vendor-neutral and stays that way**. The website must remain fully
+functional with **no POS integration at all** — manual adjustment, CSV/Excel import
+and reconciliation are the V1 path and remain permanently supported, not a stopgap.
+
+When a POS is eventually chosen, integration options are taken **in this order of
+preference**, using the highest one the vendor actually supports:
+
+1. **Official documented POS API**, if available and suitable.
+2. **Official webhooks / event feeds**, if available.
+3. **Scheduled stock/API polling**, if supported.
+4. **CSV / Excel import/export.**
+5. **Officially supported read-only database / connector access.**
+6. **Manual reconciliation** — the final fallback, and the one that always works.
+
+**No vendor-specific POS adapter is built until all four of these hold:**
+
+1. the POS software is **selected**;
+2. its **official documentation is reviewed**;
+3. the **supported endpoints and data fields are confirmed**;
+4. **authentication and rate limits are understood**.
+
+The core website architecture **does not change based on which POS is chosen**. What
+is kept regardless: `PosSkuMap`, the POS-neutral adapter interfaces, the manual/CSV
+fallback, and per-store `StoreSettings.posMode`.
+
+**Consequences.** POS vendor choice is deferred with zero core impact, and a vendor
+that turns out to expose nothing integrable costs the platform nothing but the
+manual path it already has. Walk-in drift is tolerated meanwhile (ADR-0005). Slight
+upfront cost: interfaces + a no-op impl + `PosSkuMap` shipped unused. The four
+preconditions mean an integration cannot start from a sales claim or a screenshot —
+only from documentation the vendor stands behind.
 
 **Status.** Accepted (human R14).
 
