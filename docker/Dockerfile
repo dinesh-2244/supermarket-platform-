@@ -33,6 +33,40 @@ ENV APP_ENV=ci \
 RUN npm run build
 
 # ---------------------------------------------------------------------------
+# migrate — `prisma migrate deploy`, as a gated pre-deploy step (§18/§23)
+# ---------------------------------------------------------------------------
+#
+# Its own stage with the *whole* locked dependency tree, not a hand-picked copy
+# of `node_modules/prisma` and `node_modules/@prisma`. The Prisma CLI is a real
+# dependency graph — @prisma/config alone pulls in `effect`, `c12`, `jiti` and
+# more — and copying two directories out of it produced an image that built
+# fine and then died at `Cannot find module 'effect'`, taking the whole Compose
+# stack down with it because app/ depends on migrate completing.
+#
+# Reusing the `deps` stage verbatim is what keeps this honest: whatever
+# `npm ci` resolved for the build is exactly what runs the migration.
+FROM ${NODE_IMAGE} AS migrate
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    NPM_CONFIG_UPDATE_NOTIFIER=false \
+    PRISMA_HIDE_UPDATE_MESSAGE=1
+
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --chown=node:node package.json ./
+COPY --chown=node:node prisma ./prisma
+
+# Migrations do not need the query engine, but generating the client here keeps
+# `prisma migrate status` and `migrate resolve` usable from the same image.
+RUN npx prisma generate
+
+USER node
+
+# `migrate deploy` is idempotent and never prompts, so it is safe to re-run on
+# every deploy; it applies only migrations that are not yet recorded.
+CMD ["npx", "--no-install", "prisma", "migrate", "deploy"]
+
+# ---------------------------------------------------------------------------
 # runner — non-root, minimal surface
 # ---------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS runner
@@ -51,11 +85,6 @@ COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/public ./public
 
-# Schema, migrations and the Prisma CLI, so `prisma migrate deploy` can run as a
-# gated pre-deploy step from this same image (§18/§23).
-COPY --from=builder --chown=node:node /app/prisma ./prisma
-COPY --from=builder --chown=node:node /app/node_modules/prisma ./node_modules/prisma
-COPY --from=builder --chown=node:node /app/node_modules/@prisma ./node_modules/@prisma
 # The generated client and its query engine, in case Next's tracing missed them.
 COPY --from=builder --chown=node:node /app/node_modules/.prisma ./node_modules/.prisma
 
