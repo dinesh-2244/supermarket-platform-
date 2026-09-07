@@ -33,3 +33,22 @@ export {
   type ModuleDescriptor,
   type StockReason,
 } from './domain/index';
+
+export {
+  errorReportCsv,
+  getImportRun,
+  IMPORT_MODES,
+  listImportHistory,
+  MAX_IMPORT_BYTES,
+  MAX_IMPORT_ROWS,
+  planStockImport,
+  runStockImport,
+  type ImportInput,
+  type ImportMode,
+  type ImportOutcome,
+  type ImportPlan,
+  type PlannedChange,
+  type RowError,
+} from './import-service';
+
+export { parseStockCsv, type ParsedRow, type ParseResult } from './domain/csv';

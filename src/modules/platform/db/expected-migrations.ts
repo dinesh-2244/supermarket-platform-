@@ -9,4 +9,5 @@ export const EXPECTED_MIGRATIONS: readonly string[] = [
   '20260906090000_init',
   '20260907190000_store_low_stock_threshold',
   '20260907200000_catalog_search_trgm',
+  '20260907210000_inventory_import_history',
 ];

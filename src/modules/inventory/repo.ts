@@ -268,3 +268,74 @@ export async function findListedProductIds(
   });
   return new Set(rows.map((row) => row.productId));
 }
+
+// ---------------------------------------------------------------------------
+// Import history (D6)
+// ---------------------------------------------------------------------------
+
+export interface ImportRunRecord {
+  readonly id: string;
+  readonly storeId: string;
+  readonly filename: string;
+  readonly mode: string;
+  readonly outcome: string;
+  readonly rowCount: number;
+  readonly appliedCount: number;
+  readonly errorCount: number;
+  readonly errorsJson: unknown;
+  readonly actorUserId: string | null;
+  readonly createdAt: Date;
+}
+
+export interface InsertImportRun {
+  readonly storeId: string;
+  readonly filename: string;
+  readonly mode: string;
+  readonly outcome: string;
+  readonly rowCount: number;
+  readonly appliedCount: number;
+  readonly errorCount: number;
+  readonly errors: readonly unknown[];
+  readonly actorUserId: string | null;
+}
+
+/**
+ * Recorded for a rejected run as well as an applied one: a refused import plus
+ * its per-row errors is exactly what the operator needs in order to fix the
+ * file, and it is the only record that the attempt happened at all.
+ */
+export async function insertImportRun(
+  row: InsertImportRun,
+  db?: DbExecutor,
+): Promise<ImportRunRecord> {
+  return executor(db).inventoryImport.create({
+    data: {
+      storeId: row.storeId,
+      filename: row.filename,
+      mode: row.mode,
+      outcome: row.outcome,
+      rowCount: row.rowCount,
+      appliedCount: row.appliedCount,
+      errorCount: row.errorCount,
+      errorsJson: row.errors as never,
+      actorUserId: row.actorUserId,
+    },
+  });
+}
+
+export async function listImportRuns(
+  principal: Principal,
+  storeId: string,
+  limit: number,
+  db?: DbExecutor,
+): Promise<readonly ImportRunRecord[]> {
+  return executor(db).inventoryImport.findMany({
+    where: { ...storeScopeFilter(principal), storeId },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+  });
+}
+
+export async function findImportRun(id: string, db?: DbExecutor): Promise<ImportRunRecord | null> {
+  return executor(db).inventoryImport.findUnique({ where: { id } });
+}

@@ -132,6 +132,7 @@ model Store {
   inventoryItems InventoryItem[]
   stockLedger    StockLedger[]
   posSkuMaps     PosSkuMap[]
+  inventoryImports InventoryImport[]
   users          User[]
   carts          Cart[]
   orders         Order[]
@@ -359,6 +360,29 @@ model StockLedger {
 
   @@index([storeId, productId, createdAt])
   @@index([refType, refId])
+}
+
+/// One stock-import attempt: who ran it, over what file, and what it did (D6).
+/// Kept whether the import applied or was rejected — a refused import with its
+/// per-row errors is exactly what the operator needs to fix the file.
+model InventoryImport {
+  id            String   @id @default(uuid())
+  storeId       String
+  filename      String
+  mode          String
+  /// `dry-run`, `applied` or `rejected`.
+  outcome       String
+  rowCount      Int      @default(0)
+  appliedCount  Int      @default(0)
+  errorCount    Int      @default(0)
+  /// Per-row errors, as `[{ line, sku, message }]`. Empty on success.
+  errorsJson    Json?
+  actorUserId   String?
+  createdAt     DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, createdAt])
 }
 
 /// Reserved for future POS inventory sync (R14 / ADR-0007). Unused in V1.
