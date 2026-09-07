@@ -248,3 +248,46 @@ small, well-contained decision made with real data at staging. Portability
 preserved.
 
 **Status.** Accepted (human override R10).
+
+---
+
+## ADR-0009 — Authorization: a closed action union with per-role grant tables
+
+**Context.** Phase 1 shipped an `authorize()` stub that granted everything to the
+`system` principal and to `SUPER_ADMIN`, documented as an accepted exception
+until a real rule table existed (see the note under ADR-0007's acceptance section
+in the Phase 1 review). Phase 2 introduces real staff, real roles and real
+tenancy, so the exception has to go.
+
+**Decision.** `platform/authz` holds the rule table; `identity` owns `User` and
+staff authentication. Architecture §4 assigns `authorize()` to `platform` and
+every module calls it, so the table is kernel code rather than a module's.
+
+- `Action` is a **closed union** of every capability the platform has, not a
+  `${string}:${string}` template. A verb that is not in the union is a typo, and
+  a typo that silently produced a deny would be indistinguishable from a policy
+  decision.
+- Each role has an **explicit per-action grant table** — no wildcards, including
+  for `SUPER_ADMIN`. A wildcard hands every capability added in a later phase to
+  whoever holds it, silently, which is how a deny-by-default table stops being
+  one. The cost is one line per action per role; the benefit is that every grant
+  is visible in a diff.
+- A grant is `global` or `store`-scoped. A store-scoped grant against a resource
+  that names **no** store is refused: an unknown store must narrow access, never
+  widen it.
+- The `system` principal is a **narrow allowlist** of the actions internal code
+  actually performs (boot, seed, event handlers) — not a wildcard, so a code path
+  that fails to build a real principal cannot fall back to unlimited access.
+- `allowedStoreIds` returns `null` for "every store" and an array otherwise.
+  Phase 1 returned `[]` for both a super-admin and a user with no store, so
+  "unrestricted" and "no access" were the same value; the compiler now asks.
+- A store-bound role whose `storeId` is null — a data defect the identity service
+  refuses to create — is granted **nothing**, not merely nothing store-scoped.
+
+**Consequences.** Adding a capability is a deliberate, reviewable act in one
+file. The tables are verbose by design. Store scoping is enforced in the module
+services and in every repository query (`storeScopeFilter`), never in a template
+— a list that forgets its filter is an IDOR, so the filtered query is the only
+one the module owns. **The Phase 1 grant-all exception is resolved.**
+
+**Status.** Accepted (Phase 2).

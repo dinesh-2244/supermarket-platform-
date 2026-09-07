@@ -191,7 +191,7 @@ const ROLE_GRANTS: Readonly<Record<UserRole, Partial<Readonly<Record<Action, Gra
 
 /**
  * The internal principal, for code that runs with no session: boot, the seed,
- * and event handlers.
+ * and event handlers (ADR-0009).
  *
  * It is an explicit allowlist, **not** a wildcard. Phase 1 shipped `system` as
  * "allowed anything", which meant any code path that failed to build a real

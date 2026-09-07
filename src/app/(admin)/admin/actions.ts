@@ -1,0 +1,370 @@
+'use server';
+
+import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
+import { signIn, signOut, requirePrincipal } from '@/auth';
+import { isAppError } from '@/modules/platform';
+import {
+  changeOwnPassword,
+  createUser,
+  resetPassword,
+  setUserActive,
+  updateUser,
+} from '@/modules/identity';
+import { createArea, createZone, updateArea, updateSettings, updateZone } from '@/modules/stores';
+import { createCategory, createProduct, updateCategory, updateProduct } from '@/modules/catalog';
+import { setListed, setPrice } from '@/modules/pricing';
+import { adjustStock, reconcileStock, runStockImport } from '@/modules/inventory';
+
+/**
+ * Server actions for the back office.
+ *
+ * **Every one of these re-checks authorization.** `requirePrincipal()` reads the
+ * session from the database on each call, and the module service it hands the
+ * principal to runs `authorize(...)` itself. Middleware only redirects (it runs
+ * on the edge with no database), and the layout only hides nav — neither is the
+ * boundary. A POST straight at one of these actions from outside the UI hits the
+ * same check as a click.
+ *
+ * Failures come back as a string rather than an exception so the screen can show
+ * the real reason. A leading `!` marks an error, which is what `<Notice>` reads.
+ */
+type ActionState = string | undefined;
+
+async function run(work: () => Promise<string>): Promise<string> {
+  try {
+    return await work();
+  } catch (error) {
+    // Domain errors carry a message meant for a person; anything else does not.
+    if (isAppError(error)) return `!${error.message}`;
+    throw error;
+  }
+}
+
+function text(form: FormData, key: string): string {
+  const value = form.get(key);
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function optionalText(form: FormData, key: string): string | undefined {
+  const value = text(form, key);
+  return value === '' ? undefined : value;
+}
+
+function int(form: FormData, key: string): number {
+  return Number.parseInt(text(form, key), 10);
+}
+
+function checked(form: FormData, key: string): boolean {
+  return form.get(key) !== null;
+}
+
+// ---------------------------------------------------------------------------
+// Session
+// ---------------------------------------------------------------------------
+
+export async function signInAction(_state: ActionState, form: FormData): Promise<string> {
+  const email = text(form, 'email');
+  const password = text(form, 'password');
+  const next = text(form, 'next');
+
+  try {
+    await signIn('credentials', { email, password, redirect: false });
+  } catch {
+    // One message for every failure — the form must not tell an attacker which
+    // addresses have accounts.
+    return '!That email and password do not match an active account.';
+  }
+  redirect(next === '' ? '/admin' : next);
+}
+
+export async function signOutAction(): Promise<void> {
+  await signOut({ redirectTo: '/admin/sign-in' });
+}
+
+export async function changePasswordAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    await changeOwnPassword(principal, text(form, 'current'), text(form, 'next'));
+    return 'Password changed. Your other sessions are unaffected.';
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Users
+// ---------------------------------------------------------------------------
+
+export async function createUserAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const role = text(form, 'role');
+    const storeId = optionalText(form, 'storeId') ?? null;
+    const user = await createUser(principal, {
+      email: text(form, 'email'),
+      name: text(form, 'name'),
+      password: text(form, 'password'),
+      role: role === 'SUPER_ADMIN' || role === 'STORE_MANAGER' ? role : 'STORE_STAFF',
+      storeId: role === 'SUPER_ADMIN' ? null : storeId,
+    });
+    revalidatePath('/admin/users');
+    return `Created ${user.email}.`;
+  });
+}
+
+export async function setUserActiveAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const user = await setUserActive(principal, text(form, 'userId'), checked(form, 'isActive'));
+    revalidatePath('/admin/users');
+    return `${user.email} is now ${user.isActive ? 'active' : 'disabled'}.`;
+  });
+}
+
+export async function updateUserRoleAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const role = text(form, 'role');
+    const user = await updateUser(principal, text(form, 'userId'), {
+      role: role === 'SUPER_ADMIN' || role === 'STORE_MANAGER' ? role : 'STORE_STAFF',
+      storeId: role === 'SUPER_ADMIN' ? null : (optionalText(form, 'storeId') ?? null),
+    });
+    revalidatePath('/admin/users');
+    return `${user.email} is now ${user.role}. Their sessions were ended.`;
+  });
+}
+
+export async function resetPasswordAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    await resetPassword(principal, text(form, 'userId'), text(form, 'password'));
+    revalidatePath('/admin/users');
+    return 'Password reset. Their sessions were ended.';
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Stores, zones and areas
+// ---------------------------------------------------------------------------
+
+export async function updateSettingsAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const substitutionPolicy = text(form, 'substitutionPolicy');
+    await updateSettings(principal, text(form, 'storeId'), {
+      deliveryFeePaise: int(form, 'deliveryFeePaise'),
+      minOrderPaise: int(form, 'minOrderPaise'),
+      slotLengthMinutes: int(form, 'slotLengthMinutes'),
+      slotCapacity: int(form, 'slotCapacity'),
+      priceVariancePercentBp: int(form, 'priceVariancePercentBp'),
+      priceVarianceAbsCapPaise: int(form, 'priceVarianceAbsCapPaise'),
+      lowStockThreshold: int(form, 'lowStockThreshold'),
+      isAcceptingOrders: checked(form, 'isAcceptingOrders'),
+      ...(substitutionPolicy === 'NONE' ||
+      substitutionPolicy === 'ASK_CUSTOMER' ||
+      substitutionPolicy === 'STAFF_DISCRETION'
+        ? { substitutionPolicy }
+        : {}),
+    });
+    revalidatePath('/admin/stores');
+    return 'Settings saved.';
+  });
+}
+
+export async function createZoneAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const zone = await createZone(principal, {
+      storeId: text(form, 'storeId'),
+      name: text(form, 'name'),
+    });
+    revalidatePath('/admin/zones');
+    return `Added zone ${zone.name}.`;
+  });
+}
+
+export async function updateZoneAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    await updateZone(principal, text(form, 'zoneId'), { isActive: checked(form, 'isActive') });
+    revalidatePath('/admin/zones');
+    return 'Zone updated.';
+  });
+}
+
+export async function createAreaAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const hints = text(form, 'matchHints');
+    const area = await createArea(principal, {
+      zoneId: text(form, 'zoneId'),
+      name: text(form, 'name'),
+      pincode: optionalText(form, 'pincode') ?? null,
+      matchHints: hints === '' ? [] : hints.split(',').map((hint) => hint.trim()),
+    });
+    revalidatePath('/admin/zones');
+    return `Added area ${area.name}.`;
+  });
+}
+
+export async function updateAreaAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    await updateArea(principal, text(form, 'areaId'), { isActive: checked(form, 'isActive') });
+    revalidatePath('/admin/zones');
+    return 'Area updated.';
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Catalogue
+// ---------------------------------------------------------------------------
+
+export async function createCategoryAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const category = await createCategory(principal, {
+      name: text(form, 'name'),
+      parentId: optionalText(form, 'parentId') ?? null,
+    });
+    revalidatePath('/admin/categories');
+    return `Added ${category.name}.`;
+  });
+}
+
+export async function updateCategoryAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    await updateCategory(principal, text(form, 'categoryId'), {
+      isActive: checked(form, 'isActive'),
+      parentId: optionalText(form, 'parentId') ?? null,
+    });
+    revalidatePath('/admin/categories');
+    return 'Category updated.';
+  });
+}
+
+export async function createProductAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const product = await createProduct(principal, {
+      sku: text(form, 'sku'),
+      name: text(form, 'name'),
+      packSize: text(form, 'packSize'),
+      categoryId: text(form, 'categoryId'),
+      brand: optionalText(form, 'brand') ?? null,
+    });
+    revalidatePath('/admin/products');
+    return `Added ${product.name} (${product.sku}).`;
+  });
+}
+
+export async function updateProductAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    await updateProduct(principal, text(form, 'productId'), {
+      isActive: checked(form, 'isActive'),
+    });
+    revalidatePath('/admin/products');
+    return 'Product updated.';
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Pricing
+// ---------------------------------------------------------------------------
+
+export async function setPriceAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    await setPrice(principal, text(form, 'storeId'), text(form, 'productId'), {
+      mrpPaise: int(form, 'mrpPaise'),
+      sellingPricePaise: int(form, 'sellingPricePaise'),
+      reason: optionalText(form, 'reason') ?? null,
+    });
+    revalidatePath('/admin/listings');
+    return 'Price saved.';
+  });
+}
+
+export async function setListedAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    await setListed(
+      principal,
+      text(form, 'storeId'),
+      text(form, 'productId'),
+      checked(form, 'isListed'),
+    );
+    revalidatePath('/admin/listings');
+    return 'Listing updated.';
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Inventory
+// ---------------------------------------------------------------------------
+
+export async function adjustStockAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const result = await adjustStock(principal, {
+      storeId: text(form, 'storeId'),
+      productId: text(form, 'productId'),
+      delta: int(form, 'delta'),
+      note: optionalText(form, 'note') ?? null,
+    });
+    revalidatePath('/admin/inventory');
+    return `Stock is now ${String(result.balanceAfter)}.`;
+  });
+}
+
+export async function reconcileStockAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const result = await reconcileStock(principal, {
+      storeId: text(form, 'storeId'),
+      productId: text(form, 'productId'),
+      counted: int(form, 'counted'),
+      note: optionalText(form, 'note') ?? null,
+    });
+    revalidatePath('/admin/inventory');
+    return result === null
+      ? 'The count matched. Nothing to change.'
+      : `Reconciled to ${String(result.balanceAfter)} (${String(result.delta)}).`;
+  });
+}
+
+export async function importStockAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const file = form.get('file');
+    if (!(file instanceof File) || file.size === 0) return '!Choose a CSV file first.';
+
+    const content = await file.text();
+    const mode = text(form, 'mode') === 'delta' ? 'delta' : 'set';
+    const result = await runStockImport(principal, {
+      storeId: text(form, 'storeId'),
+      filename: file.name,
+      content,
+      mode,
+      byteLength: file.size,
+      dryRun: checked(form, 'dryRun'),
+    });
+
+    revalidatePath('/admin/inventory');
+
+    if (result.outcome === 'rejected') {
+      const first = result.errors
+        .slice(0, 3)
+        .map((error) => `line ${String(error.line)}: ${error.message}`)
+        .join('; ');
+      return `!Nothing was imported — ${String(result.errors.length)} problem(s). ${first}`;
+    }
+    if (result.outcome === 'dry-run') {
+      return `Dry run: ${String(result.changes.length)} row(s) would change, ${String(
+        result.unchanged.length,
+      )} unchanged. Nothing was written.`;
+    }
+    return `Imported ${String(result.applied)} row(s).`;
+  });
+}

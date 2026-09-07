@@ -47,13 +47,20 @@ export default defineConfig({
         // Generated from prisma/migrations; asserted on by expected-migrations.test.ts.
         'src/modules/platform/db/expected-migrations.ts',
       ],
-      // Gate is wired now and ratchets up as Phase 2 fills the modules in (§19).
-      // These are floors under the *real* numbers, not the numbers themselves.
+      // Floors under the real numbers, not the numbers themselves.
+      //
+      // The gate measures the **whole** suite, unit and integration together
+      // (`npm run test:coverage` runs both projects), which is why it needs a
+      // database. Measuring only the unit project would systematically
+      // under-report: most of what Phase 2 added is service and repository code
+      // whose correctness is exactly what the integration tests establish —
+      // ledger atomicity, cross-store denial, import rollback. A gate that
+      // could not see any of that would be back to measuring skeletons.
       thresholds: {
-        lines: 65,
-        statements: 65,
-        functions: 75,
-        branches: 85,
+        lines: 80,
+        statements: 80,
+        functions: 80,
+        branches: 80,
       },
     },
   },

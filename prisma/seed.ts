@@ -329,7 +329,15 @@ const STORES: readonly StoreSeed[] = [
 /** Marks the ledger rows that explain where a seeded balance came from. */
 const OPENING_BALANCE_REF = 'opening-balance';
 
+/**
+ * One SKU per store is seeded at or below the default low-stock threshold, so
+ * the low-stock report and the `stock.low` path have something to show on a
+ * fresh database instead of being demoable only after someone sells something.
+ */
+const LOW_STOCK_SKU = '8901234500042';
+
 function stockFor(storeCode: string, sku: string): number {
+  if (sku === LOW_STOCK_SKU) return storeCode === 'S1' ? 3 : 5;
   const digits = Number(sku.slice(-3));
   return storeCode === 'S1' ? 20 + (digits % 30) : 12 + (digits % 45);
 }
@@ -463,7 +471,14 @@ async function seedStore(store: StoreSeed, productIds: Map<string, string>): Pro
 }
 
 async function seedUsers(storeIds: Map<string, string>): Promise<void> {
-  const passwordHash = await argon2.hash(DEV_PASSWORD, { type: argon2.argon2id });
+  // Same parameters the identity service uses, so a seeded account behaves
+  // exactly like one created through the admin screens (arch §20).
+  const passwordHash = await argon2.hash(DEV_PASSWORD, {
+    type: argon2.argon2id,
+    memoryCost: 19_456,
+    timeCost: 2,
+    parallelism: 1,
+  });
 
   const users: {
     email: string;

@@ -12,8 +12,10 @@ PostgreSQL 16 database, one Docker image. Domain logic lives in `src/modules/*`
 behind enforced boundaries; `app/` is thin — it parses input, calls a module
 service, and renders.
 
-> **Status: Phase 1 (foundation).** The skeleton, schema, kernel and test harness
-> are in place. There are no storefront or admin features yet.
+> **Status: Phase 2 (back office).** Staff sign-in, RBAC, stores and settings,
+> delivery zones/areas, the shared catalogue, per-store pricing and the inventory
+> ledger — all driveable from `/admin`. There is still **no customer-facing
+> surface**: no storefront, cart, checkout or orders. Those are Phase 3+.
 
 ## Requirements
 
@@ -42,6 +44,47 @@ profile.
 
 `GET /api/health` reports `{ status, db, migrations }` and is the quickest check
 that the app and database agree.
+
+### Signing in to the back office
+
+The seed creates staff accounts. **Development only — never use these anywhere
+real.** There is no public signup; a `SUPER_ADMIN` creates every account.
+
+| Email                          | Role            | Store |
+| ------------------------------ | --------------- | ----- |
+| `admin@munderfresh.local`      | `SUPER_ADMIN`   | —     |
+| `manager.s1@munderfresh.local` | `STORE_MANAGER` | S1    |
+| `manager.s2@munderfresh.local` | `STORE_MANAGER` | S2    |
+| `staff.s1@munderfresh.local`   | `STORE_STAFF`   | S1    |
+| `staff.s2@munderfresh.local`   | `STORE_STAFF`   | S2    |
+
+All seeded with the password `DevPassw0rd!`. Sign in at
+<http://localhost:3000/admin/sign-in>.
+
+A `STORE_MANAGER` sees only their own store, and is refused another store's
+settings, zones, prices and stock **server-side** — not merely not shown them. A
+`STORE_STAFF` is read-only this phase.
+
+### Stock import format
+
+`/admin/inventory` takes a **CSV** (export from Excel as CSV — binary `.xlsx` is
+rejected with a message saying so). A header row naming at least `sku` and
+`quantity`, optionally `mode`:
+
+```csv
+sku,quantity,mode
+8901234500011,42,set
+8901234500028,-3,delta
+```
+
+- `set` writes an absolute quantity and is idempotent; `delta` adds a signed one
+  and is **not** — re-running a delta file applies it again.
+- `mode` may be omitted, in which case the mode chosen on the form applies.
+- Common header spellings (`barcode`, `qty`, `stock`, `count`) are accepted, as
+  are semicolon and tab separators, quoted fields, a UTF-8 BOM and CRLF endings.
+- **Every row is validated before any is applied.** One bad row rejects the whole
+  file with a per-row report and writes nothing — there is no partial import.
+- Tick **Dry run** to see the diff without writing.
 
 ### Prod-parity stack
 

@@ -24,7 +24,7 @@
     "db:manifest": "node scripts/generate-migration-manifest.mjs",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
-    "test:coverage": "vitest run --project unit --coverage"
+    "test:coverage": "vitest run --coverage"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

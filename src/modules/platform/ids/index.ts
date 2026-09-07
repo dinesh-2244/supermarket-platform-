@@ -1,8 +1,30 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+/**
+ * Uses the **Web Crypto** API (`globalThis.crypto`) rather than `node:crypto`.
+ * Both are CSPRNGs and Node has exposed Web Crypto globally since 18, but only
+ * Web Crypto exists on the edge runtime — and `src/middleware.ts` makes Next
+ * compile `instrumentation.ts`, and therefore this barrel, for edge as well as
+ * Node. A `node:` import there fails the production build outright with
+ * "UnhandledSchemeError: Reading from node:crypto". One API that works in both
+ * places beats two code paths.
+ */
+const HEX = '0123456789abcdef';
+
+function randomBytes(byteLength: number): Uint8Array {
+  return crypto.getRandomValues(new Uint8Array(byteLength));
+}
+
+function toHex(bytes: Uint8Array): string {
+  let out = '';
+  for (const byte of bytes) {
+    out += HEX[byte >> 4];
+    out += HEX[byte & 0x0f];
+  }
+  return out;
+}
 
 /** Primary-key id. UUID v4 — matches the Prisma `@default(uuid())` columns. */
 export function newId(): string {
-  return randomUUID();
+  return crypto.randomUUID();
 }
 
 // Crockford-ish base32 without look-alike characters, so a token can be read
@@ -34,12 +56,12 @@ export function trackingToken(): string {
  * could usefully tamper with and nothing to verify beyond "does this row exist".
  */
 export function sessionToken(): string {
-  return randomBytes(32).toString('hex');
+  return toHex(randomBytes(32));
 }
 
 /** Per-request correlation id for the logger. */
 export function requestId(): string {
-  return randomUUID();
+  return crypto.randomUUID();
 }
 
 /**
