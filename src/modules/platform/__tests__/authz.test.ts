@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { allowedStoreIds, assertAuthorized, authorize, isUnscoped } from '../authz/index';
+import {
+  allowedStoreIds,
+  assertAuthorized,
+  authorize,
+  AUTHZ_ACCEPTED_EXCEPTIONS,
+  isUnscoped,
+} from '../authz/index';
 import { AuthzError } from '../errors/index';
 
 const superAdmin = { kind: 'user', userId: 'u1', role: 'SUPER_ADMIN', storeId: null } as const;
@@ -7,6 +13,30 @@ const manager = { kind: 'user', userId: 'u2', role: 'STORE_MANAGER', storeId: 's
 const guest = { kind: 'customer', customerId: 'c1' } as const;
 
 describe('platform/authz', () => {
+  // The only two grants that exist before the rule table does. They are an
+  // accepted, documented deviation from deny-everything (see authz/index.ts);
+  // this test is what makes widening or removing them a deliberate act.
+  it('grants exactly two privileged principals while the rule table is empty', () => {
+    expect(AUTHZ_ACCEPTED_EXCEPTIONS).toEqual(['system principal', 'SUPER_ADMIN']);
+
+    const system = { kind: 'system' } as const;
+    expect(authorize(system, 'inventory:adjust', { type: 'InventoryItem' })).toEqual({
+      allowed: true,
+      reason: 'system principal',
+    });
+    expect(authorize(superAdmin, 'inventory:adjust', { type: 'InventoryItem' })).toEqual({
+      allowed: true,
+      reason: 'SUPER_ADMIN',
+    });
+
+    const staff = { kind: 'user', userId: 'u3', role: 'STORE_STAFF', storeId: 'store-1' } as const;
+    for (const principal of [manager, staff, guest] as const) {
+      expect(authorize(principal, 'inventory:adjust', { type: 'InventoryItem' }).allowed).toBe(
+        false,
+      );
+    }
+  });
+
   it('denies by default', () => {
     const decision = authorize(manager, 'inventory:adjust', { type: 'InventoryItem' });
     expect(decision.allowed).toBe(false);

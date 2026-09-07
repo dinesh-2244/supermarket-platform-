@@ -29,19 +29,46 @@ export interface AuthzDecision {
 }
 
 /**
+ * The two principals that are allowed through while the rule table is empty.
+ *
+ * **Accepted deviation from "deny everything until there are rules" (§5).** Both
+ * are deliberate, both are narrow, and both are load-bearing rather than
+ * convenient:
+ *
+ * - `system` is the platform acting on its own behalf — seeds, migrations,
+ *   scheduled jobs, event handlers. It is never derived from a request and has
+ *   no session; a rule table cannot grant it anything because there is no
+ *   subject to look up. Denying it would mean no background work can run at all.
+ * - `SUPER_ADMIN` is the break-glass operator role. Every rule Phase 2 adds will
+ *   grant it, so denying it now would only mean the pilot has no way in until
+ *   the table is complete.
+ *
+ * Everything else — `STORE_MANAGER`, `STORE_STAFF`, customers and guests — is
+ * denied, so no feature can be built on a permissive default. When the rule
+ * table lands, `SUPER_ADMIN` becomes an ordinary (fully granted) row and only
+ * the `system` exception should survive as a special case.
+ *
+ * `authz.test.ts` pins both exceptions, so removing them is a deliberate act.
+ */
+const PRIVILEGED_WITHOUT_RULES = ['system principal', 'SUPER_ADMIN'] as const;
+
+export const AUTHZ_ACCEPTED_EXCEPTIONS: readonly string[] = PRIVILEGED_WITHOUT_RULES;
+
+/**
  * Deny-by-default authorization (§5).
  *
  * Phase 1 stub: the real rule table lands with the modules that own the actions.
- * Only `SUPER_ADMIN` and the `system` principal are allowed anything, so nothing
- * can accidentally rely on a permissive default while the table is empty.
+ * Only the two principals in {@link AUTHZ_ACCEPTED_EXCEPTIONS} are allowed
+ * anything, so nothing can accidentally rely on a permissive default while the
+ * table is empty.
  */
 export function authorize(principal: Principal, action: Action, resource: Resource): AuthzDecision {
   if (principal.kind === 'system') {
-    return { allowed: true, reason: 'system principal' };
+    return { allowed: true, reason: PRIVILEGED_WITHOUT_RULES[0] };
   }
 
   if (principal.kind === 'user' && principal.role === 'SUPER_ADMIN') {
-    return { allowed: true, reason: 'SUPER_ADMIN' };
+    return { allowed: true, reason: PRIVILEGED_WITHOUT_RULES[1] };
   }
 
   if (principal.kind === 'user' && resource.storeId != null) {
