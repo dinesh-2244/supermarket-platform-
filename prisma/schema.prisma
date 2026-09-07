@@ -154,6 +154,10 @@ model StoreSettings {
   priceVariancePercentBp   Int                @default(500)
   priceVarianceAbsCapPaise Int                @default(5000)
   isAcceptingOrders        Boolean            @default(true)
+  /// At or below this `websiteStock`, an item is reported low and a downward
+  /// crossing emits `stock.low`. A per-store business setting, not env (§22):
+  /// a small store and a large one do not agree on what "running out" means.
+  lowStockThreshold        Int                @default(5)
   createdAt                DateTime           @default(now())
   updatedAt                DateTime           @updatedAt
 
