@@ -305,30 +305,25 @@ test.describe.serial('back office', () => {
     await edit.getByLabel('Brand').fill('E2E Brand');
     await edit.getByLabel('Pack size').fill('750 g');
     await edit.getByRole('button', { name: 'Save product' }).click();
-    await expect(page.getByRole('status').first()).toContainText(/saved/i);
+    await expect(edit.getByRole('status')).toContainText(/saved/i);
 
     // Images: add two, reorder, remove one.
+    //
+    // Each ActionForm renders its own status message, so the assertions are
+    // scoped to the form that produced them — `getByRole('status').first()`
+    // picks whichever notice is first in the DOM, which is the edit form's.
     const addImage = page.locator('form').filter({ hasText: 'Add image' });
     await addImage.getByLabel('Image URL').fill('https://cdn.example/e2e-1.jpg');
     await addImage.getByRole('button', { name: 'Add image' }).click();
-    await expect(page.getByRole('status').first()).toContainText(/Image added/i);
+    await expect(addImage.getByRole('status')).toContainText(/Image added/i);
 
-    await page
-      .locator('form')
-      .filter({ hasText: 'Add image' })
-      .getByLabel('Image URL')
-      .fill('https://cdn.example/e2e-2.jpg');
-    await page
-      .locator('form')
-      .filter({ hasText: 'Add image' })
-      .getByRole('button', { name: 'Add image' })
-      .click();
+    await addImage.getByLabel('Image URL').fill('https://cdn.example/e2e-2.jpg');
+    await addImage.getByRole('button', { name: 'Add image' }).click();
     await expect(page.getByRole('cell', { name: 'https://cdn.example/e2e-2.jpg' })).toBeVisible();
 
     // Reorder: image 2 was added second, so moving image 1 down puts it first.
     await expect(page.getByRole('cell', { name: 'https://cdn.example/e2e-1.jpg' })).toBeVisible();
     await page.getByRole('button', { name: 'Down' }).first().click();
-    await expect(page.getByRole('status').first()).toContainText(/Image moved/i);
     const ordered = await page.getByRole('cell', { name: /cdn\.example/ }).allTextContents();
     expect(ordered[0]).toBe('https://cdn.example/e2e-2.jpg');
 
@@ -409,6 +404,85 @@ test.describe.serial('back office', () => {
       .allTextContents();
     expect(reasons.length).toBeGreaterThan(0);
     expect(reasons.every((value) => value === 'CSV_IMPORT')).toBe(true);
+  });
+
+  /**
+   * R8 — client-side validation is not validation. Both values are set through
+   * the DOM, exactly as they would be with devtools open or from a script.
+   */
+  test('a fractional or suffixed quantity is refused, not truncated', async ({ page }) => {
+    await signIn(page, managerEmail, MANAGER_PASSWORD);
+    await page.goto('/admin/inventory');
+
+    const row = page.locator('tr').filter({ hasText: FIXTURE_SKU }).first();
+    const adjust = row.locator('form').filter({ hasText: 'Adjust' });
+    const before = await row.locator('td').nth(2).textContent();
+
+    // `1.9` used to become a stock movement of 1.
+    await adjust.locator('input[name="delta"]').evaluate((input) => {
+      const field = input as HTMLInputElement;
+      field.type = 'text';
+      field.value = '1.9';
+    });
+    await adjust.getByRole('button', { name: 'Adjust' }).click();
+    await expect(page.getByRole('status').first()).toContainText(/whole number/i);
+    await expect(page.getByRole('status').first()).not.toContainText(/Stock is now/i);
+
+    // `10junk` used to become 10.
+    await page.reload();
+    const adjust2 = page
+      .locator('tr')
+      .filter({ hasText: FIXTURE_SKU })
+      .first()
+      .locator('form')
+      .filter({ hasText: 'Adjust' });
+    await adjust2.locator('input[name="delta"]').evaluate((input) => {
+      const field = input as HTMLInputElement;
+      field.type = 'text';
+      field.value = '10junk';
+    });
+    await adjust2.getByRole('button', { name: 'Adjust' }).click();
+    await expect(page.getByRole('status').first()).toContainText(/whole number/i);
+
+    // The balance never moved.
+    await page.reload();
+    const after = await page
+      .locator('tr')
+      .filter({ hasText: FIXTURE_SKU })
+      .first()
+      .locator('td')
+      .nth(2)
+      .textContent();
+    expect(after).toBe(before);
+  });
+
+  /**
+   * R9 — the redirect after a genuine sign-in. The victim really does
+   * authenticate on the real site first, which is what makes this convincing.
+   */
+  test('sign-in never redirects off-site, however next= is dressed up', async ({ page }) => {
+    for (const attack of [
+      'https://redirect-probe.invalid/landing',
+      '//redirect-probe.invalid/landing',
+      '/\\redirect-probe.invalid',
+      '/api/health',
+    ]) {
+      await page.goto(`/admin/sign-in?next=${encodeURIComponent(attack)}`);
+      await page.getByLabel('Email').fill(managerEmail);
+      await page.getByLabel('Password').fill(MANAGER_PASSWORD);
+      await page.getByRole('button', { name: 'Sign in' }).click();
+
+      // Always somewhere under /admin on this origin.
+      await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:\d+\/admin/);
+      await signOut(page);
+    }
+
+    // …and a legitimate next= is still honoured.
+    await page.goto('/admin/sign-in?next=%2Fadmin%2Finventory');
+    await page.getByLabel('Email').fill(managerEmail);
+    await page.getByLabel('Password').fill(MANAGER_PASSWORD);
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page).toHaveURL(/\/admin\/inventory/);
   });
 
   test('signing out invalidates the session immediately', async ({ page }) => {
