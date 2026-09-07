@@ -22,12 +22,17 @@ export {
 } from './logger/index';
 
 export {
+  assertTransactionHandle,
   checkDbHealth,
   type DbExecutor,
   type DbHealth,
+  evaluateMigrationState,
+  EXPECTED_MIGRATIONS,
   getPrisma,
   type LockedInventoryRow,
+  type MigrationAttempt,
   Prisma,
+  readMigrationAttempts,
   selectForUpdate,
   selectManyForUpdate,
   type TransactionOptions,
@@ -78,6 +83,7 @@ export { cartToken, newId, orderNumber, requestId, trackingToken } from './ids/i
 export {
   type Action,
   allowedStoreIds,
+  AUTHZ_ACCEPTED_EXCEPTIONS,
   assertAuthorized,
   authorize,
   type AuthzDecision,
