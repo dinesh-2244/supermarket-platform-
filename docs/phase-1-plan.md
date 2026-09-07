@@ -2,8 +2,9 @@
 
 **Owner (build):** JIM Builder · **Independent review/test:** OSCAR Reviewer ·
 **Integration + acceptance:** Michael
-**Authorised against:** `docs/phase-0-architecture.md` (v2) + `docs/adr/README.md`
-**Status:** dispatched 2026-09-06
+**Authorised against:** `docs/phase-0-architecture.md` (v2.1) + `docs/adr/README.md`
+**Status:** dispatched 2026-09-06 · amended 2026-09-07 (POS capability dependency —
+arch §16.1 / ADR-0007; see "POS boundary in Phase 1" below)
 
 > Phase 1 stands up the skeleton so Phase 2 can build features. **No business
 > features.** No storefront pages, no admin screens, no auth flows, no cart /
@@ -135,8 +136,48 @@ PRs may be combined if small, but keep P1-2 and P1-3 reviewable on their own.
   provided by `platform.db`; it is exercised by Phase 2+, not implemented here.
 - No **production DB vendor** choice, no hosting provider, no budget.
 - No **real** SMS, Sentry, or object-storage wiring — interfaces / no-op only.
-- No **POS adapter** — `PosSkuMap` table only.
+- No **POS adapter** — `PosSkuMap` table only. See "POS boundary" below.
 - No performance work, no load testing.
+
+## POS boundary in Phase 1
+
+POS integration is capability-dependent. The platform will integrate only with functionality officially exposed and documented by the selected POS vendor. The website remains operational without POS integration.
+
+Phase 1 builds **only** the POS-neutral seams (arch §16.1, ADR-0007):
+
+- the **POS-neutral interfaces** — `PosBillingGateway`, `PosInventoryFeed` — and
+  their V1 implementations: `ManualPosBillingGateway` (staff form),
+  `NoopInventoryFeed`, and the manual **CSV/Excel** import path;
+- **`PosSkuMap`**, present in the schema and deliberately unused;
+- **`StoreSettings.posMode`** (`MANUAL` default), the per-store switch a future
+  factory reads.
+
+Nothing else. The POS product has not been chosen, so **assume no API, no API
+documentation, no webhooks, no stock endpoints, no billing endpoints, no write
+access and no database access.** The storefront, admin, inventory and order flows
+must all work with no POS integration whatsoever — manual adjustment, CSV import and
+reconciliation are the permanent baseline, not a placeholder.
+
+When a POS is eventually selected, integration takes the **highest option it
+actually supports**, in this order:
+
+1. **Official documented POS API**, if available and suitable.
+2. **Official webhooks / event feeds**, if available.
+3. **Scheduled stock/API polling**, if supported.
+4. **CSV / Excel import/export.**
+5. **Officially supported read-only database / connector access.**
+6. **Manual reconciliation** — the final fallback, and the one that always works.
+
+**No vendor-specific POS adapter is in scope — in Phase 1 or any later phase —
+until all four of these hold:**
+
+1. the POS software is **selected**;
+2. its **official documentation is reviewed**;
+3. the **supported endpoints and data fields are confirmed**;
+4. **authentication and rate limits are understood**.
+
+The core architecture does not change with the POS choice; a future adapter is new
+files under `*/pos/` plus `PosSkuMap` rows, with no core module or table changes.
 
 ## OSCAR — independent review scope for Phase 1
 
