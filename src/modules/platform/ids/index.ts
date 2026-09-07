@@ -28,6 +28,15 @@ export function trackingToken(): string {
   return `t_${randomToken(20)}`;
 }
 
+/**
+ * Opaque staff session id. 256 bits of CSPRNG output, hex-encoded — the cookie
+ * carries only this, never a role or a store, so there is nothing in it a client
+ * could usefully tamper with and nothing to verify beyond "does this row exist".
+ */
+export function sessionToken(): string {
+  return randomBytes(32).toString('hex');
+}
+
 /** Per-request correlation id for the logger. */
 export function requestId(): string {
   return randomUUID();

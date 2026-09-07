@@ -78,18 +78,22 @@ export {
   ZERO,
 } from './money/index';
 
-export { cartToken, newId, orderNumber, requestId, trackingToken } from './ids/index';
+export { cartToken, newId, orderNumber, requestId, sessionToken, trackingToken } from './ids/index';
+
+export { type AuditAction, type AuditEntry, writeAuditLog } from './audit/index';
 
 export {
   type Action,
+  ALL_ACTIONS,
   allowedStoreIds,
-  AUTHZ_ACCEPTED_EXCEPTIONS,
   assertAuthorized,
   authorize,
   type AuthzDecision,
+  canAccessStore,
   isUnscoped,
   type Principal,
   type Resource,
+  storeScopeFilter,
   type UserRole,
 } from './authz/index';
 
