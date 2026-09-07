@@ -1,3 +1,5 @@
+import { haltProcess } from './boot/fail-closed';
+
 /**
  * Runs once, on server startup, before the first request is handled.
  *
@@ -5,6 +7,11 @@
  * environment with Zod, so a missing or malformed variable stops the process
  * here with a readable message rather than surfacing later as a confusing
  * runtime error on some unrelated request (architecture §22).
+ *
+ * "Stops the process" is literal. Next.js swallows an exception thrown from
+ * `register()` and keeps the server listening, so a rethrow alone left a
+ * half-dead app answering 500s and a supervisor with nothing to restart. The
+ * failure path therefore exits non-zero via {@link haltProcess}.
  */
 export async function register(): Promise<void> {
   // Only the Node.js server runtime boots the kernel; the edge runtime has no
@@ -24,6 +31,6 @@ export async function register(): Promise<void> {
         'Copy .env.example to .env and fill in the required values.\n',
     );
     console.error(error instanceof Error ? error.message : error);
-    throw error;
+    haltProcess(1);
   }
 }
