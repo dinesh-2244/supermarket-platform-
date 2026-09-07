@@ -29,7 +29,9 @@ export {
 } from './service';
 
 export {
+  assertCanManageTarget,
   assignableRoles,
+  manageableRoles,
   MIN_PASSWORD_LENGTH,
   SESSION_MAX_AGE_SECONDS,
   normalizeEmail,

@@ -31,7 +31,10 @@ export {
 } from './service';
 
 export {
+  EDITABLE_SETTINGS_FIELDS,
+  type EditableSettingsField,
   normalizeLocality,
+  pickEditableSettings,
   normalizePincode,
   resolveServiceabilityFrom,
   type AreaCandidate,

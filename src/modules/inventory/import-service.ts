@@ -10,6 +10,7 @@
 import {
   assertAuthorized,
   NotFoundError,
+  ValidationError,
   withTransaction,
   writeAuditLog,
   type Principal,
@@ -155,7 +156,8 @@ export async function planStockImport(
 }
 
 export interface ImportOutcome extends ImportPlan {
-  readonly importId: string;
+  /** `null` for a dry run — a preview creates no history row. */
+  readonly importId: string | null;
   readonly outcome: 'dry-run' | 'applied' | 'rejected';
   readonly applied: number;
 }
@@ -180,42 +182,34 @@ export async function runStockImport(
   const dryRun = input.dryRun ?? false;
   const actorUserId = principal.kind === 'user' ? principal.userId : null;
 
-  if (!plan.ok || dryRun) {
+  // A dry run writes *nothing* — the UI says so, so the history must not gain a
+  // row either. Only a real attempt (applied or rejected) is recorded.
+  if (dryRun) {
+    return { ...plan, importId: null, outcome: 'dry-run', applied: 0 };
+  }
+
+  if (!plan.ok) {
     const record = await repo.insertImportRun({
       storeId: plan.storeId,
       filename: plan.filename,
       mode: plan.mode,
-      outcome: plan.ok ? 'dry-run' : 'rejected',
+      outcome: 'rejected',
       rowCount: plan.rowCount,
       appliedCount: 0,
       errorCount: plan.errors.length,
       errors: plan.errors,
       actorUserId,
     });
-    return {
-      ...plan,
-      importId: record.id,
-      outcome: plan.ok ? 'dry-run' : 'rejected',
-      applied: 0,
-    };
+    return { ...plan, importId: record.id, outcome: 'rejected', applied: 0 };
   }
 
   const results: MovementResult[] = [];
-  const record = await withTransaction(async (tx) => {
-    for (const change of plan.changes) {
-      results.push(
-        await applyMovement(tx, principal, {
-          storeId: plan.storeId,
-          productId: change.productId,
-          delta: change.delta,
-          reason: 'CSV_IMPORT',
-          refType: 'import',
-          refId: plan.filename,
-          note: `${change.mode} ${String(change.quantity)} (line ${String(change.line)})`,
-        }),
-      );
-    }
+  const applied: PlannedChange[] = [];
 
+  const outcome = await withTransaction(async (tx) => {
+    // The import run is created first so its id can be the ledger reference: a
+    // filename is reusable, so "which run moved this stock?" was unanswerable
+    // when the same file was imported twice.
     const run = await repo.insertImportRun(
       {
         storeId: plan.storeId,
@@ -223,7 +217,7 @@ export async function runStockImport(
         mode: plan.mode,
         outcome: 'applied',
         rowCount: plan.rowCount,
-        appliedCount: plan.changes.length,
+        appliedCount: 0,
         errorCount: 0,
         errors: [],
         actorUserId,
@@ -231,25 +225,122 @@ export async function runStockImport(
       tx,
     );
 
+    // Lock EVERY affected row, in a deterministic order, before deciding
+    // anything — including rows the plan thought were unchanged.
+    //
+    // The plan's deltas were computed from balances read outside this
+    // transaction. A concurrent adjust between the plan and the apply made a
+    // `set 110` add its stale delta of +10 to a balance that had already moved:
+    // the row ended at 120 while the import reported 110. Set-mode differences
+    // have to come from the balance this transaction is holding.
+    const candidates = [...plan.changes, ...plan.unchanged].sort((a, b) =>
+      a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0,
+    );
+
+    const locked = new Map<string, number>();
+    for (const change of candidates) {
+      await repo.ensureItem(tx, plan.storeId, change.productId);
+      const row = await repo.lockItem(tx, plan.storeId, change.productId);
+      if (row === null) {
+        throw new NotFoundError('No inventory row for that store and product', {
+          storeId: plan.storeId,
+          productId: change.productId,
+        });
+      }
+      locked.set(change.productId, row.websiteStock);
+    }
+
+    // Revalidate the whole batch against the locked balances, then apply.
+    const recomputed: { change: PlannedChange; delta: number }[] = [];
+    for (const change of candidates) {
+      const current = locked.get(change.productId) ?? 0;
+      const target = change.mode === 'set' ? change.quantity : current + change.quantity;
+
+      if (target < 0) {
+        throw new ValidationError(
+          `Line ${String(change.line)} (${change.sku}) would take stock to ${String(target)} — it cannot go below zero`,
+          { line: change.line, sku: change.sku, current, target },
+        );
+      }
+      const delta = target - current;
+      if (delta !== 0) recomputed.push({ change, delta });
+    }
+
+    for (const { change, delta } of recomputed) {
+      const before = locked.get(change.productId) ?? 0;
+      const movement = await applyMovement(tx, principal, {
+        storeId: plan.storeId,
+        productId: change.productId,
+        delta,
+        reason: 'CSV_IMPORT',
+        refType: 'import',
+        refId: run.id,
+        note: `${change.mode} ${String(change.quantity)} (line ${String(change.line)}, ${plan.filename})`,
+      });
+      results.push(movement);
+      applied.push({ ...change, currentStock: before, newStock: movement.balanceAfter, delta });
+
+      // Per-item before/after, so this sensitive stock path shows the same
+      // detail in the generic trail that a manual adjustment does. A batch
+      // summary alone could not answer "what did this do to that product?".
+      await writeAuditLog(tx, {
+        principal,
+        action: 'import',
+        entityType: 'InventoryItem',
+        entityId: `${plan.storeId}:${change.productId}`,
+        before: { websiteStock: movement.balanceBefore },
+        after: {
+          websiteStock: movement.balanceAfter,
+          delta: movement.delta,
+          sku: change.sku,
+          line: change.line,
+          importId: run.id,
+        },
+      });
+    }
+
+    const finished = await repo.updateImportRunCounts(tx, run.id, recomputed.length);
+
     await writeAuditLog(tx, {
       principal,
       action: 'import',
       entityType: 'InventoryImport',
       entityId: run.id,
+      before: {
+        stock: Object.fromEntries(candidates.map((c) => [c.sku, locked.get(c.productId) ?? 0])),
+      },
       after: {
         filename: plan.filename,
         mode: plan.mode,
-        applied: plan.changes.length,
-        unchanged: plan.unchanged.length,
+        applied: recomputed.length,
+        unchanged: candidates.length - recomputed.length,
+        stock: Object.fromEntries(
+          candidates.map((c) => {
+            const change = applied.find((a) => a.productId === c.productId);
+            return [c.sku, change?.newStock ?? locked.get(c.productId) ?? 0];
+          }),
+        ),
       },
     });
-    return run;
+
+    return finished;
   });
 
   // After commit: a handler must not be able to roll back an import that landed.
   for (const result of results) announceMovement(result);
 
-  return { ...plan, importId: record.id, outcome: 'applied', applied: plan.changes.length };
+  const appliedIds = new Set(applied.map((change) => change.productId));
+  return {
+    ...plan,
+    // Built from what actually committed, not from the pre-transaction plan.
+    changes: applied,
+    unchanged: [...plan.changes, ...plan.unchanged].filter(
+      (change) => !appliedIds.has(change.productId),
+    ),
+    importId: outcome.id,
+    outcome: 'applied',
+    applied: applied.length,
+  };
 }
 
 /** Who imported what, when, and how it went (D6). */
@@ -276,13 +367,46 @@ export async function getImportRun(
   return run;
 }
 
+/**
+ * Neutralise a value that a spreadsheet would execute as a formula.
+ *
+ * The error report is downloaded and opened in Excel or Sheets — the same tool
+ * the broken file came from. A cell beginning `=`, `+`, `-`, `@`, tab or CR is
+ * treated as a formula there, so an attacker-controlled SKU of `=1+1` (or
+ * something far worse, like a `WEBSERVICE()` call exfiltrating the sheet) runs
+ * on the operator's machine. Quoting does not help: the quotes are consumed by
+ * the CSV parser before the formula engine sees the value.
+ *
+ * A leading apostrophe is the conventional fix — the cell renders as text.
+ * Control characters are dropped outright; they have no business in a report.
+ */
+export function neutralizeCsvValue(value: string): string {
+  // Strip C0 control characters, keeping the ones a CSV legitimately uses
+  // (tab, LF, CR are handled by the quoting below). Written as a code-point
+  // filter rather than a regex so the intent is readable and ESLint's
+  // no-control-regex rule is not being worked around.
+  const cleaned = [...value]
+    .filter((char) => {
+      const code = char.codePointAt(0) ?? 0;
+      return code >= 0x20 || code === 0x09 || code === 0x0a || code === 0x0d;
+    })
+    .join('');
+
+  return FORMULA_PREFIXES.has(cleaned.charAt(0)) ? `'${cleaned}` : cleaned;
+}
+
+/** What a spreadsheet treats as the start of a formula. */
+const FORMULA_PREFIXES = new Set(['=', '+', '-', '@', '\t', '\r']);
+
 /** The error report as a CSV the operator can open in the tool they exported from. */
 export function errorReportCsv(errors: readonly RowError[]): string {
-  const escape = (value: string): string =>
-    /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+  const cell = (value: string): string => {
+    const safe = neutralizeCsvValue(value);
+    return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+  };
   return [
     'line,sku,error',
-    ...errors.map((e) => [String(e.line), escape(e.sku ?? ''), escape(e.message)].join(',')),
+    ...errors.map((e) => [String(e.line), cell(e.sku ?? ''), cell(e.message)].join(',')),
   ].join('\n');
 }
 

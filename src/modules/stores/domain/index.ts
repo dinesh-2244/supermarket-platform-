@@ -193,6 +193,74 @@ export interface EditableSettings {
   readonly lowStockThreshold?: number;
 }
 
+/**
+ * The field names a settings update may carry, as a **runtime** value.
+ *
+ * `EditableSettings` restricts this at compile time only, which is not a
+ * boundary: `Object.entries()` of a structurally wider object — or any
+ * JavaScript caller — happily carried `posMode` straight through to Prisma,
+ * bypassing the super-admin-only grant on `updatePosMode`. The update is now
+ * built from this list, so a field that is not on it cannot reach the database
+ * however the object was constructed.
+ */
+export const EDITABLE_SETTINGS_FIELDS = [
+  'deliveryFeePaise',
+  'minOrderPaise',
+  'slotLengthMinutes',
+  'slotCapacity',
+  'priceVariancePercentBp',
+  'priceVarianceAbsCapPaise',
+  'isAcceptingOrders',
+  'substitutionPolicy',
+  'lowStockThreshold',
+] as const;
+
+export type EditableSettingsField = (typeof EDITABLE_SETTINGS_FIELDS)[number];
+
+/**
+ * Keep only the allowed fields, type-checking each one, and refuse anything else
+ * loudly rather than dropping it silently — a caller that thought it was setting
+ * `posMode` should be told it was not.
+ */
+export function pickEditableSettings(input: Readonly<Record<string, unknown>>): EditableSettings {
+  const allowed = new Set<string>(EDITABLE_SETTINGS_FIELDS);
+  const rejected = Object.keys(input).filter((key) => !allowed.has(key));
+  if (rejected.length > 0) {
+    throw new ValidationError(`These settings cannot be changed here: ${rejected.join(', ')}`, {
+      rejected,
+    });
+  }
+
+  const out: {
+    -readonly [K in keyof EditableSettings]: EditableSettings[K];
+  } = {};
+
+  for (const field of EDITABLE_SETTINGS_FIELDS) {
+    const value = input[field];
+    if (value === undefined) continue;
+
+    if (field === 'isAcceptingOrders') {
+      if (typeof value !== 'boolean') {
+        throw new ValidationError('isAcceptingOrders must be true or false', { value });
+      }
+      out.isAcceptingOrders = value;
+    } else if (field === 'substitutionPolicy') {
+      if (value !== 'NONE' && value !== 'ASK_CUSTOMER' && value !== 'STAFF_DISCRETION') {
+        throw new ValidationError('That substitution policy is not one of the allowed values', {
+          value,
+        });
+      }
+      out.substitutionPolicy = value;
+    } else {
+      if (typeof value !== 'number') {
+        throw new ValidationError(`${field} must be a number`, { field, value });
+      }
+      out[field] = value;
+    }
+  }
+  return out;
+}
+
 function assertNonNegativeInt(value: number, field: string): void {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new ValidationError(`${field} must be a whole number of zero or more`, { field, value });

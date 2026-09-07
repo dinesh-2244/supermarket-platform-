@@ -93,16 +93,23 @@ export async function updateCategory(
   },
 ): Promise<repo.CategoryRecord> {
   assertAuthorized(principal, 'category:write', { ...CATEGORY, id: categoryId });
-  const before = await repo.findCategory(categoryId);
-  if (before === null) throw new NotFoundError('Category not found', { categoryId });
-
-  // A loop in the tree turns every breadcrumb and every "products under this
-  // category" walk into an infinite one. Refuse the edge, don't defend the walks.
-  if (input.parentId !== undefined) {
-    assertNoCycle(categoryId, input.parentId, await repo.loadCategoryNodes());
-  }
 
   return withTransaction(async (tx) => {
+    // Serialise hierarchy changes before reading the tree. A cycle is a property
+    // of the whole tree, so two reparentings that each validate against an
+    // acyclic snapshot can still commit one between them — there is no single
+    // row whose lock they would contend for.
+    if (input.parentId !== undefined) await repo.lockCategoryTree(tx);
+
+    const before = await repo.findCategory(categoryId, tx);
+    if (before === null) throw new NotFoundError('Category not found', { categoryId });
+
+    // Detection now runs *inside* the protected section, against the tree as it
+    // actually is, not as it was before a concurrent writer moved something.
+    if (input.parentId !== undefined) {
+      assertNoCycle(categoryId, input.parentId, await repo.loadCategoryNodes(tx));
+    }
+
     const after = await repo
       .updateCategoryRow(tx, categoryId, {
         ...(input.name !== undefined
@@ -349,9 +356,19 @@ export async function reorderProductImages(
 
   const existing = await repo.listImages(productId);
   const known = new Set(existing.map((image) => image.id));
-  if (orderedImageIds.length !== known.size || orderedImageIds.some((id) => !known.has(id))) {
+  const requested = new Set(orderedImageIds);
+
+  // Length + membership alone accepted `[A, A]` for a two-image product: it is
+  // the right length and every entry is known, but B is never assigned a sort
+  // key and both images end up at the same position. Uniqueness and exact set
+  // equality are what "once each" actually means.
+  const sameSize = requested.size === orderedImageIds.length && requested.size === known.size;
+  if (!sameSize || orderedImageIds.some((id) => !known.has(id))) {
     throw new ValidationError('The new order must list exactly this product’s images once each', {
       productId,
+      expected: known.size,
+      received: orderedImageIds.length,
+      distinct: requested.size,
     });
   }
 

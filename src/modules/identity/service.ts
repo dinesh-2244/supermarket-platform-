@@ -15,6 +15,7 @@ import {
   ValidationError,
   withTransaction,
   writeAuditLog,
+  type Tx,
   type Principal,
   type UserRole,
 } from '../platform/index';
@@ -22,8 +23,10 @@ import {
   assertCanAssignRole,
   assertName,
   assertPasswordAcceptable,
+  assertCanManageTarget,
   assertRoleStorePairing,
   descriptor,
+  manageableRoles,
   SESSION_MAX_AGE_SECONDS,
   normalizeEmail,
   principalForUser,
@@ -132,9 +135,46 @@ export async function principalForUserId(userId: string): Promise<Principal | nu
 // User management
 // ---------------------------------------------------------------------------
 
+/**
+ * Open a transaction, lock the target user, and run every eligibility check
+ * against the row as it is *inside* that transaction — then hand it to `body`.
+ *
+ * The lock is the point. Checking the target's role before the transaction left
+ * a window in which a concurrent promotion could change the answer between the
+ * check and the write, so the check has to hold for the rest of the operation.
+ * Three things are asserted here, in order:
+ *
+ * 1. the action itself is granted to the principal at all;
+ * 2. the target's **store** is one the principal is scoped to;
+ * 3. the target's **current role** is inside the principal's management scope —
+ *    which is what stops a manager reaching a peer manager in their own store.
+ */
+async function withManagedTarget<T>(
+  principal: Principal,
+  userId: string,
+  action: 'user:update' | 'user:disable' | 'user:reset-password',
+  body: (tx: Tx, target: repo.UserRecord) => Promise<T>,
+): Promise<T> {
+  return withTransaction(async (tx) => {
+    const target = await repo.findByIdForUpdate(tx, userId);
+    if (target === null) throw new NotFoundError('User not found', { userId });
+
+    assertAuthorized(principal, action, {
+      type: 'User',
+      id: userId,
+      storeId: target.storeId,
+    });
+    assertCanManageTarget(principal, target);
+
+    return body(tx, target);
+  });
+}
+
 export async function listUsers(principal: Principal): Promise<readonly repo.UserRecord[]> {
   assertAuthorized(principal, 'user:read', { type: 'User', storeId: firstScopedStore(principal) });
-  return repo.listVisibleUsers(principal);
+  // Role-scoped as well as store-scoped: a manager runs their store's staff, so
+  // a peer manager must not appear in a list that offers reset/disable actions.
+  return repo.listVisibleUsers(principal, manageableRoles(principal));
 }
 
 export async function getUser(principal: Principal, userId: string): Promise<repo.UserRecord> {
@@ -145,6 +185,7 @@ export async function getUser(principal: Principal, userId: string): Promise<rep
     id: user.id,
     storeId: user.storeId,
   });
+  assertCanManageTarget(principal, user);
   return user;
 }
 
@@ -216,34 +257,33 @@ export async function updateUser(
   userId: string,
   input: UpdateUserInput,
 ): Promise<repo.UserRecord> {
-  const before = await repo.findById(userId);
-  if (before === null) throw new NotFoundError('User not found', { userId });
+  return withManagedTarget(principal, userId, 'user:update', async (tx, before) => {
+    const role = input.role ?? before.role;
+    const proposedStoreId = input.storeId === undefined ? before.storeId : input.storeId;
+    assertRoleStorePairing(role, proposedStoreId);
 
-  const role = input.role ?? before.role;
-  const storeId = input.storeId === undefined ? before.storeId : input.storeId;
-  assertRoleStorePairing(role, storeId);
+    // The *proposed* role and store are a separate question from whether this
+    // target may be managed at all, and both are checked: a manager must not be
+    // able to promote a staff member to peer, nor move them into another store.
+    if (proposedStoreId !== before.storeId || role !== before.role) {
+      assertCanAssignRole(principal, role);
+      assertAuthorized(principal, 'user:update', {
+        type: 'User',
+        id: userId,
+        storeId: proposedStoreId,
+      });
+    }
 
-  assertAuthorized(principal, 'user:update', {
-    type: 'User',
-    id: userId,
-    storeId: before.storeId,
-  });
-  if (storeId !== before.storeId || role !== before.role) {
-    assertCanAssignRole(principal, role);
-    assertAuthorized(principal, 'user:update', { type: 'User', id: userId, storeId });
-  }
-
-  const authorityChanged = role !== before.role || storeId !== before.storeId;
-
-  return withTransaction(async (tx) => {
     const after = await repo.updateUser(tx, userId, {
       ...(input.name !== undefined ? { name: assertName(input.name) } : {}),
       role,
-      storeId,
+      storeId: proposedStoreId,
     });
 
     // A live cookie must not outlive the authority it was issued under.
-    if (authorityChanged) await repo.deleteSessionsForUser(tx, userId);
+    if (role !== before.role || proposedStoreId !== before.storeId) {
+      await repo.deleteSessionsForUser(tx, userId);
+    }
 
     await writeAuditLog(tx, {
       principal,
@@ -270,38 +310,36 @@ export async function setUserActive(
   userId: string,
   isActive: boolean,
 ): Promise<repo.UserRecord> {
-  const before = await repo.findById(userId);
-  if (before === null) throw new NotFoundError('User not found', { userId });
-
-  assertAuthorized(principal, isActive ? 'user:update' : 'user:disable', {
-    type: 'User',
-    id: userId,
-    storeId: before.storeId,
-  });
-
-  if (!isActive && principal.kind === 'user' && principal.userId === userId) {
+  if (principal.kind === 'user' && principal.userId === userId && !isActive) {
     throw new ValidationError('You cannot disable your own account', { userId });
   }
-  if (!isActive && before.role === 'SUPER_ADMIN' && before.isActive) {
-    if ((await repo.countActiveSuperAdmins()) <= 1) {
-      throw new ConflictError('The last active SUPER_ADMIN cannot be disabled', { userId });
-    }
-  }
 
-  const after = await withTransaction(async (tx) => {
-    const updated = await repo.updateUser(tx, userId, { isActive });
-    if (!isActive) await repo.deleteSessionsForUser(tx, userId);
+  const after = await withManagedTarget(
+    principal,
+    userId,
+    isActive ? 'user:update' : 'user:disable',
+    async (tx, before) => {
+      // Locking everyone out of the back office is not a recoverable state.
+      if (!isActive && before.role === 'SUPER_ADMIN' && before.isActive) {
+        if ((await repo.countActiveSuperAdmins(tx)) <= 1) {
+          throw new ConflictError('The last active SUPER_ADMIN cannot be disabled', { userId });
+        }
+      }
 
-    await writeAuditLog(tx, {
-      principal,
-      action: isActive ? 'enable' : 'disable',
-      entityType: 'User',
-      entityId: userId,
-      before,
-      after: updated,
-    });
-    return updated;
-  });
+      const updated = await repo.updateUser(tx, userId, { isActive });
+      if (!isActive) await repo.deleteSessionsForUser(tx, userId);
+
+      await writeAuditLog(tx, {
+        principal,
+        action: isActive ? 'enable' : 'disable',
+        entityType: 'User',
+        entityId: userId,
+        before,
+        after: updated,
+      });
+      return updated;
+    },
+  );
 
   if (!isActive) emit('user.disabled', { userId });
   return after;
@@ -316,18 +354,9 @@ export async function resetPassword(
   userId: string,
   newPassword: string,
 ): Promise<void> {
-  const before = await repo.findById(userId);
-  if (before === null) throw new NotFoundError('User not found', { userId });
-
-  assertAuthorized(principal, 'user:reset-password', {
-    type: 'User',
-    id: userId,
-    storeId: before.storeId,
-  });
-
   const passwordHash = await hashPassword(newPassword);
 
-  await withTransaction(async (tx) => {
+  await withManagedTarget(principal, userId, 'user:reset-password', async (tx, before) => {
     await repo.updateUser(tx, userId, { passwordHash });
     await repo.deleteSessionsForUser(tx, userId);
     // The hash is never in the audit payload — only that a reset happened.

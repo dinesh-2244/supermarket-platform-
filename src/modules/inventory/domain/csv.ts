@@ -48,14 +48,37 @@ export interface ParseResult {
   readonly errors: readonly RowError[];
 }
 
-/** Split one CSV line, honouring quotes and doubled quotes inside them. */
-function splitLine(line: string): string[] {
+/** A malformed line, reported by row and column rather than silently repaired. */
+export class CsvSyntaxError extends Error {
+  constructor(
+    readonly column: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'CsvSyntaxError';
+  }
+}
+
+/**
+ * Split one CSV line on a **single, chosen** delimiter, honouring quotes and
+ * doubled quotes inside them — and refusing anything malformed.
+ *
+ * The previous version treated `,`, `;` and tab as separators everywhere and
+ * simply ran off the end of an unterminated quote, so `,"150` parsed as the
+ * number 150 with no error at all and was applied to stock. A quoting mistake in
+ * a spreadsheet export is exactly the kind of thing that should stop an import,
+ * not be guessed at: the three cases below are all silent data corruption if
+ * accepted.
+ */
+function splitLine(line: string, delimiter: string): string[] {
   const out: string[] = [];
   let field = '';
   let inQuotes = false;
+  let quotedFieldClosed = false;
 
   for (let i = 0; i < line.length; i += 1) {
     const char = line[i];
+
     if (inQuotes) {
       if (char === '"') {
         if (line[i + 1] === '"') {
@@ -63,21 +86,68 @@ function splitLine(line: string): string[] {
           i += 1;
         } else {
           inQuotes = false;
+          quotedFieldClosed = true;
         }
       } else {
         field += char;
       }
-    } else if (char === '"') {
-      inQuotes = true;
-    } else if (char === ',' || char === ';' || char === '\t') {
+      continue;
+    }
+
+    if (char === delimiter) {
       out.push(field);
       field = '';
-    } else {
-      field += char;
+      quotedFieldClosed = false;
+      continue;
     }
+
+    if (char === '"') {
+      if (quotedFieldClosed || field !== '') {
+        throw new CsvSyntaxError(i + 1, 'A quote may only start a field');
+      }
+      inQuotes = true;
+      continue;
+    }
+
+    // Anything after a closing quote other than the delimiter is a mistake —
+    // `"12"3` is not the number 123, it is a broken field.
+    if (quotedFieldClosed && char !== undefined && char.trim() !== '') {
+      throw new CsvSyntaxError(i + 1, 'Unexpected text after a closing quote');
+    }
+    field += char;
   }
+
+  if (inQuotes) {
+    throw new CsvSyntaxError(
+      line.length,
+      'Unterminated quote — a field opens a quote and never closes it',
+    );
+  }
+
   out.push(field);
   return out.map((value) => value.trim());
+}
+
+/**
+ * Pick one delimiter for the whole file, from the header.
+ *
+ * Accepting all three everywhere meant a comma inside a semicolon-separated file
+ * silently split a field. The header names the columns, so whichever candidate
+ * yields the most fields there is the file's delimiter, and it is used for every
+ * row after.
+ */
+function chooseDelimiter(headerLine: string): string {
+  const candidates = [',', ';', '\t'];
+  let best = ',';
+  let bestCount = 0;
+  for (const candidate of candidates) {
+    const count = headerLine.split(candidate).length;
+    if (count > bestCount) {
+      best = candidate;
+      bestCount = count;
+    }
+  }
+  return best;
 }
 
 /**
@@ -145,10 +215,23 @@ export function parseStockCsv(
 
   let headerIndex = -1;
   let columns: { sku: number; quantity: number; mode: number } | null = null;
+  let delimiter = ',';
 
   for (const [index, line] of lines.entries()) {
     if (line.trim() === '') continue;
-    const cells = splitLine(line).map((cell) => cell.toLowerCase());
+    delimiter = chooseDelimiter(line);
+    let cells: string[];
+    try {
+      cells = splitLine(line, delimiter).map((cell) => cell.toLowerCase());
+    } catch (error) {
+      if (error instanceof CsvSyntaxError) {
+        throw new ValidationError(
+          `The header row is malformed: ${error.message} (column ${String(error.column)})`,
+          {},
+        );
+      }
+      throw error;
+    }
     const sku = cells.findIndex((cell) => HEADER_ALIASES[cell] === 'sku');
     const quantity = cells.findIndex((cell) => HEADER_ALIASES[cell] === 'quantity');
     if (sku !== -1 && quantity !== -1) {
@@ -187,7 +270,22 @@ export function parseStockCsv(
       break;
     }
 
-    const cells = splitLine(raw);
+    let cells: string[];
+    try {
+      cells = splitLine(raw, delimiter);
+    } catch (error) {
+      // A quoting mistake is a row error with a column, not a silent repair.
+      if (error instanceof CsvSyntaxError) {
+        errors.push({
+          line,
+          sku: null,
+          message: `${error.message} (column ${String(error.column)})`,
+        });
+        continue;
+      }
+      throw error;
+    }
+
     const sku = (cells[columns.sku] ?? '').toUpperCase();
     const quantityText = cells[columns.quantity] ?? '';
     const modeText = (columns.mode === -1 ? '' : (cells[columns.mode] ?? '')).toLowerCase();

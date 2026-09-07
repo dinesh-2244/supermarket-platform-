@@ -74,21 +74,60 @@ export async function findByEmailWithSecret(
 }
 
 /**
- * List users the principal may see.
+ * List users the principal may see *and manage*.
  *
- * The scope filter is applied here rather than by the caller: a store-bound list
- * that forgets it is an IDOR, so the only query in the module is the filtered
- * one. `SUPER_ADMIN`s have no `storeId`, so a scoped principal never sees them.
+ * Two filters, both here rather than in the caller: the store scope (a
+ * store-bound list that forgets it is an IDOR) and the **role** scope. The role
+ * filter is what stops a `STORE_MANAGER` seeing — and therefore being offered
+ * reset/demote/disable buttons for — a peer manager in their own store.
+ * `SUPER_ADMIN`s have no `storeId`, so a scoped principal never sees them either.
  */
 export async function listVisibleUsers(
   principal: Principal,
+  manageableRoles: readonly UserRole[],
   db?: DbExecutor,
 ): Promise<readonly UserRecord[]> {
   return executor(db).user.findMany({
-    where: storeScopeFilter(principal),
+    where: {
+      ...storeScopeFilter(principal),
+      // A super-admin manages every role, so this is unrestricted for them.
+      ...(manageableRoles.length === 0 ? { id: '' } : { role: { in: [...manageableRoles] } }),
+    },
     select: publicUserSelect,
     orderBy: [{ isActive: 'desc' }, { email: 'asc' }],
   });
+}
+
+/**
+ * Read a user for mutation, holding its row lock until the transaction ends.
+ *
+ * The eligibility check has to run against the role the target has *now*, and
+ * "now" has to mean "for the rest of this transaction" — otherwise a concurrent
+ * promotion between the check and the write is a way past it. Raw SQL because
+ * Prisma has no `FOR UPDATE`; the branded `Tx` is required for the same reason
+ * it is everywhere else.
+ */
+export async function findByIdForUpdate(tx: Tx, id: string): Promise<UserRecord | null> {
+  const rows = await auditedExecutor(tx).$queryRaw<
+    {
+      id: string;
+      email: string;
+      name: string;
+      role: UserRole;
+      storeId: string | null;
+      isActive: boolean;
+      lastLoginAt: Date | null;
+      createdAt: Date;
+      updatedAt: Date;
+    }[]
+  >`
+    SELECT "id", "email", "name", "role", "storeId", "isActive",
+           "lastLoginAt", "createdAt", "updatedAt"
+    FROM "User"
+    WHERE "id" = ${id}
+    FOR UPDATE
+  `;
+  return rows[0] ?? null;
 }
 
 export interface CreateUserRow {
@@ -138,6 +177,8 @@ export async function deleteSessionsForUser(tx: Tx, userId: string): Promise<num
 export async function countActiveSuperAdmins(db?: DbExecutor): Promise<number> {
   return executor(db).user.count({ where: { role: 'SUPER_ADMIN', isActive: true } });
 }
+
+export type { UserRole };
 
 // ---------------------------------------------------------------------------
 // Sessions

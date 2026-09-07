@@ -84,9 +84,13 @@ export async function setPrice(
   await getStore(principal, storeId);
   await getProduct(principal, productId);
 
-  const before = await repo.findListingForPair(storeId, productId);
+  const outcome = await withTransaction(async (tx) => {
+    // The before-state is read *under the row lock*, inside the same transaction
+    // as the write and the history row. Reading it beforehand meant two
+    // concurrent edits both recorded the same stale "old price", so the history
+    // stopped reconstructing the actual sequence of prices.
+    const before = await repo.lockListingForPair(tx, storeId, productId);
 
-  const after = await withTransaction(async (tx) => {
     const listing = await repo.upsertListing(tx, {
       storeId,
       productId,
@@ -124,17 +128,17 @@ export async function setPrice(
       });
     }
 
-    return { listing, moved };
+    return { listing, moved, oldPricePaise: before?.sellingPricePaise ?? 0 };
   });
 
-  if (after.moved) {
+  if (outcome.moved) {
     emit('price.changed', {
-      storeProductId: after.listing.id,
-      oldPricePaise: before?.sellingPricePaise ?? 0,
-      newPricePaise: after.listing.sellingPricePaise,
+      storeProductId: outcome.listing.id,
+      oldPricePaise: outcome.oldPricePaise,
+      newPricePaise: outcome.listing.sellingPricePaise,
     });
   }
-  return after.listing;
+  return outcome.listing;
 }
 
 /**
@@ -149,16 +153,18 @@ export async function setListed(
 ): Promise<repo.StoreProductRecord> {
   assertAuthorized(principal, 'store-product:list', { type: 'StoreProduct', storeId });
 
-  const before = await repo.findListingForPair(storeId, productId);
-  if (before === null) {
-    throw new NotFoundError('That product is not set up for this store yet — set a price first', {
-      storeId,
-      productId,
-    });
-  }
-  if (before.isListed === isListed) return before;
-
   return withTransaction(async (tx) => {
+    // Same reasoning as setPrice: read under the lock, so a concurrent toggle
+    // cannot be overwritten from a stale value.
+    const before = await repo.lockListingForPair(tx, storeId, productId);
+    if (before === null) {
+      throw new NotFoundError('That product is not set up for this store yet — set a price first', {
+        storeId,
+        productId,
+      });
+    }
+    if (before.isListed === isListed) return before;
+
     const after = await repo.updateListing(tx, before.id, {
       isListed,
       // First time it goes live, remember when.

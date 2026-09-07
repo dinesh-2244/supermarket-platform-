@@ -86,6 +86,26 @@ export async function findCategory(id: string, db?: DbExecutor): Promise<Categor
   return executor(db).category.findUnique({ where: { id } });
 }
 
+/**
+ * Serialise every category-hierarchy mutation against one advisory lock.
+ *
+ * A cycle is a property of the whole tree, not of one row, so locking the two
+ * categories involved is not enough: `updateCategory(A,{parent:B})` and
+ * `updateCategory(B,{parent:A})` each validated against a tree that was still
+ * acyclic, then both committed, leaving A→B→A. There is no row whose lock both
+ * transactions would contend for.
+ *
+ * A transaction-scoped advisory lock is the cheap fix: reparenting is rare, and
+ * making it strictly serial costs nothing anyone will notice. The lock is
+ * released automatically when the transaction ends, so a failure cannot strand
+ * it. The constant is an arbitrary but fixed key for "the category tree".
+ */
+const CATEGORY_TREE_LOCK = 0x0ca7_e0_01;
+
+export async function lockCategoryTree(tx: Tx): Promise<void> {
+  await auditedExecutor(tx).$executeRaw`SELECT pg_advisory_xact_lock(${CATEGORY_TREE_LOCK})`;
+}
+
 export async function insertCategory(
   tx: Tx,
   row: { name: string; slug: string; parentId: string | null; sortKey: number },

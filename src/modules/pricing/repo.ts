@@ -99,6 +99,30 @@ export async function listListings(
   });
 }
 
+/**
+ * Read a listing for mutation, holding its row lock until the transaction ends.
+ *
+ * Reading the before-state *outside* the transaction meant two concurrent edits
+ * both saw the original price, and both wrote a `PriceChange` claiming to start
+ * from it — so a 100→200→300 sequence was recorded as 100→200 and 100→300, and
+ * the history no longer reconstructed the actual path. Raw SQL because Prisma
+ * has no `FOR UPDATE`. Returns `null` when the store has no listing yet, in
+ * which case there is nothing to lock and the upsert creates it.
+ */
+export async function lockListingForPair(
+  tx: Tx,
+  storeId: string,
+  productId: string,
+): Promise<StoreProductRecord | null> {
+  const rows = await auditedExecutor(tx).$queryRaw<StoreProductRecord[]>`
+    SELECT "id", "storeId", "productId", "isListed", "mrpPaise", "sellingPricePaise", "listedAt"
+    FROM "StoreProduct"
+    WHERE "storeId" = ${storeId} AND "productId" = ${productId}
+    FOR UPDATE
+  `;
+  return rows[0] ?? null;
+}
+
 export async function upsertListing(
   tx: Tx,
   row: {

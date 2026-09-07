@@ -1,7 +1,7 @@
 /**
  * Pure domain logic for `identity` — no I/O, no Prisma, no framework types.
  */
-import { ValidationError, type Principal, type UserRole } from '../../platform/index';
+import { AuthzError, ValidationError, type Principal, type UserRole } from '../../platform/index';
 
 /** Static description of what this module owns and may depend on (§4). */
 export interface ModuleDescriptor {
@@ -115,5 +115,46 @@ export function assignableRoles(principal: Principal): readonly UserRole[] {
 export function assertCanAssignRole(principal: Principal, role: UserRole): void {
   if (!assignableRoles(principal).includes(role)) {
     throw new ValidationError('You may not assign that role', { role });
+  }
+}
+
+/**
+ * Which roles a principal may *manage an existing user of*.
+ *
+ * Deliberately separate from {@link assignableRoles}, which answers a different
+ * question: what role the target may be given. Checking only the proposed role
+ * left a hole — a `STORE_MANAGER` could reset, demote or disable a **peer
+ * manager** in their own store, because the store matched and the proposed role
+ * (`STORE_STAFF`) was one they were allowed to assign. Two managers could
+ * therefore evict or take over one another.
+ *
+ * A manager runs their store's *staff*. Anyone else in the store — another
+ * manager — is above them, and a `SUPER_ADMIN` is not in a store at all.
+ */
+export function manageableRoles(principal: Principal): readonly UserRole[] {
+  if (principal.kind !== 'user') return [];
+  if (principal.role === 'SUPER_ADMIN') return USER_ROLES;
+  if (principal.role === 'STORE_MANAGER') return ['STORE_STAFF'];
+  return [];
+}
+
+/**
+ * Refuse to act on a target whose **current** role is out of the principal's
+ * management scope. Checked on reads and on every mutation, against the role the
+ * target has *now* — not the one the caller proposes.
+ */
+export function assertCanManageTarget(
+  principal: Principal,
+  target: { readonly id: string; readonly role: UserRole },
+): void {
+  // Managing your own account (changing your own password) is always allowed;
+  // the caller is not escalating anything by acting on themselves.
+  if (principal.kind === 'user' && principal.userId === target.id) return;
+
+  if (!manageableRoles(principal).includes(target.role)) {
+    throw new AuthzError('You do not have permission to manage that user', {
+      targetRole: target.role,
+      reason: 'target is outside your management scope',
+    });
   }
 }

@@ -18,8 +18,8 @@ import {
   assertRequiredName,
   assertStoreCode,
   descriptor,
+  pickEditableSettings,
   resolveServiceabilityFrom,
-  type EditableSettings,
   type ModuleDescriptor,
   type ServiceabilityInput,
   type ServiceabilityResult,
@@ -152,19 +152,24 @@ export async function getSettings(
 export async function updateSettings(
   principal: Principal,
   storeId: string,
-  input: EditableSettings,
+  input: Readonly<Record<string, unknown>>,
 ): Promise<repo.SettingsRecord> {
   assertAuthorized(principal, 'store-settings:update', { type: 'StoreSettings', storeId });
-  assertEditableSettings(input);
+
+  // Allowlist at *runtime*, not just in the type. `EditableSettings` deliberately
+  // omits `posMode`, but a TypeScript interface is not a boundary — forwarding
+  // every key of the input let a manager set `posMode: 'ADAPTER'` and walk past
+  // the super-admin grant on `updatePosMode` below.
+  const data = pickEditableSettings(input);
+  assertEditableSettings(data);
 
   const before = await repo.findSettings(storeId);
   if (before === null) throw new NotFoundError('Store settings not found', { storeId });
 
-  const data = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
   if (Object.keys(data).length === 0) return before;
 
   return withTransaction(async (tx) => {
-    const after = await repo.updateSettingsRow(tx, storeId, data);
+    const after = await repo.updateSettingsRow(tx, storeId, { ...data });
     await writeAuditLog(tx, {
       principal,
       action: 'update',

@@ -129,7 +129,7 @@ export async function findSettings(
 export async function updateSettingsRow(
   tx: Tx,
   storeId: string,
-  data: Record<string, unknown>,
+  data: Readonly<Record<string, unknown>>,
 ): Promise<SettingsRecord> {
   return auditedExecutor(tx).storeSettings.update({ where: { storeId }, data: data as never });
 }

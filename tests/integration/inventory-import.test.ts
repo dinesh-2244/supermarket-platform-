@@ -171,7 +171,10 @@ describe('import — a valid file applies atomically', () => {
     const rows = await prisma.stockLedger.findMany({ where: { storeId: storeA } });
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.reason === 'CSV_IMPORT')).toBe(true);
-    expect(rows.every((r) => r.refType === 'import' && r.refId === 'monday.csv')).toBe(true);
+    // R13: the ledger reference is the unique run id, not the reusable filename,
+    // so "which run moved this?" is answerable when a file is imported twice.
+    expect(rows.every((r) => r.refType === 'import' && r.refId === result.importId)).toBe(true);
+    expect(rows.every((r) => (r.note ?? '').includes('monday.csv'))).toBe(true);
 
     const byProduct = new Map(rows.map((r) => [r.productId, r]));
     expect(byProduct.get(productA)?.balanceAfter).toBe(80);
@@ -271,7 +274,8 @@ describe('import — one bad row rejects the whole file', () => {
       content: [header, `NOPE,1,set`].join('\n'),
     });
 
-    const run = await getImportRun(managerA, result.importId);
+    expect(result.importId).not.toBeNull();
+    const run = await getImportRun(managerA, result.importId!);
     expect(run).toMatchObject({ outcome: 'rejected', appliedCount: 0, errorCount: 1 });
     expect(errorReportCsv(result.errors)).toContain('No product with that SKU');
     expect(errorReportCsv(result.errors).split('\n')[0]).toBe('line,sku,error');
@@ -322,8 +326,10 @@ describe('import — dry run', () => {
     expect(await stock(productB)).toBe(50);
     expect(await ledgerCount()).toBe(0);
 
-    const history = await listImportHistory(managerA, storeA);
-    expect(history[0]).toMatchObject({ outcome: 'dry-run', appliedCount: 0 });
+    // R12: a dry run writes NOTHING — the UI says "Nothing was written", so the
+    // history must not gain a row either.
+    expect(plan.importId).toBeNull();
+    expect(await prisma.inventoryImport.count({ where: { storeId: storeA } })).toBe(0);
   });
 
   it('planStockImport alone touches nothing', async () => {
@@ -395,9 +401,21 @@ describe('import — audit', () => {
     });
 
     const entry = await prisma.auditLog.findFirstOrThrow({
-      where: { entityType: 'InventoryImport', entityId: result.importId },
+      where: { entityType: 'InventoryImport', entityId: result.importId! },
     });
     expect(entry.action).toBe('import');
     expect(entry.afterJson).toMatchObject({ filename: 'audited.csv', applied: 1 });
+    // R13: the batch entry now carries a real before-snapshot, not null.
+    expect(entry.beforeJson).not.toBeNull();
+
+    // …and each changed item has its own before/after stock entry, so this
+    // sensitive path shows the same detail a manual adjustment does.
+    const perItem = await prisma.auditLog.findMany({
+      where: { entityType: 'InventoryItem', entityId: `${storeA}:${productA}`, action: 'import' },
+      orderBy: { createdAt: 'desc' },
+      take: 1,
+    });
+    expect(perItem[0]?.beforeJson).toMatchObject({ websiteStock: 50 });
+    expect(perItem[0]?.afterJson).toMatchObject({ websiteStock: 70, importId: result.importId });
   });
 });

@@ -336,6 +336,18 @@ export async function listImportRuns(
   });
 }
 
+/** Stamp the final applied count once the batch is known. */
+export async function updateImportRunCounts(
+  tx: Tx,
+  id: string,
+  appliedCount: number,
+): Promise<ImportRunRecord> {
+  return auditedExecutor(tx).inventoryImport.update({
+    where: { id },
+    data: { appliedCount },
+  });
+}
+
 export async function findImportRun(id: string, db?: DbExecutor): Promise<ImportRunRecord | null> {
   return executor(db).inventoryImport.findUnique({ where: { id } });
 }

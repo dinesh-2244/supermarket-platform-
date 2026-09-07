@@ -1,0 +1,366 @@
+import { PrismaClient } from '@prisma/client';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { getPrisma, type Principal } from '@/modules/platform';
+import { createCategory, createProduct, updateCategory } from '@/modules/catalog';
+import { createUser } from '@/modules/identity';
+import { getListing, listPriceHistory, setPrice } from '@/modules/pricing';
+import { runStockImport } from '@/modules/inventory';
+import { adjustStock } from '@/modules/inventory';
+import { setPrice as setPriceAgain } from '@/modules/pricing';
+import { createStore, createStoreSettings } from '../factories/index';
+
+/**
+ * The corrective round's concurrency repros (R2, R4, R6).
+ *
+ * Each one uses a **real lock-wait barrier**, the way OSCAR reproduced them: a
+ * separate connection takes the row lock and holds it, the service call is
+ * started and blocks on that lock, and only then is the lock released. Sleeping
+ * and hoping would make these tests prove nothing on a fast machine.
+ */
+const prisma = getPrisma();
+const suffix = `${Date.now() % 1000000}`;
+
+let admin: Principal;
+let managerA: Principal;
+let storeA: string;
+let productA: string;
+let skuA: string;
+let categoryId: string;
+const userIds: string[] = [];
+
+/** Wait until `check()` is true, polling — for "has the writer blocked yet?". */
+async function until(check: () => Promise<boolean>, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('Timed out waiting for the barrier condition');
+}
+
+/** True once at least `n` backends are blocked waiting on a lock. */
+async function waitingBackends(n: number): Promise<boolean> {
+  const rows = await prisma.$queryRaw<{ count: bigint }[]>`
+    SELECT COUNT(*)::bigint AS count
+    FROM pg_stat_activity
+    WHERE wait_event_type = 'Lock' AND state = 'active'
+  `;
+  return Number(rows[0]?.count ?? 0n) >= n;
+}
+
+beforeAll(async () => {
+  const store = await createStore(prisma, { code: `CON-${suffix.slice(-5)}` });
+  storeA = store.id;
+  await createStoreSettings(prisma, storeA, { lowStockThreshold: 5 });
+
+  const bootstrap: Principal = {
+    kind: 'user',
+    userId: 'con-bootstrap',
+    role: 'SUPER_ADMIN',
+    storeId: null,
+  };
+  const password = 'ConcurrencyPass123';
+  const adminRow = await createUser(bootstrap, {
+    email: `con-admin-${suffix}@example.test`,
+    name: 'Concurrency Admin',
+    password,
+    role: 'SUPER_ADMIN',
+    storeId: null,
+  });
+  admin = { kind: 'user', userId: adminRow.id, role: 'SUPER_ADMIN', storeId: null };
+
+  const mgr = await createUser(admin, {
+    email: `con-mgr-${suffix}@example.test`,
+    name: 'Concurrency Manager',
+    password,
+    role: 'STORE_MANAGER',
+    storeId: storeA,
+  });
+  userIds.push(adminRow.id, mgr.id);
+  managerA = { kind: 'user', userId: mgr.id, role: 'STORE_MANAGER', storeId: storeA };
+
+  categoryId = (await createCategory(admin, { name: `Concurrency ${suffix}` })).id;
+  skuA = `CON-${suffix}`;
+  productA = (
+    await createProduct(admin, {
+      sku: skuA,
+      name: `Contended ${suffix}`,
+      packSize: '1 kg',
+      categoryId,
+    })
+  ).id;
+  await setPrice(admin, storeA, productA, { mrpPaise: 10_000, sellingPricePaise: 100 });
+});
+
+afterAll(async () => {
+  await prisma.inventoryImport.deleteMany({ where: { storeId: storeA } });
+  await prisma.stockLedger.deleteMany({ where: { storeId: storeA } });
+  await prisma.inventoryItem.deleteMany({ where: { storeId: storeA } });
+  await prisma.auditLog.deleteMany({ where: { actorId: { in: [...userIds, 'con-bootstrap'] } } });
+  await prisma.priceChange.deleteMany({ where: { storeProduct: { storeId: storeA } } });
+  await prisma.storeProduct.deleteMany({ where: { storeId: storeA } });
+  await prisma.product.deleteMany({ where: { id: productA } });
+  await prisma.category.deleteMany({ where: { name: { contains: suffix } } });
+  await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
+  await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+  await prisma.storeSettings.deleteMany({ where: { storeId: storeA } });
+  await prisma.store.deleteMany({ where: { id: storeA } });
+  await prisma.$disconnect();
+});
+
+beforeEach(async () => {
+  await prisma.inventoryItem.upsert({
+    where: { storeId_productId: { storeId: storeA, productId: productA } },
+    update: { websiteStock: 100 },
+    create: { storeId: storeA, productId: productA, websiteStock: 100 },
+  });
+  await prisma.stockLedger.deleteMany({ where: { storeId: storeA } });
+  await prisma.inventoryImport.deleteMany({ where: { storeId: storeA } });
+});
+
+describe('R2 — a concurrent import must not write a stale absolute stock', () => {
+  /**
+   * OSCAR's exact scenario: stock 100, an import setting it to 110 blocks on the
+   * row lock, and a +10 adjust commits while it waits. The old code added its
+   * *precomputed* delta of +10 to the new balance, landing on 120 while
+   * reporting 110.
+   */
+  it('recomputes a set-mode diff from the locked balance, not the planned one', async () => {
+    const holder = new PrismaClient();
+    try {
+      let importResult: Awaited<ReturnType<typeof runStockImport>> | undefined;
+      let importing: Promise<void> | undefined;
+
+      await holder.$transaction(async (tx) => {
+        // Hold the row lock so the import blocks after planning against 100.
+        await tx.$queryRaw`
+          SELECT "id" FROM "InventoryItem"
+          WHERE "storeId" = ${storeA} AND "productId" = ${productA}
+          FOR UPDATE
+        `;
+
+        importing = runStockImport(managerA, {
+          storeId: storeA,
+          filename: 'race.csv',
+          content: `sku,quantity,mode\n${skuA},125,set\n`,
+        }).then((result) => {
+          importResult = result;
+        });
+
+        await until(() => waitingBackends(1));
+
+        // Move the balance underneath it: 100 -> 110.
+        await tx.$executeRaw`
+          UPDATE "InventoryItem" SET "websiteStock" = "websiteStock" + 10
+          WHERE "storeId" = ${storeA} AND "productId" = ${productA}
+        `;
+      });
+
+      await importing;
+
+      const actual = await prisma.inventoryItem.findUniqueOrThrow({
+        where: { storeId_productId: { storeId: storeA, productId: productA } },
+      });
+
+      // `set 125` means 125. The old code added its *planned* delta (125-100=25)
+      // to the balance it eventually saw (110) and landed on 135 while reporting
+      // 125 — stock and report disagreeing is the whole defect.
+      expect(actual.websiteStock).toBe(125);
+      expect(importResult?.applied).toBe(1);
+      expect(importResult?.changes[0]).toMatchObject({
+        currentStock: 110,
+        newStock: 125,
+        delta: 15,
+      });
+
+      const ledger = await prisma.stockLedger.findFirstOrThrow({
+        where: { storeId: storeA, productId: productA },
+        orderBy: { createdAt: 'desc' },
+      });
+      // The ledger describes the row that is actually in the table.
+      expect(ledger.delta).toBe(15);
+      expect(ledger.balanceAfter).toBe(125);
+      expect(ledger.balanceAfter).toBe(actual.websiteStock);
+    } finally {
+      await holder.$disconnect();
+    }
+  }, 60_000);
+
+  it('reports the movements that actually committed', async () => {
+    const result = await runStockImport(managerA, {
+      storeId: storeA,
+      filename: 'report.csv',
+      content: `sku,quantity,mode\n${skuA},130,set\n`,
+    });
+
+    expect(result.applied).toBe(1);
+    expect(result.changes[0]).toMatchObject({ currentStock: 100, newStock: 130, delta: 30 });
+
+    const actual = await prisma.inventoryItem.findUniqueOrThrow({
+      where: { storeId_productId: { storeId: storeA, productId: productA } },
+    });
+    expect(actual.websiteStock).toBe(result.changes[0]?.newStock);
+  });
+
+  it('a set import racing an adjust never leaves stock disagreeing with the ledger', async () => {
+    await Promise.all([
+      runStockImport(managerA, {
+        storeId: storeA,
+        filename: 'race2.csv',
+        content: `sku,quantity,mode\n${skuA},80,set\n`,
+      }),
+      adjustStock(managerA, { storeId: storeA, productId: productA, delta: -5 }),
+    ]);
+
+    const actual = await prisma.inventoryItem.findUniqueOrThrow({
+      where: { storeId_productId: { storeId: storeA, productId: productA } },
+    });
+    const rows = await prisma.stockLedger.findMany({
+      where: { storeId: storeA, productId: productA },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // Replay from the opening balance: the ledger must land on the real value.
+    let running = 100;
+    for (const row of rows) {
+      running += row.delta;
+      expect(row.balanceAfter).toBe(running);
+    }
+    expect(actual.websiteStock).toBe(running);
+  }, 60_000);
+
+  it('two set imports of the same row serialise', async () => {
+    await Promise.all([
+      runStockImport(managerA, {
+        storeId: storeA,
+        filename: 'a.csv',
+        content: `sku,quantity,mode\n${skuA},70,set\n`,
+      }),
+      runStockImport(managerA, {
+        storeId: storeA,
+        filename: 'b.csv',
+        content: `sku,quantity,mode\n${skuA},90,set\n`,
+      }),
+    ]);
+
+    const actual = await prisma.inventoryItem.findUniqueOrThrow({
+      where: { storeId_productId: { storeId: storeA, productId: productA } },
+    });
+    const last = await prisma.stockLedger.findFirstOrThrow({
+      where: { storeId: storeA, productId: productA },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Whichever committed second wrote its own absolute value.
+    expect([70, 90]).toContain(actual.websiteStock);
+    expect(last.balanceAfter).toBe(actual.websiteStock);
+  }, 60_000);
+});
+
+describe('R4 — concurrent price edits must record the real previous price', () => {
+  /**
+   * Two writers blocked on the same `StoreProduct` row lock. The old code read
+   * the before-state outside the transaction, so both recorded "old price 100"
+   * and the history no longer reconstructed 100 → 200 → 300.
+   */
+  it('reads the before-state under the lock, so the history chains', async () => {
+    await setPrice(admin, storeA, productA, { mrpPaise: 10_000, sellingPricePaise: 100 });
+    const listing = await getListing(admin, storeA, productA);
+    await prisma.priceChange.deleteMany({ where: { storeProductId: listing!.id } });
+
+    const holder = new PrismaClient();
+    try {
+      const writers: Promise<unknown>[] = [];
+
+      await holder.$transaction(async (tx) => {
+        await tx.$queryRaw`
+          SELECT "id" FROM "StoreProduct" WHERE "id" = ${listing!.id} FOR UPDATE
+        `;
+
+        writers.push(
+          setPrice(managerA, storeA, productA, { mrpPaise: 10_000, sellingPricePaise: 200 }),
+        );
+        await until(() => waitingBackends(1));
+        writers.push(
+          setPriceAgain(managerA, storeA, productA, { mrpPaise: 10_000, sellingPricePaise: 300 }),
+        );
+        await until(() => waitingBackends(2));
+      });
+
+      await Promise.all(writers);
+
+      const history = await listPriceHistory(admin, listing!.id, 20);
+      const chain = [...history].reverse();
+
+      // Each entry's old price is the previous entry's new price — a real chain,
+      // not two edits both claiming to have started from 100.
+      for (const [index, change] of chain.entries()) {
+        if (index === 0) continue;
+        expect(change.oldSellingPricePaise).toBe(chain[index - 1]!.newSellingPricePaise);
+      }
+
+      const current = await getListing(admin, storeA, productA);
+      expect(chain.at(-1)?.newSellingPricePaise).toBe(current?.sellingPricePaise);
+    } finally {
+      await holder.$disconnect();
+    }
+  }, 60_000);
+});
+
+describe('R6 — concurrent reparenting must not create a cycle', () => {
+  it('refuses the second of two crossing moves', async () => {
+    const a = await createCategory(admin, { name: `Cyc A ${suffix}` });
+    const b = await createCategory(admin, { name: `Cyc B ${suffix}` });
+
+    // Both validate against an acyclic tree; only one may commit.
+    const results = await Promise.allSettled([
+      updateCategory(admin, a.id, { parentId: b.id }),
+      updateCategory(admin, b.id, { parentId: a.id }),
+    ]);
+
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(rejected.length).toBeGreaterThanOrEqual(1);
+
+    // And the tree is genuinely acyclic afterwards: walking up terminates.
+    const rows = await prisma.category.findMany({
+      where: { name: { contains: `Cyc ` } },
+      select: { id: true, parentId: true },
+    });
+    const parentOf = new Map(rows.map((row) => [row.id, row.parentId]));
+    for (const start of [a.id, b.id]) {
+      const seen = new Set<string>();
+      let cursor: string | null | undefined = start;
+      while (cursor != null) {
+        expect(seen.has(cursor)).toBe(false);
+        seen.add(cursor);
+        cursor = parentOf.get(cursor);
+      }
+    }
+  }, 60_000);
+
+  it('refuses a longer concurrent cycle', async () => {
+    const a = await createCategory(admin, { name: `Chain A ${suffix}` });
+    const b = await createCategory(admin, { name: `Chain B ${suffix}`, parentId: a.id });
+    const c = await createCategory(admin, { name: `Chain C ${suffix}`, parentId: b.id });
+
+    // A under C would close A→B→C→A.
+    const results = await Promise.allSettled([
+      updateCategory(admin, a.id, { parentId: c.id }),
+      updateCategory(admin, c.id, { parentId: a.id }),
+    ]);
+    expect(results.some((r) => r.status === 'rejected')).toBe(true);
+
+    const rows = await prisma.category.findMany({
+      where: { name: { contains: `Chain ` } },
+      select: { id: true, parentId: true },
+    });
+    const parentOf = new Map(rows.map((row) => [row.id, row.parentId]));
+    const seen = new Set<string>();
+    let cursor: string | null | undefined = a.id;
+    while (cursor != null) {
+      expect(seen.has(cursor)).toBe(false);
+      seen.add(cursor);
+      cursor = parentOf.get(cursor);
+    }
+  }, 60_000);
+});

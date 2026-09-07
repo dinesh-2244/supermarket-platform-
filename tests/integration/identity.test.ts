@@ -363,6 +363,114 @@ describe('identity — cross-store denial (server-side, not UI-hidden)', () => {
   });
 });
 
+/**
+ * R1 — a STORE_MANAGER runs their store's *staff*, not their peers.
+ *
+ * The Phase 2 checks authorized the target's store but only ever looked at the
+ * *proposed* role, so a manager could reset, demote or disable another manager
+ * in the same store: the store matched, and STORE_STAFF was a role they were
+ * allowed to assign. Two managers could evict or take over one another.
+ */
+describe('identity — a manager cannot manage a peer manager (R1)', () => {
+  let peerId: string;
+  let peerEmail: string;
+  let managerAOwnStaffId: string;
+
+  beforeAll(async () => {
+    const peer = await createUser(admin, {
+      email: unique('peer-mgr'),
+      name: 'Peer Manager',
+      password: PASSWORD,
+      role: 'STORE_MANAGER',
+      storeId: storeA,
+    });
+    peerId = peer.id;
+    peerEmail = peer.email;
+    createdUserIds.push(peer.id);
+
+    const staff = await createUser(managerA, {
+      email: unique('a-staff'),
+      name: 'A Staff',
+      password: PASSWORD,
+      role: 'STORE_STAFF',
+      storeId: storeA,
+    });
+    managerAOwnStaffId = staff.id;
+    createdUserIds.push(staff.id);
+  });
+
+  it('refuses to reset a peer manager’s password — and the old one still works', async () => {
+    await expect(resetPassword(managerA, peerId, OTHER_PASSWORD)).rejects.toThrow(/permission/i);
+
+    // The exact check OSCAR ran: the peer's original credentials are intact.
+    expect(await verifyCredentials(peerEmail, OTHER_PASSWORD)).toBeNull();
+    expect(await verifyCredentials(peerEmail, PASSWORD)).not.toBeNull();
+  });
+
+  it('refuses to demote a peer manager', async () => {
+    await expect(updateUser(managerA, peerId, { role: 'STORE_STAFF' })).rejects.toThrow(
+      /permission/i,
+    );
+    expect((await getUser(admin, peerId)).role).toBe('STORE_MANAGER');
+  });
+
+  it('refuses to disable a peer manager', async () => {
+    await expect(setUserActive(managerA, peerId, false)).rejects.toThrow(/permission/i);
+    expect((await getUser(admin, peerId)).isActive).toBe(true);
+  });
+
+  it('refuses to even read a peer manager', async () => {
+    await expect(getUser(managerA, peerId)).rejects.toThrow(/permission/i);
+  });
+
+  it('does not show a peer manager in the list that offers those actions', async () => {
+    const visible = await listUsers(managerA);
+    expect(visible.map((user) => user.id)).not.toContain(peerId);
+    // …but their own staff are there, so the list is not simply empty.
+    expect(visible.map((user) => user.id)).toContain(managerAOwnStaffId);
+    expect(visible.every((user) => user.role === 'STORE_STAFF')).toBe(true);
+  });
+
+  it('still lets a manager manage their own staff', async () => {
+    await expect(
+      updateUser(managerA, managerAOwnStaffId, { name: 'A Staff Renamed' }),
+    ).resolves.toMatchObject({ name: 'A Staff Renamed' });
+    await expect(
+      resetPassword(managerA, managerAOwnStaffId, OTHER_PASSWORD),
+    ).resolves.toBeUndefined();
+    await setUserActive(managerA, managerAOwnStaffId, false);
+    await setUserActive(managerA, managerAOwnStaffId, true);
+  });
+
+  it('refuses another store’s staff, so the store check still applies too', async () => {
+    const otherStaff = await createUser(admin, {
+      email: unique('b-staff-r1'),
+      name: 'B Staff',
+      password: PASSWORD,
+      role: 'STORE_STAFF',
+      storeId: storeB,
+    });
+    createdUserIds.push(otherStaff.id);
+
+    await expect(resetPassword(managerA, otherStaff.id, OTHER_PASSWORD)).rejects.toThrow(
+      /permission/i,
+    );
+    await expect(setUserActive(managerA, otherStaff.id, false)).rejects.toThrow(/permission/i);
+  });
+
+  it('refuses a SUPER_ADMIN target outright', async () => {
+    const adminId = admin.kind === 'user' ? admin.userId : '';
+    await expect(resetPassword(managerA, adminId, OTHER_PASSWORD)).rejects.toThrow(/permission/i);
+    await expect(setUserActive(managerA, adminId, false)).rejects.toThrow(/permission/i);
+  });
+
+  it('still lets a super-admin manage managers', async () => {
+    await expect(updateUser(admin, peerId, { name: 'Peer Renamed' })).resolves.toMatchObject({
+      name: 'Peer Renamed',
+    });
+  });
+});
+
 describe('identity — audit and safety rails', () => {
   it('writes a before/after AuditLog row for every user mutation', async () => {
     const row = await createUser(admin, {
