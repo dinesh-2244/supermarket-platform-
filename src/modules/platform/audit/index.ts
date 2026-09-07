@@ -35,6 +35,16 @@ export interface AuditEntry {
   readonly action: AuditAction;
   readonly entityType: string;
   readonly entityId: string;
+  /**
+   * The store this change belonged to **at the time it happened**, or `null` for
+   * a genuinely global one (the catalogue master, a super-admin account).
+   *
+   * Stamped here and never updated. Deriving it later from the actor's *current*
+   * store meant transferring a manager between stores retro-assigned their whole
+   * history to the new store, and handed that store's colleagues the old store's
+   * audit rows.
+   */
+  readonly storeId?: string | null;
   /** State before the change — omit on create. */
   readonly before?: unknown;
   /** State after the change — omit on a pure delete. */
@@ -77,6 +87,7 @@ export async function writeAuditLog(tx: Tx, entry: AuditEntry): Promise<void> {
       action: entry.action,
       entityType: entry.entityType,
       entityId: entry.entityId,
+      storeId: entry.storeId ?? null,
       beforeJson: snapshot(entry.before) as never,
       afterJson: snapshot(entry.after) as never,
       ip: entry.ip ?? null,

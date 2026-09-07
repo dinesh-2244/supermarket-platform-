@@ -288,6 +288,7 @@ export async function runStockImport(
         action: 'import',
         entityType: 'InventoryItem',
         entityId: `${plan.storeId}:${change.productId}`,
+        storeId: plan.storeId,
         before: { websiteStock: movement.balanceBefore },
         after: {
           websiteStock: movement.balanceAfter,
@@ -306,6 +307,7 @@ export async function runStockImport(
       action: 'import',
       entityType: 'InventoryImport',
       entityId: run.id,
+      storeId: plan.storeId,
       before: {
         stock: Object.fromEntries(candidates.map((c) => [c.sku, locked.get(c.productId) ?? 0])),
       },

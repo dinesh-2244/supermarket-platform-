@@ -188,6 +188,7 @@ export async function adjustStock(
       action: 'adjust',
       entityType: 'InventoryItem',
       entityId: `${input.storeId}:${input.productId}`,
+      storeId: input.storeId,
       before: { websiteStock: movement.balanceBefore },
       after: { websiteStock: movement.balanceAfter, delta: movement.delta },
     });
@@ -248,6 +249,7 @@ export async function reconcileStock(
       action: 'reconcile',
       entityType: 'InventoryItem',
       entityId: `${input.storeId}:${input.productId}`,
+      storeId: input.storeId,
       before: { websiteStock: movement.balanceBefore },
       after: { websiteStock: movement.balanceAfter, counted: input.counted, delta },
     });

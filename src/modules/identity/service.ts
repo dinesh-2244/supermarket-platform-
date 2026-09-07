@@ -230,6 +230,7 @@ export async function createUser(
       action: 'create',
       entityType: 'User',
       entityId: user.id,
+      storeId: user.storeId,
       after: user,
     });
     return user;
@@ -290,6 +291,7 @@ export async function updateUser(
       action: 'update',
       entityType: 'User',
       entityId: userId,
+      storeId: before.storeId,
       before,
       after,
     });
@@ -334,6 +336,7 @@ export async function setUserActive(
         action: isActive ? 'enable' : 'disable',
         entityType: 'User',
         entityId: userId,
+        storeId: before.storeId,
         before,
         after: updated,
       });
@@ -365,6 +368,7 @@ export async function resetPassword(
       action: 'reset-password',
       entityType: 'User',
       entityId: userId,
+      storeId: before.storeId,
       before: { passwordChangedAt: before.updatedAt },
       after: { passwordChangedAt: new Date() },
     });
@@ -400,6 +404,7 @@ export async function changeOwnPassword(
       action: 'reset-password',
       entityType: 'User',
       entityId: user.id,
+      storeId: user.storeId,
       before: { passwordChangedAt: user.updatedAt },
       after: { passwordChangedAt: new Date(), self: true },
     });

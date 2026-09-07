@@ -75,6 +75,8 @@ export async function createCategory(
       action: 'create',
       entityType: 'Category',
       entityId: category.id,
+      // The catalogue master is global (ADR-0003), so this belongs to no store.
+      storeId: null,
       after: category,
     });
     return category;
@@ -127,6 +129,8 @@ export async function updateCategory(
       action: 'update',
       entityType: 'Category',
       entityId: categoryId,
+      // The catalogue master is global (ADR-0003), so this belongs to no store.
+      storeId: null,
       before,
       after,
     });
@@ -225,6 +229,8 @@ export async function createProduct(
       action: 'create',
       entityType: 'Product',
       entityId: product.id,
+      // The catalogue master is global (ADR-0003), so this belongs to no store.
+      storeId: null,
       after: product,
     });
     return product;
@@ -279,6 +285,8 @@ export async function updateProduct(
       action: 'update',
       entityType: 'Product',
       entityId: productId,
+      // The catalogue master is global (ADR-0003), so this belongs to no store.
+      storeId: null,
       before,
       after: updated,
     });
@@ -340,6 +348,8 @@ export async function addProductImage(
       action: 'create',
       entityType: 'ProductImage',
       entityId: image.id,
+      // The catalogue master is global (ADR-0003), so this belongs to no store.
+      storeId: null,
       after: image,
     });
     return image;
@@ -381,6 +391,8 @@ export async function reorderProductImages(
       action: 'update',
       entityType: 'ProductImage',
       entityId: productId,
+      // The catalogue master is global (ADR-0003), so this belongs to no store.
+      storeId: null,
       before: existing.map((image) => image.id),
       after: orderedImageIds,
     });
@@ -400,6 +412,8 @@ export async function removeProductImage(principal: Principal, imageId: string):
       action: 'update',
       entityType: 'ProductImage',
       entityId: imageId,
+      // The catalogue master is global (ADR-0003), so this belongs to no store.
+      storeId: null,
       before: image,
     });
   });

@@ -134,11 +134,13 @@ export function resolveStoreId(
 /**
  * The generic sensitive-mutation trail (§21), for the audit viewer.
  *
- * `AuditLog` has no `storeId` column — the trail is deliberately cross-cutting,
- * covering user changes that belong to no store. So a scoped principal is
- * narrowed by **actor** instead: a store manager sees what they and their own
- * store's staff did, and nothing from another store. A super-admin sees
- * everything. Read-only; Phase 2 has no path that updates or deletes an entry.
+ * Scoped by the **immutable `storeId` stamped on each entry**, filtered in SQL
+ * before the limit. The previous version narrowed by "users currently assigned
+ * to my store" and filtered after the query, which was wrong twice over: moving
+ * a manager between stores retro-assigned their entire history to the new store,
+ * and a busy second store could push every visible row out of the fetched page.
+ *
+ * Read-only; Phase 2 has no path that updates or deletes an entry.
  */
 export async function auditEntries(
   principal: Principal,
@@ -149,16 +151,5 @@ export async function auditEntries(
     storeId: principal.kind === 'user' ? principal.storeId : null,
   });
 
-  const stores = allowedStoreIds(principal);
-  if (stores === null) return repo.listAuditEntries(query);
-
-  const visibleActors = new Set(await repo.userIdsForStores(stores));
-  if (principal.kind === 'user') visibleActors.add(principal.userId);
-
-  // Filter after the query rather than in it: the requested `actorId` (if any)
-  // still has to be one this principal may see.
-  const entries = await repo.listAuditEntries({ ...query, limit: (query.limit ?? 100) * 4 });
-  return entries
-    .filter((entry) => entry.actorId !== null && visibleActors.has(entry.actorId))
-    .slice(0, query.limit ?? 100);
+  return repo.listAuditEntries({ ...query, storeIds: allowedStoreIds(principal) });
 }

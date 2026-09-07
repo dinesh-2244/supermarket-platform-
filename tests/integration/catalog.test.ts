@@ -247,6 +247,23 @@ describe('catalog — images', () => {
     expect((await listProductImages(admin, product.id)).map((i) => i.id)).toEqual([second.id]);
   });
 
+  // N1: [A, A] is the right *length* and every entry is known, but B never gets
+  // a sort key and both images end up at position 1.
+  it('refuses a reorder that repeats an image', async () => {
+    const product = await makeProduct(`Duplicated ${suffix}`);
+    const a = await addProductImage(admin, product.id, { url: 'https://cdn.example/d1.jpg' });
+    const b = await addProductImage(admin, product.id, { url: 'https://cdn.example/d2.jpg' });
+
+    await expect(reorderProductImages(admin, product.id, [a.id, a.id])).rejects.toThrow(
+      /once each/i,
+    );
+
+    // Untouched: still in their original order with distinct sort keys.
+    const after = await listProductImages(admin, product.id);
+    expect(after.map((image) => image.id)).toEqual([a.id, b.id]);
+    expect(new Set(after.map((image) => image.sortKey)).size).toBe(2);
+  });
+
   it('refuses a partial reorder rather than half-applying one', async () => {
     const product = await makeProduct(`Gallery ${suffix}`);
     const a = await addProductImage(admin, product.id, { url: 'https://cdn.example/a.jpg' });

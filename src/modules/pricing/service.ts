@@ -123,6 +123,7 @@ export async function setPrice(
         action: 'set-price',
         entityType: 'StoreProduct',
         entityId: listing.id,
+        storeId,
         before,
         after: listing,
       });
@@ -175,6 +176,7 @@ export async function setListed(
       action: isListed ? 'list' : 'unlist',
       entityType: 'StoreProduct',
       entityId: before.id,
+      storeId,
       before,
       after,
     });

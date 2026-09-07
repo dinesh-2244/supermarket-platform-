@@ -1,6 +1,10 @@
 name: E2E
 
 on:
+  # Also on pull requests: the E2E job previously ran only after a merge, so a
+  # release candidate could never be shown green on Playwright *before* it went
+  # in — a reviewer had to take the browser coverage on trust.
+  pull_request:
   push:
     branches: [main]
   workflow_dispatch:

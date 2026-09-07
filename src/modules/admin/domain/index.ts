@@ -85,3 +85,35 @@ export function navigationFor(
 
   return [...managers, { href: '/admin/categories', label: 'Categories' }];
 }
+
+/**
+ * Where to send someone after signing in.
+ *
+ * Only a same-origin `/admin` path is accepted. `?next=https://evil.example/…`
+ * was followed verbatim, which turns the real sign-in page into a convincing
+ * launchpad for phishing — the victim genuinely authenticated on the real site
+ * first, then landed somewhere else entirely. Absolute URLs, protocol-relative
+ * `//host`, backslash tricks and anything that does not normalise to a path
+ * under `/admin` all fall back to `/admin`.
+ *
+ * Parsing against a placeholder origin rather than pattern-matching the string
+ * is what makes the encoded and traversal cases fall out for free.
+ */
+export function safeNextPath(next: string): string {
+  const fallback = '/admin';
+  if (next === '' || !next.startsWith('/')) return fallback;
+  // `//evil.example` and `/\evil.example` are protocol-relative, not paths.
+  if (next.startsWith('//') || next.startsWith('/\\')) return fallback;
+
+  let url: URL;
+  try {
+    url = new URL(next, 'http://placeholder.invalid');
+  } catch {
+    return fallback;
+  }
+  if (url.origin !== 'http://placeholder.invalid') return fallback;
+
+  const path = url.pathname;
+  if (path !== '/admin' && !path.startsWith('/admin/')) return fallback;
+  return `${path}${url.search}`;
+}

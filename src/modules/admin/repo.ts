@@ -17,6 +17,7 @@ export function executor(db?: DbExecutor): DbExecutor {
 
 export interface AuditEntryRecord {
   readonly id: string;
+  readonly storeId: string | null;
   readonly actorType: 'USER' | 'CUSTOMER' | 'SYSTEM';
   readonly actorId: string | null;
   readonly action: string;
@@ -33,17 +34,37 @@ export interface AuditQuery {
   readonly from?: Date;
   readonly to?: Date;
   readonly limit?: number;
+  /**
+   * `null` means every store (a super-admin). An array restricts to those
+   * stores' entries — applied **in SQL, before the limit**.
+   */
+  readonly storeIds?: readonly string[] | null;
 }
 
-/** Newest first. Read-only — nothing in Phase 2 updates or deletes an entry. */
+/**
+ * Newest first. Read-only — nothing in Phase 2 updates or deletes an entry.
+ *
+ * The store restriction is part of the query rather than a filter applied to the
+ * results, for two reasons. It has to use the **immutable** `storeId` stamped on
+ * each row, not the actor's current assignment — otherwise transferring a
+ * manager between stores hands their new colleagues the old store's history. And
+ * filtering after a `LIMIT` silently drops legitimate rows whenever the newest N
+ * entries globally happen to belong to another store, which is exactly what a
+ * busy second store causes.
+ */
 export async function listAuditEntries(
   query: AuditQuery,
   db?: DbExecutor,
 ): Promise<readonly AuditEntryRecord[]> {
+  const stores = query.storeIds;
   return executor(db).auditLog.findMany({
     where: {
       ...(query.entityType !== undefined ? { entityType: query.entityType } : {}),
       ...(query.actorId !== undefined ? { actorId: query.actorId } : {}),
+      // A scoped principal sees their own stores' entries. Global rows
+      // (storeId null — the catalogue master) stay visible to super-admins only:
+      // they are not "no store", they are "every store".
+      ...(stores == null ? {} : { storeId: { in: [...stores] } }),
       ...(query.from !== undefined || query.to !== undefined
         ? {
             createdAt: {
@@ -56,16 +77,4 @@ export async function listAuditEntries(
     orderBy: { createdAt: 'desc' },
     take: query.limit ?? 100,
   });
-}
-
-/** The actor ids a scoped principal is allowed to see entries for. */
-export async function userIdsForStores(
-  storeIds: readonly string[],
-  db?: DbExecutor,
-): Promise<readonly string[]> {
-  const rows = await executor(db).user.findMany({
-    where: { storeId: { in: [...storeIds] } },
-    select: { id: true },
-  });
-  return rows.map((row) => row.id);
 }

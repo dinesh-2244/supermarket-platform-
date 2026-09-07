@@ -476,6 +476,12 @@ model AuditLog {
   action     String
   entityType String
   entityId   String
+  /// The store this change *belonged to*, stamped when the entry is written and
+  /// never updated. Null for genuinely global changes (the catalogue master, a
+  /// SUPER_ADMIN account). Historical tenancy must not be inferred from the
+  /// actor's current store assignment: transferring a manager between stores
+  /// would otherwise hand their new colleagues the old store's history.
+  storeId    String?
   beforeJson Json?
   afterJson  Json?
   ip         String?
@@ -483,6 +489,7 @@ model AuditLog {
 
   @@index([entityType, entityId, createdAt])
   @@index([actorId, createdAt])
+  @@index([storeId, createdAt])
 }
 
 // ---------------------------------------------------------------------------

@@ -77,6 +77,61 @@ describe('inventory/csv — per-row errors carry their line number', () => {
   });
 });
 
+/**
+ * R7 — a quoting mistake in a spreadsheet export must stop the import, not be
+ * guessed at. `,"150` previously parsed as the number 150 with zero errors and
+ * was applied to stock.
+ */
+describe('inventory/csv — malformed quoting is refused (R7)', () => {
+  it('rejects an unterminated quote instead of reading the rest as a value', () => {
+    const result = parseStockCsv(`${HEADER}\nABC-1,"150\n`, 'set');
+
+    expect(result.rows).toHaveLength(0);
+    expect(result.errors[0]?.line).toBe(2);
+    expect(result.errors[0]?.message).toMatch(/unterminated quote/i);
+    expect(result.errors[0]?.message).toMatch(/column \d+/);
+  });
+
+  it('rejects a quote that opens partway through a field', () => {
+    const result = parseStockCsv(`${HEADER}\nABC-1,15"0,set\n`, 'set');
+    expect(result.rows).toHaveLength(0);
+    expect(result.errors[0]?.message).toMatch(/quote may only start a field/i);
+  });
+
+  it('rejects text after a closing quote — "12"3 is not 123', () => {
+    const result = parseStockCsv(`${HEADER}\nABC-1,"12"3,set\n`, 'set');
+    expect(result.rows).toHaveLength(0);
+    expect(result.errors[0]?.message).toMatch(/after a closing quote/i);
+  });
+
+  it('still accepts a properly escaped quote inside a quoted field', () => {
+    const result = parseStockCsv('sku,quantity\n"AB""C",7\n', 'set');
+    expect(result.errors).toEqual([]);
+    expect(result.rows[0]).toMatchObject({ sku: 'AB"C', quantity: 7 });
+  });
+
+  it('rejects a malformed header outright rather than per-row', () => {
+    expect(() => parseStockCsv('sku,"quantity\nABC-1,1\n', 'set')).toThrow(
+      /header row is malformed/i,
+    );
+  });
+
+  // One delimiter per file: treating comma, semicolon and tab as separators
+  // everywhere meant a comma inside a semicolon-separated file split a field.
+  it('picks one delimiter from the header and uses it throughout', () => {
+    const result = parseStockCsv('sku;quantity\nAB,C-1;7\n', 'set');
+    expect(result.errors).toEqual([]);
+    expect(result.rows[0]).toMatchObject({ sku: 'AB,C-1', quantity: 7 });
+  });
+
+  it('keeps a bad row from stopping the good ones being reported', () => {
+    const result = parseStockCsv(`${HEADER}\nABC-1,5,set\nABC-2,"9\nABC-3,7,set\n`, 'set');
+    expect(result.rows.map((r) => r.sku)).toEqual(['ABC-1', 'ABC-3']);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]?.line).toBe(3);
+  });
+});
+
 describe('inventory/csv — whole-file rejections', () => {
   it('refuses a file with no usable header', () => {
     expect(() => parseStockCsv('name,price\nfoo,1\n', 'set')).toThrow(/header/i);

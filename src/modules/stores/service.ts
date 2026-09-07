@@ -86,6 +86,7 @@ export async function createStore(
       action: 'create',
       entityType: 'Store',
       entityId: store.id,
+      storeId: store.id,
       after: store,
     });
     return store;
@@ -120,6 +121,7 @@ export async function updateStore(
       action: 'update',
       entityType: 'Store',
       entityId: storeId,
+      storeId,
       before,
       after,
     });
@@ -175,6 +177,7 @@ export async function updateSettings(
       action: 'update',
       entityType: 'StoreSettings',
       entityId: after.id,
+      storeId,
       before,
       after,
     });
@@ -202,6 +205,7 @@ export async function updatePosMode(
       action: 'update',
       entityType: 'StoreSettings',
       entityId: after.id,
+      storeId,
       before: { posMode: before.posMode },
       after: { posMode: after.posMode },
     });
@@ -253,6 +257,7 @@ export async function createZone(
       action: 'create',
       entityType: 'DeliveryZone',
       entityId: zone.id,
+      storeId: input.storeId,
       after: zone,
     });
     return zone;
@@ -285,6 +290,7 @@ export async function updateZone(
       action: 'update',
       entityType: 'DeliveryZone',
       entityId: zoneId,
+      storeId: before.storeId,
       before,
       after,
     });
@@ -339,6 +345,7 @@ export async function createArea(
       action: 'create',
       entityType: 'DeliveryArea',
       entityId: area.id,
+      storeId: zone.storeId,
       after: area,
     });
     return area;
@@ -375,6 +382,7 @@ export async function updateArea(
       action: 'update',
       entityType: 'DeliveryArea',
       entityId: areaId,
+      storeId: found.storeId,
       before: found.area,
       after,
     });

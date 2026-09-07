@@ -23,6 +23,7 @@ export {
   formatDelta,
   formatPaise,
   navigationFor,
+  safeNextPath,
   type ModuleDescriptor,
   type NavItem,
 } from './domain/index';

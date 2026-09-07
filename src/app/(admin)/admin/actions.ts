@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { signIn, signOut, requirePrincipal } from '@/auth';
-import { isAppError } from '@/modules/platform';
+import { isAppError, ValidationError } from '@/modules/platform';
+import { safeNextPath } from '@/modules/admin';
 import {
   changeOwnPassword,
   createUser,
@@ -51,8 +52,28 @@ function optionalText(form: FormData, key: string): string | undefined {
   return value === '' ? undefined : value;
 }
 
-function int(form: FormData, key: string): number {
-  return Number.parseInt(text(form, key), 10);
+/**
+ * Read a whole number, requiring the **entire** field to be one.
+ *
+ * `Number.parseInt` reads a leading prefix and stops: `'1.9'` became 1 and
+ * `'10junk'` became 10, and the resulting integer then sailed through every
+ * downstream domain check because by then it *was* a valid integer. Silently
+ * turning a mistyped 1.9 into a stock movement of 1 is worse than refusing it.
+ */
+function int(form: FormData, key: string, label = key): number {
+  const raw = text(form, key);
+  if (raw === '') throw new ValidationError(`${label} is required`, { field: key });
+  if (!/^[+-]?\d+$/.test(raw)) {
+    throw new ValidationError(`${label} must be a whole number, not "${raw}"`, {
+      field: key,
+      value: raw,
+    });
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value)) {
+    throw new ValidationError(`${label} is out of range`, { field: key, value: raw });
+  }
+  return value;
 }
 
 function checked(form: FormData, key: string): boolean {
@@ -75,7 +96,7 @@ export async function signInAction(_state: ActionState, form: FormData): Promise
     // addresses have accounts.
     return '!That email and password do not match an active account.';
   }
-  redirect(next === '' ? '/admin' : next);
+  redirect(safeNextPath(next));
 }
 
 export async function signOutAction(): Promise<void> {
@@ -277,8 +298,8 @@ export async function setPriceAction(_state: ActionState, form: FormData): Promi
   return run(async () => {
     const principal = await requirePrincipal();
     await setPrice(principal, text(form, 'storeId'), text(form, 'productId'), {
-      mrpPaise: int(form, 'mrpPaise'),
-      sellingPricePaise: int(form, 'sellingPricePaise'),
+      mrpPaise: int(form, 'mrpPaise', 'MRP'),
+      sellingPricePaise: int(form, 'sellingPricePaise', 'Selling price'),
       reason: optionalText(form, 'reason') ?? null,
     });
     revalidatePath('/admin/listings');
@@ -310,7 +331,7 @@ export async function adjustStockAction(_state: ActionState, form: FormData): Pr
     const result = await adjustStock(principal, {
       storeId: text(form, 'storeId'),
       productId: text(form, 'productId'),
-      delta: int(form, 'delta'),
+      delta: int(form, 'delta', 'Change by'),
       note: optionalText(form, 'note') ?? null,
     });
     revalidatePath('/admin/inventory');
@@ -324,7 +345,7 @@ export async function reconcileStockAction(_state: ActionState, form: FormData):
     const result = await reconcileStock(principal, {
       storeId: text(form, 'storeId'),
       productId: text(form, 'productId'),
-      counted: int(form, 'counted'),
+      counted: int(form, 'counted', 'Counted quantity'),
       note: optionalText(form, 'note') ?? null,
     });
     revalidatePath('/admin/inventory');
