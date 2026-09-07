@@ -33,6 +33,13 @@ npm run db:seed
 npm run dev                          # http://localhost:3000
 ```
 
+`.env` is the **host** profile: its `DATABASE_URL` points at `127.0.0.1:5432`,
+the port Compose publishes, and its `AUTH_URL` at the `next dev` origin. The
+prod-parity stack below deliberately does _not_ read those two — inside a
+container `localhost` is that container. See
+[`docker/docker-compose.yml`](docker/docker-compose.yml) for the container
+profile.
+
 `GET /api/health` reports `{ status, db, migrations }` and is the quickest check
 that the app and database agree.
 
@@ -40,11 +47,26 @@ that the app and database agree.
 
 ```bash
 docker compose -f docker/docker-compose.yml up --build
+curl -i http://localhost:8080/api/health
 ```
 
 Brings up Postgres, a one-shot migration step, the app, and Caddy on
 <http://localhost:8080>. Migrations run as a gated step _before_ the app starts —
-the app never migrates on boot.
+the app never migrates on boot, and `app` will not start unless `migrate` exits 0.
+
+The stack reads only `AUTH_SECRET`, `POSTGRES_*`, `LOG_LEVEL`, `PUBLIC_URL`,
+`CADDY_*` and `DOMAIN` from `.env`. It builds the container database URL itself
+(`postgres:5432`, from `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`) and
+sets the app's public origin to Caddy's port. To check what a given `.env` will
+actually produce:
+
+```bash
+docker compose --env-file .env -f docker/docker-compose.yml config
+```
+
+`migrate` is its own image target with the full locked dependency tree — the
+Prisma CLI needs far more than `node_modules/prisma`, and a partial copy fails at
+run time with `Cannot find module 'effect'` rather than at build time.
 
 ## Scripts
 
