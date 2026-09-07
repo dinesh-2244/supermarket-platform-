@@ -29,7 +29,7 @@ jobs:
       AUTH_SECRET: ci-e2e-secret-not-a-real-secret-00000000
       AUTH_URL: http://127.0.0.1:3100
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '22.20.0'
