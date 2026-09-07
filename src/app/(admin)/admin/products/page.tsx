@@ -1,6 +1,13 @@
 import { requirePrincipal } from '@/auth';
-import { listCategories, listProducts, searchProducts } from '@/modules/catalog';
-import { createProductAction, updateProductAction } from '../actions';
+import { listCategories, listProductImages, listProducts, searchProducts } from '@/modules/catalog';
+import {
+  addProductImageAction,
+  createProductAction,
+  editProductAction,
+  moveProductImageAction,
+  removeProductImageAction,
+  updateProductAction,
+} from '../actions';
 import { ActionForm, Check, Field, Hidden, Select } from '../form';
 import { Card, Empty, PageHeading, Table } from '../ui';
 
@@ -34,6 +41,12 @@ export default async function ProductsPage({
     label: category.name,
   }));
   const categoryName = new Map(categories.map((category) => [category.id, category.name]));
+
+  // Images for the product currently open, if any. One at a time keeps the list
+  // readable and the queries bounded.
+  const openId = typeof params.edit === 'string' ? params.edit : null;
+  const openProduct = openId === null ? undefined : products.find((p) => p.id === openId);
+  const images = openId === null ? [] : await listProductImages(principal, openId);
 
   return (
     <>
@@ -70,6 +83,73 @@ export default async function ProductsPage({
         </Card>
       ) : null}
 
+      {canWrite && openProduct !== undefined ? (
+        <Card title={`Edit ${openProduct.name}`}>
+          <ActionForm action={editProductAction} submitLabel="Save product">
+            <Hidden name="productId" value={openProduct.id} />
+            <Field label="Name" name="name" defaultValue={openProduct.name} required width="w-52" />
+            <Field label="Brand" name="brand" defaultValue={openProduct.brand ?? ''} />
+            <Field
+              label="Pack size"
+              name="packSize"
+              defaultValue={openProduct.packSize}
+              required
+              width="w-28"
+            />
+            <Select
+              label="Category"
+              name="categoryId"
+              options={categoryOptions}
+              defaultValue={openProduct.categoryId}
+              width="w-44"
+            />
+          </ActionForm>
+
+          <div className="mt-4 border-t border-slate-100 pt-3">
+            <h3 className="mb-2 text-sm font-medium">Images</h3>
+            {images.length === 0 ? (
+              <Empty>No images yet.</Empty>
+            ) : (
+              <Table head={['Order', 'URL', 'Alt', 'Move', 'Remove']}>
+                {images.map((image, index) => (
+                  <tr key={image.id} className="border-b border-slate-100">
+                    <td className="py-2 pr-3">{index + 1}</td>
+                    <td className="py-2 pr-3 font-mono text-xs break-all">{image.url}</td>
+                    <td className="py-2 pr-3">{image.alt ?? '—'}</td>
+                    <td className="py-2 pr-3">
+                      <div className="flex gap-2">
+                        <ActionForm action={moveProductImageAction} submitLabel="Up">
+                          <Hidden name="productId" value={openProduct.id} />
+                          <Hidden name="imageId" value={image.id} />
+                          <Hidden name="direction" value="up" />
+                        </ActionForm>
+                        <ActionForm action={moveProductImageAction} submitLabel="Down">
+                          <Hidden name="productId" value={openProduct.id} />
+                          <Hidden name="imageId" value={image.id} />
+                          <Hidden name="direction" value="down" />
+                        </ActionForm>
+                      </div>
+                    </td>
+                    <td className="py-2 pr-3">
+                      <ActionForm action={removeProductImageAction} submitLabel="Remove">
+                        <Hidden name="imageId" value={image.id} />
+                      </ActionForm>
+                    </td>
+                  </tr>
+                ))}
+              </Table>
+            )}
+            <div className="mt-3">
+              <ActionForm action={addProductImageAction} submitLabel="Add image">
+                <Hidden name="productId" value={openProduct.id} />
+                <Field label="Image URL" name="url" required width="w-72" />
+                <Field label="Alt text" name="alt" width="w-40" />
+              </ActionForm>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
       <Card title={`${String(products.length)} product(s)`}>
         {products.length === 0 ? (
           <Empty>Nothing matched.</Empty>
@@ -87,10 +167,18 @@ export default async function ProductsPage({
                 <td className="py-2 pr-3">{categoryName.get(product.categoryId) ?? '—'}</td>
                 <td className="py-2 pr-3">
                   {canWrite ? (
-                    <ActionForm action={updateProductAction} submitLabel="Save">
-                      <Hidden name="productId" value={product.id} />
-                      <Check label="Active" name="isActive" defaultChecked={product.isActive} />
-                    </ActionForm>
+                    <div className="flex items-center gap-3">
+                      <ActionForm action={updateProductAction} submitLabel="Save">
+                        <Hidden name="productId" value={product.id} />
+                        <Check label="Active" name="isActive" defaultChecked={product.isActive} />
+                      </ActionForm>
+                      <a
+                        className="text-xs text-slate-500 underline"
+                        href={`/admin/products?edit=${product.id}${query === '' ? '' : `&q=${encodeURIComponent(query)}`}`}
+                      >
+                        edit
+                      </a>
+                    </div>
                   ) : null}
                 </td>
               </tr>

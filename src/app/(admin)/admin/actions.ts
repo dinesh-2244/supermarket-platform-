@@ -12,8 +12,25 @@ import {
   setUserActive,
   updateUser,
 } from '@/modules/identity';
-import { createArea, createZone, updateArea, updateSettings, updateZone } from '@/modules/stores';
-import { createCategory, createProduct, updateCategory, updateProduct } from '@/modules/catalog';
+import {
+  createArea,
+  createStore,
+  createZone,
+  updateArea,
+  updateSettings,
+  updateStore,
+  updateZone,
+} from '@/modules/stores';
+import {
+  addProductImage,
+  createCategory,
+  listProductImages,
+  createProduct,
+  removeProductImage,
+  reorderProductImages,
+  updateCategory,
+  updateProduct,
+} from '@/modules/catalog';
 import { setListed, setPrice } from '@/modules/pricing';
 import { adjustStock, reconcileStock, runStockImport } from '@/modules/inventory';
 
@@ -167,6 +184,35 @@ export async function resetPasswordAction(_state: ActionState, form: FormData): 
 // Stores, zones and areas
 // ---------------------------------------------------------------------------
 
+export async function createStoreAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const store = await createStore(principal, {
+      code: text(form, 'code'),
+      name: text(form, 'name'),
+      addressJson: {
+        line1: text(form, 'line1'),
+        city: text(form, 'city'),
+        pincode: text(form, 'pincode'),
+      },
+    });
+    revalidatePath('/admin/stores');
+    return `Created ${store.code} · ${store.name}.`;
+  });
+}
+
+export async function updateStoreAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const store = await updateStore(principal, text(form, 'storeId'), {
+      name: text(form, 'name'),
+      isActive: checked(form, 'isActive'),
+    });
+    revalidatePath('/admin/stores');
+    return `${store.code} updated.`;
+  });
+}
+
 export async function updateSettingsAction(_state: ActionState, form: FormData): Promise<string> {
   return run(async () => {
     const principal = await requirePrincipal();
@@ -290,6 +336,68 @@ export async function updateProductAction(_state: ActionState, form: FormData): 
   });
 }
 
+/** The full edit — name, brand, pack size and category, not just the toggle. */
+export async function editProductAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const product = await updateProduct(principal, text(form, 'productId'), {
+      name: text(form, 'name'),
+      brand: optionalText(form, 'brand') ?? null,
+      packSize: text(form, 'packSize'),
+      categoryId: text(form, 'categoryId'),
+    });
+    revalidatePath('/admin/products');
+    return `${product.name} saved.`;
+  });
+}
+
+export async function addProductImageAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    await addProductImage(principal, text(form, 'productId'), {
+      url: text(form, 'url'),
+      alt: optionalText(form, 'alt') ?? null,
+    });
+    revalidatePath('/admin/products');
+    return 'Image added.';
+  });
+}
+
+export async function removeProductImageAction(
+  _state: ActionState,
+  form: FormData,
+): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    await removeProductImage(principal, text(form, 'imageId'));
+    revalidatePath('/admin/products');
+    return 'Image removed.';
+  });
+}
+
+/** Move one image up or down; the service rewrites every sort key in one tx. */
+export async function moveProductImageAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const productId = text(form, 'productId');
+    const imageId = text(form, 'imageId');
+    const direction = text(form, 'direction') === 'up' ? -1 : 1;
+
+    const current = (await listProductImages(principal, productId)).map((image) => image.id);
+    const index = current.indexOf(imageId);
+    const target = index + direction;
+    if (index === -1 || target < 0 || target >= current.length) return 'Already at the end.';
+
+    const reordered = [...current];
+    reordered[index] = current[target]!;
+    reordered[target] = current[index]!;
+
+    await reorderProductImages(principal, productId, reordered);
+    revalidatePath('/admin/products');
+    return 'Image moved.';
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Pricing
 // ---------------------------------------------------------------------------
@@ -382,9 +490,26 @@ export async function importStockAction(_state: ActionState, form: FormData): Pr
       return `!Nothing was imported — ${String(result.errors.length)} problem(s). ${first}`;
     }
     if (result.outcome === 'dry-run') {
-      return `Dry run: ${String(result.changes.length)} row(s) would change, ${String(
-        result.unchanged.length,
-      )} unchanged. Nothing was written.`;
+      // The per-row diff, not just a count: "12 rows would change" is not enough
+      // for anyone to decide whether to apply the file. Each line names the SKU
+      // and what it would do to that item's stock.
+      const preview = result.changes
+        .slice(0, 25)
+        .map(
+          (change) =>
+            `line ${String(change.line)} ${change.sku}: ${String(change.currentStock)} → ${String(
+              change.newStock,
+            )} (${change.delta > 0 ? '+' : ''}${String(change.delta)})`,
+        )
+        .join('\n');
+      const more =
+        result.changes.length > 25 ? `\n…and ${String(result.changes.length - 25)} more` : '';
+
+      return (
+        `Dry run — nothing was written. ${String(result.changes.length)} row(s) would change, ` +
+        `${String(result.unchanged.length)} unchanged.` +
+        (preview === '' ? '' : `\n${preview}${more}`)
+      );
     }
     return `Imported ${String(result.applied)} row(s).`;
   });

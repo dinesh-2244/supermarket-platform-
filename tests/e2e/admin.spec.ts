@@ -13,6 +13,17 @@ import { expect, test, type Page } from '@playwright/test';
  * button is hidden" is not authorization. Middleware only redirects and the
  * layout only hides nav; the check that counts runs server-side on every action.
  */
+/**
+ * R11 — a **named, explicitly stocked** fixture rather than "whatever row sorts
+ * first".
+ *
+ * The suite used to grab the first inventory form on the page, which is ordered
+ * by product id. On a fresh seed that can be a zero-stock item, so subtracting 2
+ * got the correct below-zero refusal and the test failed — a fixture defect that
+ * looked like a product defect and skipped five following tests with it.
+ */
+const FIXTURE_SKU = '8901234500011';
+
 const SEED_ADMIN = 'admin@munderfresh.local';
 const SEED_PASSWORD = 'DevPassw0rd!';
 const MANAGER_PASSWORD = 'ManagerPassword123';
@@ -26,6 +37,14 @@ async function signIn(page: Page, email: string, password: string): Promise<void
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page).toHaveURL(/\/admin(\?|$)/);
+}
+
+/** The value of the seeded S1 store option, whatever id it was given. */
+async function firstSeededStore(page: Page): Promise<string> {
+  const option = page.locator('select[name="storeId"] option', { hasText: /^S1 · / }).first();
+  const value = await option.getAttribute('value');
+  if (value === null) throw new Error('The seeded S1 store is not in the store list');
+  return value;
 }
 
 async function signOut(page: Page): Promise<void> {
@@ -73,6 +92,10 @@ test.describe.serial('back office', () => {
     await form.getByLabel('Name').fill('E2E Manager');
     await form.getByLabel('Password').fill(MANAGER_PASSWORD);
     await form.getByLabel('Role').selectOption('STORE_MANAGER');
+    // Pin the store rather than taking whichever option happens to be first:
+    // the store list is ordered by code, and this suite creates stores of its
+    // own, so "first" is not stable across runs.
+    await form.locator('select[name="storeId"]').selectOption(await firstSeededStore(page));
     await form.getByRole('button', { name: 'Create user' }).click();
 
     await expect(page.getByRole('status').first()).toContainText(managerEmail);
@@ -99,11 +122,25 @@ test.describe.serial('back office', () => {
     await page.goto('/admin/inventory');
     await expect(page.getByRole('heading', { name: 'Inventory' })).toBeVisible();
 
-    const adjustForm = page.locator('form').filter({ hasText: 'Adjust' }).first();
+    // Reconcile the named fixture to a known quantity first, so the adjustment
+    // below is arithmetic on a value this test chose rather than on whatever the
+    // seed happened to leave.
+    const fixtureRow = page.locator('tr').filter({ hasText: FIXTURE_SKU }).first();
+    const reconcile = fixtureRow.locator('form').filter({ hasText: 'Reconcile' });
+    await reconcile.getByLabel('Counted').fill('40');
+    await reconcile.getByRole('button', { name: 'Reconcile' }).click();
+    await expect(page.getByRole('status').first()).toContainText(/Reconciled|count matched/i);
+
+    const adjustForm = page
+      .locator('tr')
+      .filter({ hasText: FIXTURE_SKU })
+      .first()
+      .locator('form')
+      .filter({ hasText: 'Adjust' });
     await adjustForm.getByLabel('Change by').fill('-2');
     await adjustForm.getByLabel('Note').fill('e2e damage');
     await adjustForm.getByRole('button', { name: 'Adjust' }).click();
-    await expect(page.getByRole('status').first()).toContainText(/Stock is now/i);
+    await expect(page.getByRole('status').first()).toContainText(/Stock is now 38/i);
 
     await expect(page.getByRole('cell', { name: 'MANUAL_ADJUST' }).first()).toBeVisible();
     await expect(page.getByRole('cell', { name: 'e2e damage' }).first()).toBeVisible();
@@ -113,12 +150,12 @@ test.describe.serial('back office', () => {
     await signIn(page, managerEmail, MANAGER_PASSWORD);
     await page.goto('/admin/inventory');
 
-    // The SKU the seed stocks low, so the file is guaranteed to match a listing.
+    // A named fixture SKU the seed always lists for this store.
     // The quantity is derived from the run so a re-run of this suite always has
     // something to change — `set` is idempotent, which is the point of the mode,
     // and re-importing the same number would (correctly) apply nothing.
     const quantity = 20 + (Number(run) % 40);
-    const csv = `sku,quantity,mode\n8901234500042,${String(quantity)},set\n`;
+    const csv = `sku,quantity,mode\n${FIXTURE_SKU},${String(quantity)},set\n`;
     const importForm = page.locator('form').filter({ hasText: 'Run import' });
 
     await importForm.getByLabel('CSV file').setInputFiles({
@@ -153,7 +190,7 @@ test.describe.serial('back office', () => {
     await importForm.getByLabel('CSV file').setInputFiles({
       name: 'e2e-broken.csv',
       mimeType: 'text/csv',
-      buffer: Buffer.from('sku,quantity,mode\n8901234500042,5,set\nNOT-A-SKU,9,set\n'),
+      buffer: Buffer.from(`sku,quantity,mode\n${FIXTURE_SKU},5,set\nNOT-A-SKU,9,set\n`),
     });
     await importForm.getByLabel('Dry run').uncheck();
     await importForm.getByRole('button', { name: 'Run import' }).click();
@@ -194,7 +231,12 @@ test.describe.serial('back office', () => {
     await signIn(page, managerEmail, MANAGER_PASSWORD);
     await page.goto('/admin/inventory');
 
-    const adjustForm = page.locator('form').filter({ hasText: 'Adjust' }).first();
+    const adjustForm = page
+      .locator('tr')
+      .filter({ hasText: FIXTURE_SKU })
+      .first()
+      .locator('form')
+      .filter({ hasText: 'Adjust' });
     await adjustForm.getByLabel('Change by').fill('-1');
 
     // Rewrite the hidden field the server action reads, exactly as someone with
@@ -206,6 +248,167 @@ test.describe.serial('back office', () => {
 
     await expect(page.getByRole('status').first()).toContainText(/permission/i);
     await expect(page.getByRole('status').first()).not.toContainText(/Stock is now/i);
+  });
+
+  /**
+   * R10 — the operations D7 requires must be reachable *through the UI*, not
+   * merely present as a service underneath it.
+   */
+  test('a super-admin can create a store, a product, and give it its first price', async ({
+    page,
+  }) => {
+    await signIn(page, SEED_ADMIN, SEED_PASSWORD);
+
+    // A store, created from the UI rather than the seed.
+    await page.goto('/admin/stores');
+    const storeForm = page.locator('form').filter({ hasText: 'Create store' });
+    await storeForm.getByLabel('Code', { exact: true }).fill(`E2E${run.slice(-3)}`);
+    await storeForm.getByLabel('Name', { exact: true }).fill(`E2E Store ${run}`);
+    await storeForm.getByLabel('City').fill('Bengaluru');
+    await storeForm.getByRole('button', { name: 'Create store' }).click();
+    await expect(page.getByRole('status').first()).toContainText(/Created E2E/i);
+
+    // A product in the shared master.
+    await page.goto('/admin/products');
+    const productForm = page.locator('form').filter({ hasText: 'Add product' });
+    await productForm.getByLabel('SKU / barcode').fill(`E2E-SKU-${run}`);
+    await productForm.getByLabel('Name').fill(`E2E Product ${run}`);
+    await productForm.getByLabel('Pack size').fill('500 g');
+    await productForm.getByRole('button', { name: 'Add product' }).click();
+    await expect(page.getByRole('status').first()).toContainText(/Added E2E Product/i);
+
+    // …and its first price in a store, which previously had no UI path at all:
+    // Listings only iterated StoreProducts that already existed.
+    await page.goto('/admin/listings');
+    const firstPrice = page.locator('form').filter({ hasText: 'Set first price' });
+    await firstPrice
+      .getByLabel('Product')
+      .selectOption({ label: `E2E-SKU-${run} · E2E Product ${run}` });
+    await firstPrice.getByLabel('MRP (paise)').fill('20000');
+    await firstPrice.getByLabel('Selling (paise)').fill('18000');
+    await firstPrice.getByRole('button', { name: 'Set first price' }).click();
+    await expect(page.getByRole('status').first()).toContainText(/Price saved/i);
+
+    // It is now a listing, so it can be stocked.
+    await expect(page.getByRole('cell', { name: `E2E-SKU-${run}` }).first()).toBeVisible();
+  });
+
+  test('a super-admin can edit a product and manage its images', async ({ page }) => {
+    await signIn(page, SEED_ADMIN, SEED_PASSWORD);
+    await page.goto(`/admin/products?q=${encodeURIComponent(`E2E Product ${run}`)}`);
+
+    await page.getByRole('link', { name: 'edit' }).first().click();
+    await expect(page.getByRole('heading', { name: /Edit E2E Product/ })).toBeVisible();
+
+    // The fields that had no edit path before: name, brand, pack size, category.
+    const edit = page.locator('form').filter({ hasText: 'Save product' });
+    await edit.getByLabel('Brand').fill('E2E Brand');
+    await edit.getByLabel('Pack size').fill('750 g');
+    await edit.getByRole('button', { name: 'Save product' }).click();
+    await expect(page.getByRole('status').first()).toContainText(/saved/i);
+
+    // Images: add two, reorder, remove one.
+    const addImage = page.locator('form').filter({ hasText: 'Add image' });
+    await addImage.getByLabel('Image URL').fill('https://cdn.example/e2e-1.jpg');
+    await addImage.getByRole('button', { name: 'Add image' }).click();
+    await expect(page.getByRole('status').first()).toContainText(/Image added/i);
+
+    await page
+      .locator('form')
+      .filter({ hasText: 'Add image' })
+      .getByLabel('Image URL')
+      .fill('https://cdn.example/e2e-2.jpg');
+    await page
+      .locator('form')
+      .filter({ hasText: 'Add image' })
+      .getByRole('button', { name: 'Add image' })
+      .click();
+    await expect(page.getByRole('cell', { name: 'https://cdn.example/e2e-2.jpg' })).toBeVisible();
+
+    // Reorder: image 2 was added second, so moving image 1 down puts it first.
+    await expect(page.getByRole('cell', { name: 'https://cdn.example/e2e-1.jpg' })).toBeVisible();
+    await page.getByRole('button', { name: 'Down' }).first().click();
+    await expect(page.getByRole('status').first()).toContainText(/Image moved/i);
+    const ordered = await page.getByRole('cell', { name: /cdn\.example/ }).allTextContents();
+    expect(ordered[0]).toBe('https://cdn.example/e2e-2.jpg');
+
+    // Remove: assert the outcome, not a notice — the notice lives in the row's
+    // own form, which disappears along with the row.
+    await page.getByRole('button', { name: 'Remove' }).first().click();
+    await expect(page.getByRole('cell', { name: 'https://cdn.example/e2e-2.jpg' })).toHaveCount(0);
+    await expect(page.getByRole('cell', { name: 'https://cdn.example/e2e-1.jpg' })).toBeVisible();
+  });
+
+  test('a failed import can be diagnosed from its downloadable report and corrected', async ({
+    page,
+  }) => {
+    await signIn(page, managerEmail, MANAGER_PASSWORD);
+    await page.goto('/admin/inventory');
+
+    // A file with one good row and one bad one: nothing is written.
+    const importForm = page.locator('form').filter({ hasText: 'Run import' });
+    await importForm.getByLabel('CSV file').setInputFiles({
+      name: 'e2e-fixme.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(`sku,quantity,mode\n${FIXTURE_SKU},33,set\nWRONG-SKU-${run},9,set\n`),
+    });
+    await importForm.getByLabel('Dry run').uncheck();
+    await importForm.getByRole('button', { name: 'Run import' }).click();
+    await expect(page.getByRole('status').first()).toContainText(/Nothing was imported/i);
+
+    // The report is downloadable and names the offending line.
+    const link = page.getByRole('link', { name: 'download errors' }).first();
+    await expect(link).toBeVisible();
+    const href = await link.getAttribute('href');
+    const report = await page.request.get(href!);
+    expect(report.status()).toBe(200);
+    expect(report.headers()['content-disposition']).toContain('attachment');
+    const body = await report.text();
+    expect(body.split('\n')[0]).toBe('line,sku,error');
+    expect(body).toContain('No product with that SKU');
+
+    // Corrected file — the good row now applies.
+    await importForm.getByLabel('CSV file').setInputFiles({
+      name: 'e2e-fixed.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(`sku,quantity,mode\n${FIXTURE_SKU},33,set\n`),
+    });
+    await importForm.getByLabel('Dry run').uncheck();
+    await importForm.getByRole('button', { name: 'Run import' }).click();
+    await expect(page.getByRole('status').first()).toContainText(/Imported 1 row/i);
+  });
+
+  test('a dry run shows the per-row diff, not just a count', async ({ page }) => {
+    await signIn(page, managerEmail, MANAGER_PASSWORD);
+    await page.goto('/admin/inventory');
+
+    const importForm = page.locator('form').filter({ hasText: 'Run import' });
+    await importForm.getByLabel('CSV file').setInputFiles({
+      name: 'e2e-preview.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(`sku,quantity,mode\n${FIXTURE_SKU},77,set\n`),
+    });
+    await importForm.getByRole('button', { name: 'Run import' }).click();
+
+    const notice = page.getByRole('status').first();
+    await expect(notice).toContainText(/Dry run/i);
+    // The actual diff: which SKU, from what, to what.
+    await expect(notice).toContainText(FIXTURE_SKU);
+    await expect(notice).toContainText('→ 77');
+  });
+
+  test('the ledger can be filtered by reason', async ({ page }) => {
+    await signIn(page, managerEmail, MANAGER_PASSWORD);
+    await page.goto('/admin/inventory');
+
+    await page.locator('select[name="reason"]').selectOption('CSV_IMPORT');
+    await page.getByRole('button', { name: 'Filter' }).click();
+
+    const reasons = await page
+      .getByRole('cell', { name: /^(MANUAL_ADJUST|CSV_IMPORT|RECONCILE)$/ })
+      .allTextContents();
+    expect(reasons.length).toBeGreaterThan(0);
+    expect(reasons.every((value) => value === 'CSV_IMPORT')).toBe(true);
   });
 
   test('signing out invalidates the session immediately', async ({ page }) => {

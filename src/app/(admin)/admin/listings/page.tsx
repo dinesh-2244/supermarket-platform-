@@ -1,9 +1,10 @@
 import { requirePrincipal } from '@/auth';
 import { listStores } from '@/modules/stores';
+import { listProducts } from '@/modules/catalog';
 import { listPriceHistory } from '@/modules/pricing';
 import { formatDateTime, formatPaise, listingRows, resolveStoreId } from '@/modules/admin';
 import { setListedAction, setPriceAction } from '../actions';
-import { ActionForm, Check, Field, Hidden } from '../form';
+import { ActionForm, Check, Field, Hidden, Select } from '../form';
 import { Card, Empty, PageHeading, StoreSwitcher, Table } from '../ui';
 
 export const dynamic = 'force-dynamic';
@@ -33,6 +34,15 @@ export default async function ListingsPage({
 
   const rows = await listingRows(principal, storeId);
 
+  // Products in the shared master that this store has no listing for yet. Until
+  // now a newly created product could never be given its first price here, which
+  // meant the catalogue and the store could not be connected through the UI at
+  // all.
+  const listed = new Set(rows.map((row) => row.listing.productId));
+  const unlisted = (await listProducts(principal, { limit: 500 })).filter(
+    (product) => !listed.has(product.id),
+  );
+
   // The append-only history for whichever listing was opened.
   const openId = typeof params.history === 'string' ? params.history : null;
   const history = openId === null ? [] : await listPriceHistory(principal, openId, 20);
@@ -44,6 +54,28 @@ export default async function ListingsPage({
         subtitle="Per store, independent. Every change writes a PriceChange row in the same transaction."
       />
       <StoreSwitcher stores={stores} storeId={storeId} basePath="/admin/listings" />
+
+      <Card title="Add a product to this store">
+        {unlisted.length === 0 ? (
+          <Empty>Every active product already has a price here.</Empty>
+        ) : (
+          <ActionForm action={setPriceAction} submitLabel="Set first price">
+            <Hidden name="storeId" value={storeId} />
+            <Select
+              label="Product"
+              name="productId"
+              width="w-64"
+              options={unlisted.map((product) => ({
+                value: product.id,
+                label: `${product.sku} · ${product.name}`,
+              }))}
+            />
+            <Field label="MRP (paise)" name="mrpPaise" type="number" width="w-28" />
+            <Field label="Selling (paise)" name="sellingPricePaise" type="number" width="w-28" />
+            <Field label="Reason" name="reason" width="w-32" />
+          </ActionForm>
+        )}
+      </Card>
 
       <Card title={`${String(rows.length)} listing(s)`}>
         {rows.length === 0 ? (

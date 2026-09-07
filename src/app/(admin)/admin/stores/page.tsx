@@ -1,9 +1,9 @@
 import { requirePrincipal } from '@/auth';
 import { getSettings, listStores } from '@/modules/stores';
 import { formatPaise, resolveStoreId } from '@/modules/admin';
-import { updateSettingsAction } from '../actions';
+import { createStoreAction, updateSettingsAction, updateStoreAction } from '../actions';
 import { ActionForm, Check, Field, Hidden, Select } from '../form';
-import { Card, Empty, PageHeading, StoreSwitcher } from '../ui';
+import { Card, Empty, PageHeading, StoreSwitcher, Table } from '../ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +32,7 @@ export default async function StoresPage({
 
   const settings = await getSettings(principal, storeId);
   const store = stores.find((candidate) => candidate.id === storeId);
+  const isSuperAdmin = principal.kind === 'user' && principal.role === 'SUPER_ADMIN';
 
   return (
     <>
@@ -40,6 +41,39 @@ export default async function StoresPage({
         subtitle="Per-store business settings. Money is stored in paise; these fields are paise too."
       />
       <StoreSwitcher stores={stores} storeId={storeId} basePath="/admin/stores" />
+
+      {isSuperAdmin ? (
+        <>
+          <Card title="Stores">
+            <Table head={['Code', 'Name', 'Active', 'Edit']}>
+              {stores.map((row) => (
+                <tr key={row.id} className="border-b border-slate-100">
+                  <td className="py-2 pr-3 font-mono text-xs">{row.code}</td>
+                  <td className="py-2 pr-3">{row.name}</td>
+                  <td className="py-2 pr-3">{row.isActive ? 'yes' : 'no'}</td>
+                  <td className="py-2 pr-3">
+                    <ActionForm action={updateStoreAction} submitLabel="Save">
+                      <Hidden name="storeId" value={row.id} />
+                      <Field label="Name" name="name" defaultValue={row.name} />
+                      <Check label="Active" name="isActive" defaultChecked={row.isActive} />
+                    </ActionForm>
+                  </td>
+                </tr>
+              ))}
+            </Table>
+          </Card>
+
+          <Card title="Add a store">
+            <ActionForm action={createStoreAction} submitLabel="Create store">
+              <Field label="Code" name="code" required width="w-28" placeholder="S3" />
+              <Field label="Name" name="name" required width="w-52" />
+              <Field label="Address line 1" name="line1" width="w-52" />
+              <Field label="City" name="city" width="w-36" />
+              <Field label="Pincode" name="pincode" width="w-28" />
+            </ActionForm>
+          </Card>
+        </>
+      ) : null}
 
       <Card title={store === undefined ? 'Settings' : `${store.code} · ${store.name}`}>
         <ActionForm action={updateSettingsAction} submitLabel="Save settings">

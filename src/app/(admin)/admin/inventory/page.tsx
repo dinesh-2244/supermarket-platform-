@@ -1,6 +1,6 @@
 import { requirePrincipal } from '@/auth';
 import { listStores } from '@/modules/stores';
-import { listImportHistory, listLedger, listLowStock } from '@/modules/inventory';
+import { listImportHistory, listLedger, listLowStock, STOCK_REASONS } from '@/modules/inventory';
 import { formatDateTime, formatDelta, resolveStoreId, stockRows } from '@/modules/admin';
 import { adjustStockAction, importStockAction, reconcileStockAction } from '../actions';
 import { ActionForm, Check, Field, Hidden, Select } from '../form';
@@ -33,12 +33,30 @@ export default async function InventoryPage({
 
   const focusProduct = typeof params.product === 'string' ? params.product : null;
 
+  // Ledger filters (D5: "filter by reason / date range / actor").
+  const one = (key: string): string => {
+    const value = params[key];
+    return typeof value === 'string' ? value.trim() : '';
+  };
+  const reason = one('reason');
+  const actor = one('actor');
+  const from = one('from');
+  const to = one('to');
+
+  const reasonFilter = STOCK_REASONS.find((candidate) => candidate === reason);
+  const fromDate = from === '' ? undefined : new Date(from);
+  const toDate = to === '' ? undefined : new Date(`${to}T23:59:59.999Z`);
+
   const [rows, low, ledger, imports] = await Promise.all([
     stockRows(principal, storeId),
     listLowStock(principal, storeId),
     listLedger(principal, {
       storeId,
       ...(focusProduct === null ? {} : { productId: focusProduct }),
+      ...(reasonFilter === undefined ? {} : { reasons: [reasonFilter] }),
+      ...(actor === '' ? {} : { actorId: actor }),
+      ...(fromDate === undefined || Number.isNaN(fromDate.getTime()) ? {} : { from: fromDate }),
+      ...(toDate === undefined || Number.isNaN(toDate.getTime()) ? {} : { to: toDate }),
       limit: 50,
     }),
     listImportHistory(principal, storeId, 10),
@@ -136,6 +154,62 @@ export default async function InventoryPage({
       </Card>
 
       <Card title={focusProduct === null ? 'Recent movements' : 'Movements for this product'}>
+        <form method="get" className="mb-3 flex flex-wrap items-end gap-2">
+          <input type="hidden" name="store" value={storeId} />
+          {focusProduct === null ? null : (
+            <input type="hidden" name="product" value={focusProduct} />
+          )}
+          <label className="text-xs text-slate-600">
+            <span className="mb-1 block">Reason</span>
+            <select
+              name="reason"
+              defaultValue={reason}
+              className="w-44 rounded border border-slate-300 px-2 py-1 text-sm"
+            >
+              <option value="">any</option>
+              {STOCK_REASONS.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs text-slate-600">
+            <span className="mb-1 block">From</span>
+            <input
+              name="from"
+              type="date"
+              defaultValue={from}
+              className="w-36 rounded border border-slate-300 px-2 py-1 text-sm"
+            />
+          </label>
+          <label className="text-xs text-slate-600">
+            <span className="mb-1 block">To</span>
+            <input
+              name="to"
+              type="date"
+              defaultValue={to}
+              className="w-36 rounded border border-slate-300 px-2 py-1 text-sm"
+            />
+          </label>
+          <label className="text-xs text-slate-600">
+            <span className="mb-1 block">Actor id</span>
+            <input
+              name="actor"
+              defaultValue={actor}
+              className="w-64 rounded border border-slate-300 px-2 py-1 font-mono text-xs"
+            />
+          </label>
+          <button type="submit" className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
+            Filter
+          </button>
+          <a
+            className="pb-2 text-xs text-slate-500 underline"
+            href={`/admin/inventory?store=${storeId}`}
+          >
+            clear
+          </a>
+        </form>
         {ledger.length === 0 ? (
           <Empty>No movements recorded.</Empty>
         ) : (
@@ -164,7 +238,7 @@ export default async function InventoryPage({
         {imports.length === 0 ? (
           <Empty>No imports yet.</Empty>
         ) : (
-          <Table head={['When', 'File', 'Mode', 'Outcome', 'Rows', 'Applied', 'Errors']}>
+          <Table head={['When', 'File', 'Mode', 'Outcome', 'Rows', 'Applied', 'Errors', 'Report']}>
             {imports.map((run) => (
               <tr key={run.id} className="border-b border-slate-100">
                 <td className="py-2 pr-3 text-slate-500">{formatDateTime(run.createdAt)}</td>
@@ -176,6 +250,19 @@ export default async function InventoryPage({
                 <td className="py-2 pr-3">{run.rowCount}</td>
                 <td className="py-2 pr-3">{run.appliedCount}</td>
                 <td className="py-2 pr-3">{run.errorCount}</td>
+                <td className="py-2 pr-3">
+                  {run.errorCount > 0 ? (
+                    <a
+                      className="text-xs underline"
+                      href={`/admin/inventory/import/${run.id}`}
+                      download
+                    >
+                      download errors
+                    </a>
+                  ) : (
+                    '—'
+                  )}
+                </td>
               </tr>
             ))}
           </Table>
