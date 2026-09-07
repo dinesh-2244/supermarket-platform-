@@ -324,8 +324,11 @@ test.describe.serial('back office', () => {
     // Reorder: image 2 was added second, so moving image 1 down puts it first.
     await expect(page.getByRole('cell', { name: 'https://cdn.example/e2e-1.jpg' })).toBeVisible();
     await page.getByRole('button', { name: 'Down' }).first().click();
-    const ordered = await page.getByRole('cell', { name: /cdn\.example/ }).allTextContents();
-    expect(ordered[0]).toBe('https://cdn.example/e2e-2.jpg');
+    // A web-first assertion, which retries: `allTextContents()` reads the DOM
+    // once, and the server action's revalidation had not landed yet in CI.
+    await expect(page.getByRole('cell', { name: /cdn\.example/ }).first()).toHaveText(
+      'https://cdn.example/e2e-2.jpg',
+    );
 
     // Remove: assert the outcome, not a notice — the notice lives in the row's
     // own form, which disappears along with the row.
@@ -399,9 +402,13 @@ test.describe.serial('back office', () => {
     await page.locator('select[name="reason"]').selectOption('CSV_IMPORT');
     await page.getByRole('button', { name: 'Filter' }).click();
 
-    const reasons = await page
-      .getByRole('cell', { name: /^(MANUAL_ADJUST|CSV_IMPORT|RECONCILE)$/ })
-      .allTextContents();
+    // Wait for the filtered table before reading it — same reason as above.
+    const reasonCells = page.getByRole('cell', {
+      name: /^(MANUAL_ADJUST|CSV_IMPORT|RECONCILE)$/,
+    });
+    await expect(reasonCells.first()).toHaveText('CSV_IMPORT');
+
+    const reasons = await reasonCells.allTextContents();
     expect(reasons.length).toBeGreaterThan(0);
     expect(reasons.every((value) => value === 'CSV_IMPORT')).toBe(true);
   });
