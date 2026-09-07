@@ -143,20 +143,31 @@ PRs may be combined if small, but keep P1-2 and P1-3 reviewable on their own.
 
 POS integration is capability-dependent. The platform will integrate only with functionality officially exposed and documented by the selected POS vendor. The website remains operational without POS integration.
 
-Phase 1 builds **only** the POS-neutral seams (arch §16.1, ADR-0007):
+Phase 1 delivers **schema plus a documented POS-neutral boundary — no behaviour**:
 
-- the **POS-neutral interfaces** — `PosBillingGateway`, `PosInventoryFeed` — and
-  their V1 implementations: `ManualPosBillingGateway` (staff form),
-  `NoopInventoryFeed`, and the manual **CSV/Excel** import path;
 - **`PosSkuMap`**, present in the schema and deliberately unused;
-- **`StoreSettings.posMode`** (`MANUAL` default), the per-store switch a future
-  factory reads.
+- **`StoreSettings.posMode`** (`MANUAL` default), the per-store switch a later
+  factory will read;
+- the **shape** of the POS-neutral interfaces — `PosBillingGateway`,
+  `PosInventoryFeed` — recorded here and in arch §16.2 as the contract later
+  phases implement against.
 
-Nothing else. The POS product has not been chosen, so **assume no API, no API
-documentation, no webhooks, no stock endpoints, no billing endpoints, no write
-access and no database access.** The storefront, admin, inventory and order flows
-must all work with no POS integration whatsoever — manual adjustment, CSV import and
-reconciliation are the permanent baseline, not a placeholder.
+Nothing else: no staff forms, no importers, no factory, no POS code of any kind.
+Phase 1 has no admin screens and no business logic at all (see "Out of scope"
+above), so nothing in this section is a Phase 1 build item.
+
+**The manual paths are requirements, not scaffolding.** The staff final-bill form
+(`ManualPosBillingGateway`) and the manual **CSV/Excel** stock import — alongside
+`NoopInventoryFeed` — are **permanent V1 fallback requirements**, delivered in the
+later feature phases that own those screens (arch §7, §12, §13). They are how the
+platform runs when there is no POS integration, which per the rule above may be
+forever. They are never removed when an adapter arrives; an adapter only adds a
+higher-preference option beside them.
+
+The POS product has not been chosen, so **assume no API, no API documentation, no
+webhooks, no stock endpoints, no billing endpoints, no write access and no database
+access.** The storefront, admin, inventory and order flows must all work with no POS
+integration whatsoever.
 
 When a POS is eventually selected, integration takes the **highest option it
 actually supports**, in this order:
