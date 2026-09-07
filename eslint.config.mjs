@@ -148,5 +148,13 @@ export default tseslint.config(
     files: ['**/*.{js,mjs,cjs}'],
     ...tseslint.configs.disableTypeChecked,
   },
+  {
+    // Repository maintenance scripts: plain Node ESM, run with `node`, never
+    // bundled. They need the Node globals the app code deliberately does not.
+    files: ['scripts/**/*.{js,mjs,cjs}'],
+    languageOptions: {
+      globals: { console: 'readonly', process: 'readonly', URL: 'readonly' },
+    },
+  },
   prettierConfig,
 );
