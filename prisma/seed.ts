@@ -11,9 +11,11 @@
  * - two delivery areas under *different* stores that share one pincode, which is
  *   the case ADR-0004 exists for;
  * - one SUPER_ADMIN plus a STORE_MANAGER and a STORE_STAFF per store;
- * - `customer_otp_login` seeded OFF.
+ * - `customer_otp_login` seeded OFF;
+ * - an opening-balance `StockLedger` row for every `InventoryItem`, written in
+ *   the same transaction as the item (§3/§7) and only on first creation.
  */
-import { PrismaClient, type Prisma } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import argon2 from 'argon2';
 
 const prisma = new PrismaClient();
@@ -324,6 +326,9 @@ const STORES: readonly StoreSeed[] = [
 ];
 
 /** Deterministic pseudo-stock so seeded quantities do not change between runs. */
+/** Marks the ledger rows that explain where a seeded balance came from. */
+const OPENING_BALANCE_REF = 'opening-balance';
+
 function stockFor(storeCode: string, sku: string): number {
   const digits = Number(sku.slice(-3));
   return storeCode === 'S1' ? 20 + (digits % 30) : 12 + (digits % 45);
@@ -420,15 +425,38 @@ async function seedStore(store: StoreSeed, productIds: Map<string, string>): Pro
     });
 
     // Inventory exists for every product the store could stock, listed or not.
-    await prisma.inventoryItem.upsert({
-      where: { storeId_productId: { storeId: row.id, productId } },
-      update: {},
-      create: {
-        storeId: row.id,
-        productId,
-        websiteStock: isListed ? stockFor(store.code, product.sku) : 0,
-      },
-    });
+    // Architecture §3/§7: *every* stock mutation writes a StockLedger row in the
+    // same transaction, opening balances included — otherwise the very first
+    // number in the ledger has no explanation. `create` + `P2002` rather than
+    // `upsert` because the ledger row must be written only on first creation:
+    // re-running the seed must not mint a second opening balance.
+    const openingStock = isListed ? stockFor(store.code, product.sku) : 0;
+
+    await prisma
+      .$transaction(async (tx) => {
+        const item = await tx.inventoryItem.create({
+          data: { storeId: row.id, productId, websiteStock: openingStock },
+        });
+
+        await tx.stockLedger.create({
+          data: {
+            storeId: item.storeId,
+            productId: item.productId,
+            delta: openingStock,
+            reason: 'RECONCILE',
+            refType: 'seed',
+            refId: OPENING_BALANCE_REF,
+            balanceAfter: openingStock,
+            actorType: 'SYSTEM',
+            note: 'Opening balance (development seed)',
+          },
+        });
+      })
+      .catch((error: unknown) => {
+        // Already seeded: leave the existing balance and its ledger alone.
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return;
+        throw error;
+      });
   }
 
   return row.id;

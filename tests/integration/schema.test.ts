@@ -220,4 +220,39 @@ describe('schema invariants (Phase 1 Definition of Done)', () => {
     expect((await columnsOf('PosSkuMap')).has('posSku')).toBe(true);
     expect(await prisma.posSkuMap.count()).toBe(0);
   });
+
+  // R6: §3/§7 — no stock balance may exist without a ledger row explaining it.
+  // The seed used to create 40 InventoryItem rows and 0 StockLedger rows.
+  it('explains every seeded stock balance with an opening-balance ledger row', async () => {
+    const items = await prisma.inventoryItem.findMany();
+    const opening = await prisma.stockLedger.findMany({ where: { refId: 'opening-balance' } });
+
+    expect(items.length).toBeGreaterThan(0);
+    expect(opening).toHaveLength(items.length);
+
+    for (const entry of opening) {
+      expect(entry.reason).toBe('RECONCILE');
+      expect(entry.actorType).toBe('SYSTEM');
+      expect(entry.delta).toBe(entry.balanceAfter);
+    }
+
+    const balances = new Map(
+      items.map((item) => [`${item.storeId}:${item.productId}`, item.websiteStock]),
+    );
+    for (const entry of opening) {
+      expect(entry.balanceAfter).toBe(balances.get(`${entry.storeId}:${entry.productId}`));
+    }
+  });
+
+  it('does not mint a second opening balance when the seed is re-run', async () => {
+    const before = await prisma.stockLedger.count({ where: { refId: 'opening-balance' } });
+    const stockBefore = await prisma.inventoryItem.aggregate({ _sum: { websiteStock: true } });
+
+    runSeed();
+
+    expect(await prisma.stockLedger.count({ where: { refId: 'opening-balance' } })).toBe(before);
+    expect(
+      (await prisma.inventoryItem.aggregate({ _sum: { websiteStock: true } }))._sum.websiteStock,
+    ).toBe(stockBefore._sum.websiteStock);
+  });
 });
