@@ -5,4 +5,6 @@
 // against `_prisma_migrations` so a database that is empty, on an older schema,
 // or mid-way through a failed migration reports `pending` instead of `current`.
 
-export const EXPECTED_MIGRATIONS: readonly string[] = ['20260906090000_init'];
+export const EXPECTED_MIGRATIONS: readonly string[] = [
+  '20260906090000_init',
+];

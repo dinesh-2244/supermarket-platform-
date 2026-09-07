@@ -21,6 +21,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
+    "db:manifest": "node scripts/generate-migration-manifest.mjs",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
     "test:coverage": "vitest run --project unit --coverage"

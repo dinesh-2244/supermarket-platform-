@@ -84,6 +84,7 @@ run time with `Cannot find module 'effect'` rather than at build time.
 | `npm run db:migrate`              | `prisma migrate dev` (create a migration)       |
 | `npm run db:migrate:deploy`       | `prisma migrate deploy` (apply, for CI/deploy)  |
 | `npm run db:seed`                 | Idempotent development seed                     |
+| `npm run db:manifest`             | Regenerate the expected-migrations manifest     |
 | `npm run db:reset`                | Drop, re-migrate and re-seed the dev database   |
 
 ## Layout
