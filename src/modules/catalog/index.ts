@@ -4,5 +4,39 @@
  * This file is the ONLY entry point other modules and `app/` may import;
  * `service.ts`, `repo.ts` and `domain/` are module-private.
  */
-export { moduleDescriptor } from './service';
-export type { ModuleDescriptor } from './domain/index';
+export {
+  addProductImage,
+  createCategory,
+  createProduct,
+  type CreateProductInput,
+  deactivateCategory,
+  deactivateProduct,
+  getProduct,
+  getProductBySku,
+  listCategories,
+  listProductImages,
+  listProducts,
+  moduleDescriptor,
+  removeProductImage,
+  reorderProductImages,
+  searchIsAvailable,
+  searchProducts,
+  type SearchOptions,
+  updateCategory,
+  updateProduct,
+  type UpdateProductInput,
+  type CategoryRecord,
+  type ImageRecord,
+  type ProductRecord,
+  type SearchHit,
+} from './service';
+
+export {
+  assertSku,
+  assertSlug,
+  depthOf,
+  MIN_TRIGRAM_QUERY_LENGTH,
+  slugify,
+  type CategoryNode,
+  type ModuleDescriptor,
+} from './domain/index';
