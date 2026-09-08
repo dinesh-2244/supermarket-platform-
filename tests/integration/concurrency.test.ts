@@ -188,6 +188,71 @@ describe('R2 — a concurrent import must not write a stale absolute stock', () 
     }
   }, 60_000);
 
+  /**
+   * N3: the row ends up unchanged because the concurrent adjust already got it
+   * there. Stock and ledger were always right; the *reported* row said
+   * "100 -> 110 (+10)" because it was filtered out of the stale plan rather than
+   * rebuilt from the balance this transaction locked.
+   */
+  it('reports an overtaken row from the locked balance, not the planned one', async () => {
+    const holder = new PrismaClient();
+    try {
+      let importResult: Awaited<ReturnType<typeof runStockImport>> | undefined;
+      let importing: Promise<void> | undefined;
+
+      await holder.$transaction(async (tx) => {
+        await tx.$queryRaw`
+          SELECT "id" FROM "InventoryItem"
+          WHERE "storeId" = ${storeA} AND "productId" = ${productA}
+          FOR UPDATE
+        `;
+
+        importing = runStockImport(managerA, {
+          storeId: storeA,
+          filename: 'overtaken.csv',
+          content: `sku,quantity,mode\n${skuA},110,set\n`,
+        }).then((result) => {
+          importResult = result;
+        });
+
+        await until(() => waitingBackends(1));
+
+        // The adjust gets there first: 100 -> 110, which is what the file asked
+        // for. There is now nothing for the import to do.
+        await tx.$executeRaw`
+          UPDATE "InventoryItem" SET "websiteStock" = "websiteStock" + 10
+          WHERE "storeId" = ${storeA} AND "productId" = ${productA}
+        `;
+      });
+
+      await importing;
+
+      const actual = await prisma.inventoryItem.findUniqueOrThrow({
+        where: { storeId_productId: { storeId: storeA, productId: productA } },
+      });
+      expect(actual.websiteStock).toBe(110);
+
+      expect(importResult?.applied).toBe(0);
+      expect(importResult?.changes).toEqual([]);
+      expect(importResult?.unchanged).toHaveLength(1);
+      expect(importResult?.unchanged[0]).toMatchObject({
+        sku: skuA,
+        currentStock: 110,
+        newStock: 110,
+        delta: 0,
+      });
+
+      // And no movement was invented to justify a number nobody moved.
+      expect(
+        await prisma.stockLedger.count({
+          where: { storeId: storeA, productId: productA, reason: 'CSV_IMPORT' },
+        }),
+      ).toBe(0);
+    } finally {
+      await holder.$disconnect();
+    }
+  }, 60_000);
+
   it('reports the movements that actually committed', async () => {
     const result = await runStockImport(managerA, {
       storeId: storeA,

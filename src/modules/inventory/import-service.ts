@@ -205,6 +205,11 @@ export async function runStockImport(
 
   const results: MovementResult[] = [];
   const applied: PlannedChange[] = [];
+  // Rows the *locked* balances said would change nothing. Rebuilt here rather
+  // than filtered out of the pre-transaction plan: after a concurrent adjust the
+  // plan's numbers are stale, so a row that ended up unchanged was still being
+  // reported as "100 → 110 (+10)" when the truth was "110 → 110 (0)".
+  const settled: PlannedChange[] = [];
 
   const outcome = await withTransaction(async (tx) => {
     // The import run is created first so its id can be the ledger reference: a
@@ -264,6 +269,7 @@ export async function runStockImport(
       }
       const delta = target - current;
       if (delta !== 0) recomputed.push({ change, delta });
+      else settled.push({ ...change, currentStock: current, newStock: current, delta: 0 });
     }
 
     for (const { change, delta } of recomputed) {
@@ -331,14 +337,12 @@ export async function runStockImport(
   // After commit: a handler must not be able to roll back an import that landed.
   for (const result of results) announceMovement(result);
 
-  const appliedIds = new Set(applied.map((change) => change.productId));
   return {
     ...plan,
-    // Built from what actually committed, not from the pre-transaction plan.
+    // Both lists are built from what this transaction actually saw and did, not
+    // from the pre-transaction plan.
     changes: applied,
-    unchanged: [...plan.changes, ...plan.unchanged].filter(
-      (change) => !appliedIds.has(change.productId),
-    ),
+    unchanged: settled,
     importId: outcome.id,
     outcome: 'applied',
     applied: applied.length,
