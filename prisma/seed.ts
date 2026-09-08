@@ -47,6 +47,16 @@ interface ProductSeed {
   brand?: string;
   mrpPaise: number;
   aisleSortKey: number;
+  /**
+   * Photos, served from `public/` rather than fetched.
+   *
+   * A seed that points at somebody else's CDN gives a demo database that looks
+   * broken offline and an e2e suite whose image assertions depend on the
+   * internet. These are checked-in SVGs with a real intrinsic size (1600×1200),
+   * which is what makes "the layout keeps an oversized photo inside its column"
+   * something a browser can actually be asked.
+   */
+  images?: readonly { url: string; alt: string }[];
 }
 
 const PRODUCTS: readonly ProductSeed[] = [
@@ -245,6 +255,49 @@ const PRODUCTS: readonly ProductSeed[] = [
     mrpPaise: 21_000,
     aisleSortKey: 502,
   },
+  {
+    sku: '8901234500219',
+    name: 'Ragi Flour',
+    slug: 'ragi-flour-1kg',
+    packSize: '1 kg',
+    category: 'staples',
+    brand: 'Annapurna',
+    mrpPaise: 9_500,
+    aisleSortKey: 107,
+    images: [{ url: '/seed/products/ragi-flour.svg', alt: 'A pack of ragi flour' }],
+  },
+  {
+    sku: '8901234500226',
+    name: 'Alphonso Mango',
+    slug: 'alphonso-mango-1kg',
+    packSize: '1 kg',
+    category: 'fruits-vegetables',
+    mrpPaise: 32_000,
+    aisleSortKey: 205,
+    images: [{ url: '/seed/products/alphonso-mango.svg', alt: 'Alphonso mangoes' }],
+  },
+  {
+    sku: '8901234500233',
+    name: 'Salted Butter',
+    slug: 'salted-butter-500g',
+    packSize: '500 g',
+    category: 'dairy-bakery',
+    brand: 'Nandini',
+    mrpPaise: 26_500,
+    aisleSortKey: 305,
+    images: [{ url: '/seed/products/salted-butter.svg', alt: 'A block of salted butter' }],
+  },
+  {
+    sku: '8901234500240',
+    name: 'Masala Peanuts',
+    slug: 'masala-peanuts-200g',
+    packSize: '200 g',
+    category: 'snacks-beverages',
+    brand: 'Kurkure',
+    mrpPaise: 6_000,
+    aisleSortKey: 405,
+    images: [{ url: '/seed/products/masala-peanuts.svg', alt: 'A packet of masala peanuts' }],
+  },
 ] as const;
 
 interface StoreSeed {
@@ -385,8 +438,42 @@ async function seedProducts(categoryIds: Map<CategorySlug, string>): Promise<Map
       create: { sku: product.sku, ...data },
     });
     ids.set(product.sku, row.id);
+    await seedProductImages(row.id, product.images ?? []);
   }
   return ids;
+}
+
+/**
+ * A product's photos, idempotently.
+ *
+ * `ProductImage` has no natural key — a product may legitimately have two photos
+ * from the same source — so `upsert` is not available and re-running the seed
+ * would otherwise mint a duplicate set every time. Matching on `(productId, url)`
+ * makes the seed's own rows identifiable without inventing a constraint the
+ * application does not need.
+ */
+async function seedProductImages(
+  productId: string,
+  images: readonly { url: string; alt: string }[],
+): Promise<void> {
+  if (images.length === 0) return;
+
+  for (const [index, image] of images.entries()) {
+    const existing = await prisma.productImage.findFirst({
+      where: { productId, url: image.url },
+      select: { id: true },
+    });
+    if (existing === null) {
+      await prisma.productImage.create({
+        data: { productId, url: image.url, alt: image.alt, sortKey: index },
+      });
+    } else {
+      await prisma.productImage.update({
+        where: { id: existing.id },
+        data: { alt: image.alt, sortKey: index },
+      });
+    }
+  }
 }
 
 async function seedStore(store: StoreSeed, productIds: Map<string, string>): Promise<string> {
@@ -622,6 +709,7 @@ async function main(): Promise<void> {
   const counts = {
     stores: await prisma.store.count(),
     products: await prisma.product.count(),
+    productImages: await prisma.productImage.count(),
     storeProducts: await prisma.storeProduct.count(),
     inventoryItems: await prisma.inventoryItem.count(),
     deliveryAreas: await prisma.deliveryArea.count(),

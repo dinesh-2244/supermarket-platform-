@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1200" viewBox="0 0 1600 1200" role="img" aria-label="Ragi Flour">
+  <title>Ragi Flour</title>
+  <rect width="1600" height="1200" fill="#f3ece4"/>
+  <circle cx="800" cy="540" r="300" fill="#8d6e5a"/>
+  <rect x="300" y="900" width="1000" height="90" rx="45" fill="#8d6e5a" opacity="0.35"/>
+  <text x="800" y="1075" font-family="Helvetica, Arial, sans-serif" font-size="72" fill="#8d6e5a" text-anchor="middle">Ragi Flour</text>
+</svg>

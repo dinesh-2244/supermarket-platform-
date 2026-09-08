@@ -65,9 +65,30 @@ describe('migrations + seed', () => {
     runSeed();
 
     expect(await prisma.store.count()).toBe(before);
-    expect(await prisma.product.count()).toBe(20);
-    expect(await prisma.storeProduct.count()).toBe(40);
+    expect(await prisma.product.count()).toBe(24);
+    expect(await prisma.storeProduct.count()).toBe(48);
     expect(await prisma.user.count()).toBe(5);
+  });
+
+  /**
+   * R8 — `ProductImage` has no natural key, so `upsert` is not available and the
+   * obvious "create the seed's photos" writes a fresh duplicate set on every
+   * run. Counted after two seeds because one proves nothing.
+   */
+  it('gives the image-bearing products their photos exactly once', async () => {
+    runSeed();
+    runSeed();
+
+    const seeded = await prisma.productImage.findMany({
+      where: { url: { startsWith: '/seed/products/' } },
+      select: { url: true, productId: true, alt: true },
+    });
+    expect(seeded).toHaveLength(4);
+    expect(new Set(seeded.map((row) => row.productId)).size).toBe(4);
+    // Served from `public/`, not somebody else's CDN: a demo database that
+    // needs the internet to look right is one that looks broken on a train.
+    expect(seeded.every((row) => row.url.endsWith('.svg'))).toBe(true);
+    expect(seeded.every((row) => (row.alt ?? '') !== '')).toBe(true);
   });
 
   it('seeds two stores with independently editable settings', async () => {
@@ -93,7 +114,9 @@ describe('migrations + seed', () => {
     });
     expect(listedPerStore).toHaveLength(2);
     for (const group of listedPerStore) {
-      expect(group._count).toBeLessThan(20);
+      // Each store leaves two products off its shelves, so neither catalogue is
+      // the whole master.
+      expect(group._count).toBeLessThan(24);
     }
 
     // The same global Product is listed by both stores at different prices.

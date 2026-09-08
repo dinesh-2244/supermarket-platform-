@@ -178,15 +178,41 @@ test('no page scrolls sideways on a 390px phone', async ({ page }) => {
  * Every image must be able to shrink. One oversized product photo is enough to
  * push the whole page wider than the screen, and it will not be spotted until
  * somebody opens that one product on a phone.
+ *
+ * R8 — this used to open "whichever product sorts first", which has no photo,
+ * and loop from 0 to a count of zero. It passed without ever measuring an image,
+ * and would have gone on passing with the layout removed entirely. It now opens
+ * a product the seed guarantees a photo for, insists the photo is really there
+ * and really loaded, and only then checks that it stays inside the column.
  */
-test('images are constrained to their container', async ({ page }) => {
+const IMAGE_PRODUCT = { slug: 'ragi-flour-1kg', name: 'Ragi Flour' };
+
+test('a product photo loads, and is constrained to its container', async ({ page }) => {
   await pickArea(page, 'Jayanagar 4th Block');
   await page.setViewportSize({ width: 390, height: 780 });
-  await page.locator('article a[href^="/p/"]').first().click();
+  await page.goto(`/p/${IMAGE_PRODUCT.slug}`);
+  await expect(page.getByRole('heading', { name: IMAGE_PRODUCT.name })).toBeVisible();
 
   const images = page.locator('main img');
-  for (let index = 0; index < (await images.count()); index += 1) {
-    const width = await images.nth(index).evaluate((img) => img.getBoundingClientRect().width);
-    expect(width).toBeLessThanOrEqual(390);
+  await expect(images).not.toHaveCount(0);
+
+  const count = await images.count();
+  for (let index = 0; index < count; index += 1) {
+    const image = images.nth(index);
+    await expect(image).toBeVisible();
+
+    const measured = await image.evaluate((element: HTMLImageElement) => ({
+      // `naturalWidth` is 0 until the bytes actually arrive, so this is the
+      // assertion that the photo loaded rather than 404ing into an empty box.
+      naturalWidth: element.naturalWidth,
+      rendered: element.getBoundingClientRect().width,
+    }));
+
+    expect(measured.naturalWidth, 'the photo loaded').toBeGreaterThan(0);
+    // The seed's photos are 1600px wide on purpose: a layout that did not
+    // constrain them would push the page off a 390px screen.
+    expect(measured.naturalWidth).toBeGreaterThan(390);
+    expect(measured.rendered).toBeGreaterThan(0);
+    expect(measured.rendered).toBeLessThanOrEqual(390);
   }
 });
