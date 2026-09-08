@@ -2,7 +2,10 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { currentStoreContext } from '@/storefront';
+import { MAX_LINE_QUANTITY } from '@/modules/cart';
+import { addToCartAction } from '../../cart-actions';
 import { productPage } from '../../catalogue';
+import { ActionForm } from '../../form';
 import { AvailabilityLabel } from '../../product-card';
 import { rupees, Card, PageHeading } from '../../ui';
 
@@ -117,23 +120,39 @@ export default async function ProductDetailPage({
           )}
 
           <div className="mt-5">
-            {/* The cart arrives in P3-4; the control is here so the shape of the
-                page is settled, and it is disabled while there is nothing to
-                add to. Whether an item *can* be added is a server decision
-                either way — a disabled button is never the check. */}
-            <button
-              type="button"
-              disabled
-              aria-disabled="true"
-              className="rounded bg-emerald-700 px-4 py-2 text-sm text-white disabled:opacity-50"
-            >
-              {outOfStock ? 'Out of stock' : 'Add to basket'}
-            </button>
-            <p className="mt-2 text-xs text-slate-500">
-              {outOfStock
-                ? 'We will show this again as soon as it is back.'
-                : 'Baskets arrive with the next release.'}
-            </p>
+            {outOfStock ? (
+              // Disabled because there is nothing to add — but the *check* is
+              // the server's: `addItem` re-reads listing and stock whatever the
+              // page rendered, so a crafted post gets the same answer.
+              <>
+                <button
+                  type="button"
+                  disabled
+                  aria-disabled="true"
+                  className="rounded bg-emerald-700 px-4 py-2 text-sm text-white disabled:opacity-50"
+                >
+                  Out of stock
+                </button>
+                <p className="mt-2 text-xs text-slate-500">
+                  We will show this again as soon as it is back.
+                </p>
+              </>
+            ) : (
+              <ActionForm action={addToCartAction} submitLabel="Add to basket">
+                <input type="hidden" name="productId" value={product.id} />
+                <label className="text-xs text-slate-600">
+                  <span className="mb-1 block">Quantity</span>
+                  <input
+                    name="qty"
+                    type="number"
+                    min={1}
+                    max={MAX_LINE_QUANTITY}
+                    defaultValue={1}
+                    className="w-20 rounded border border-slate-300 px-2 py-1.5 text-sm"
+                  />
+                </label>
+              </ActionForm>
+            )}
           </div>
 
           <dl className="mt-5 grid grid-cols-2 gap-2 text-xs text-slate-600">

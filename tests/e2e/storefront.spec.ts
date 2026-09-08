@@ -141,9 +141,10 @@ test.describe.serial('storefront', () => {
     await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toBeVisible();
     await expect(page.getByText('₹').first()).toBeVisible();
 
-    // Checkout is Phase 4: the control exists, is disabled, and says so.
+    // An in-stock product offers a real add control; an empty shelf offers a
+    // disabled one. Either way the decision is the server's, not the button's.
     const add = page.getByRole('button', { name: /add to basket|out of stock/i });
-    await expect(add).toBeDisabled();
+    await expect(add).toBeVisible();
   });
 
   test('an unknown product slug is a 404, not an empty page', async ({ page }) => {
@@ -220,12 +221,92 @@ test.describe.serial('storefront', () => {
     await expect(page.locator('article').first()).toBeVisible();
   });
 
+  test('a shopper fills a basket without ever signing in', async ({ page }) => {
+    await page.goto('/locality');
+    await pickFirstArea(page);
+
+    // Open the first in-stock product and add it.
+    await page.locator('article a[href^="/p/"]').first().click();
+    const addForm = page.locator('form').filter({ hasText: 'Add to basket' });
+    await addForm.getByLabel('Quantity').fill('2');
+    await addForm.getByRole('button', { name: 'Add to basket' }).click();
+    await expect(addForm.getByRole('status')).toContainText(/in your basket/i);
+
+    // The header count follows the basket.
+    await expect(page.getByLabel(/item\(s\) in your basket/i)).toHaveText('2');
+
+    await page.getByRole('link', { name: /^Basket/ }).click();
+    await expect(page).toHaveURL(/\/cart$/);
+    await expect(page.getByRole('heading', { name: 'Your basket' })).toBeVisible();
+    await expect(page.getByText(/subtotal \(2 item\(s\)\)/i)).toBeVisible();
+
+    // Checkout exists, is disabled, and says where it went.
+    const checkout = page.getByRole('button', { name: 'Proceed to checkout' });
+    await expect(checkout).toBeDisabled();
+    await expect(page.getByText(/checkout arrives in phase 4/i)).toBeVisible();
+
+    // At no point was there a sign-in.
+    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+  });
+
+  test('quantities can be changed and lines removed', async ({ page }) => {
+    await page.goto('/locality');
+    await pickFirstArea(page);
+    await page.locator('article a[href^="/p/"]').first().click();
+
+    const addForm = page.locator('form').filter({ hasText: 'Add to basket' });
+    await addForm.getByRole('button', { name: 'Add to basket' }).click();
+    await expect(addForm.getByRole('status')).toContainText(/in your basket/i);
+
+    await page.goto('/cart');
+    const qtyForm = page.locator('form').filter({ hasText: 'Update' }).first();
+    await qtyForm.getByLabel('Qty').fill('3');
+    await qtyForm.getByRole('button', { name: 'Update' }).click();
+    await expect(page.getByText(/subtotal \(3 item\(s\)\)/i)).toBeVisible();
+
+    await page
+      .locator('form')
+      .filter({ hasText: 'Remove' })
+      .first()
+      .getByRole('button', { name: 'Remove' })
+      .click();
+    await expect(page.getByText(/your basket is empty/i)).toBeVisible();
+  });
+
+  test('a fractional quantity is refused, not truncated', async ({ page }) => {
+    await page.goto('/locality');
+    await pickFirstArea(page);
+    await page.locator('article a[href^="/p/"]').first().click();
+
+    const addForm = page.locator('form').filter({ hasText: 'Add to basket' });
+    // `type=number` with the default `step=1` makes the browser refuse to submit
+    // a fractional value at all, so the input is turned into a plain text box
+    // first. That is exactly what a crafted POST looks like to the server, and
+    // the server's answer is the only one that counts.
+    await addForm.getByLabel('Quantity').evaluate((input: HTMLInputElement) => {
+      input.type = 'text';
+      input.value = '2.5';
+    });
+    await addForm.getByRole('button', { name: 'Add to basket' }).click();
+    await expect(addForm.getByRole('status')).toContainText(/whole number/i);
+  });
+
+  test('an empty basket offers a way back to shopping', async ({ page }) => {
+    await page.goto('/locality');
+    await pickFirstArea(page);
+    await page.goto('/cart');
+
+    await expect(page.getByText(/your basket is empty/i)).toBeVisible();
+    await page.getByRole('link', { name: 'Start shopping' }).click();
+    await expect(page).toHaveURL(/\/$|\/\?/);
+  });
+
   test('the storefront does not scroll sideways on a small phone', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 780 });
     await page.goto('/locality');
     await pickFirstArea(page);
 
-    for (const path of ['/', '/locality', '/unserviceable', '/search?q=rice']) {
+    for (const path of ['/', '/locality', '/unserviceable', '/search?q=rice', '/cart']) {
       await page.goto(path);
       const overflows = await page.evaluate(
         () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,

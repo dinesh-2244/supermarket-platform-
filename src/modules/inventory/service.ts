@@ -303,6 +303,59 @@ function refuseCustomer(principal: Principal): void {
   }
 }
 
+/** A specific quantity, checked against the shelf. */
+export interface StockCheck {
+  readonly productId: string;
+  readonly requested: number;
+  readonly available: number;
+  readonly sufficient: boolean;
+}
+
+/**
+ * Can this store supply these quantities right now?
+ *
+ * The exact balance *is* returned here, unlike {@link availabilityFor} — because
+ * the question is "you asked for 12, can I have them?", and the honest answer to
+ * that is "only 8 left". The disclosure is bounded by the shopper having asked
+ * about a specific product and quantity, rather than being published on a page
+ * anyone can scrape.
+ *
+ * This is a **read**. Nothing here reserves, holds or decrements anything: a
+ * cart is not a claim on stock, and the only place a balance may move is
+ * `applyMovement` (§3/§7). Two shoppers may hold the last unit in their carts,
+ * and Phase 4's checkout is where that is resolved under a row lock.
+ */
+export async function checkAvailability(
+  principal: Principal,
+  storeId: string,
+  requests: readonly { productId: string; qty: number }[],
+): Promise<ReadonlyMap<string, StockCheck>> {
+  assertAuthorized(principal, 'inventory:read', { type: 'InventoryItem', storeId });
+  if (requests.length === 0) return new Map();
+
+  const items = await repo.listItems(principal, {
+    storeId,
+    productIds: requests.map((request) => request.productId),
+    limit: requests.length,
+  });
+  const stockByProduct = new Map(items.map((item) => [item.productId, item.websiteStock]));
+
+  return new Map(
+    requests.map((request) => {
+      const available = Math.max(0, stockByProduct.get(request.productId) ?? 0);
+      return [
+        request.productId,
+        {
+          productId: request.productId,
+          requested: request.qty,
+          available,
+          sufficient: available >= request.qty,
+        },
+      ];
+    }),
+  );
+}
+
 /** What one product's stock looks like to a shopper. */
 export interface AvailabilityRecord {
   readonly productId: string;

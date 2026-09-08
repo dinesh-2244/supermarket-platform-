@@ -1,6 +1,7 @@
 import Link from 'next/link';
+import { cartItemCount } from '@/modules/cart';
 import { getStore } from '@/modules/stores';
-import { currentStoreContext, storefrontPrincipal } from '@/storefront';
+import { currentCartToken, currentStoreContext, storefrontPrincipal } from '@/storefront';
 import { clearAreaAction } from './actions';
 
 /**
@@ -28,6 +29,7 @@ export default async function StorefrontLayout({
     context === null
       ? null
       : await getStore(storefrontPrincipal(context), context.serviceability.storeId);
+  const basketCount = await cartItemCount(await currentCartToken());
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -40,6 +42,17 @@ export default async function StorefrontLayout({
           <nav className="flex flex-wrap gap-3 text-sm">
             <Link href="/search" className="text-slate-600 hover:text-slate-900">
               Search
+            </Link>
+            <Link href="/cart" className="text-slate-600 hover:text-slate-900">
+              Basket
+              {basketCount === 0 ? null : (
+                <span
+                  className="ml-1 rounded-full bg-emerald-700 px-1.5 py-0.5 text-xs text-white"
+                  aria-label={`${String(basketCount)} item(s) in your basket`}
+                >
+                  {basketCount}
+                </span>
+              )}
             </Link>
           </nav>
 

@@ -74,3 +74,45 @@ export function storefrontPrincipal(
     storeId: context?.serviceability.storeId ?? null,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Cart token
+// ---------------------------------------------------------------------------
+
+/**
+ * The opaque basket cookie (arch §10).
+ *
+ * `HttpOnly` so no script can read or forge it, `SameSite=Lax` so another site
+ * cannot drive a basket on the shopper's behalf, and long-lived because a
+ * grocery basket is often assembled over days. Like `storeContext`, it carries
+ * an id and nothing else: the cart's store, its lines and their prices all live
+ * in the database, so there is nothing in the cookie worth tampering with.
+ */
+export const CART_TOKEN_COOKIE = 'cartToken';
+
+/** A year. A basket abandoned longer than that is not one anyone wants back. */
+export const CART_TOKEN_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+
+export async function currentCartToken(): Promise<string | null> {
+  const jar = await cookies();
+  const token = jar.get(CART_TOKEN_COOKIE)?.value ?? '';
+  return token === '' ? null : token;
+}
+
+/**
+ * Write the basket cookie.
+ *
+ * Only ever called with a token the `cart` module just minted alongside a real
+ * row — a cookie pointing at a cart that does not exist would make every
+ * subsequent request look like a corrupted basket rather than a new one.
+ */
+export async function setCartTokenCookie(token: string): Promise<void> {
+  const jar = await cookies();
+  jar.set(CART_TOKEN_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: CART_TOKEN_MAX_AGE_SECONDS,
+    secure: process.env.NODE_ENV === 'production',
+  });
+}
