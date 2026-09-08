@@ -263,6 +263,20 @@ model Product {
 
   @@index([categoryId, isActive])
   @@index([aisleSortKey])
+  /// Trigram search (D3), declared here rather than only in raw SQL.
+  ///
+  /// These two indexes were created by `CREATE INDEX ... USING GIN` in
+  /// 20260907200000_catalog_search_trgm and were invisible to Prisma, so
+  /// `migrate diff` proposed to DROP them in every migration that followed —
+  /// hand-stripped seven times through Phase 3, and one missed strip would have
+  /// silently removed catalogue search. Declaring them makes the schema the
+  /// single source of truth for what exists, which is the only version of this
+  /// that stops being a manual step.
+  ///
+  /// `map:` pins the names the raw SQL already gave them, so this describes the
+  /// indexes in the database rather than asking for new ones.
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Product_name_trgm_idx")
+  @@index([brand(ops: raw("gin_trgm_ops"))], type: Gin, map: "Product_brand_trgm_idx")
 }
 
 model ProductImage {
