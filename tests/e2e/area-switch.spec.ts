@@ -25,55 +25,67 @@ async function pickArea(page: Page, areaName: string): Promise<void> {
   await expect(page).toHaveURL(/\/$|\/\?/);
 }
 
-async function storeContextCookie(page: Page): Promise<string | undefined> {
+async function cookieValue(page: Page, name: string): Promise<string | undefined> {
   const cookies = await page.context().cookies();
-  return cookies.find((cookie) => cookie.name === 'storeContext')?.value;
+  return cookies.find((cookie) => cookie.name === name)?.value;
 }
 
-test.describe.serial('an area we cannot serve', () => {
-  test('takes the previous shop away with it', async ({ page }) => {
-    await page.context().clearCookies();
+const storeContextCookie = (page: Page): Promise<string | undefined> =>
+  cookieValue(page, 'storeContext');
 
-    // A real shopper with a real shop and a real basket.
-    await pickArea(page, 'Jayanagar 4th Block');
-    await page.locator('article a[href^="/p/"]').first().click();
-    const addForm = page.locator('form').filter({ hasText: 'Add to basket' });
-    await addForm.getByRole('button', { name: 'Add to basket' }).click();
-    await expect(addForm.getByRole('status')).toContainText(/in your basket/i);
+const cartCookie = (page: Page): Promise<string | undefined> => cookieValue(page, 'cartToken');
 
-    const before = await storeContextCookie(page);
-    expect(before, 'a context to lose').toBeDefined();
+/**
+ * One test, not three.
+ *
+ * Playwright gives every test its own browser context, so a suite split across
+ * three would start each one with no cookies — and "the basket is unreachable"
+ * would pass for a visitor who never had a basket at all. The whole point is
+ * what happens to a context and a cart that already exist, so the story has to
+ * be continuous.
+ */
+test('an unserviceable switch takes the previous shop away, and gives the basket back', async ({
+  page,
+}) => {
+  // A real shopper with a real shop and a real basket.
+  await pickArea(page, 'Jayanagar 4th Block');
+  await page.locator('article a[href^="/p/"]').first().click();
+  const addForm = page.locator('form').filter({ hasText: 'Add to basket' });
+  await addForm.getByRole('button', { name: 'Add to basket' }).click();
+  await expect(addForm.getByRole('status')).toContainText(/in your basket/i);
 
-    // Submit the picker for an area that does not resolve — the shape of a form
-    // that has gone stale since it was rendered.
-    await page.goto('/locality');
-    const form = page.locator('form').filter({ hasText: 'Jayanagar 4th Block' });
-    await form
-      .locator('input[name="areaId"]')
-      .evaluate((input: HTMLInputElement) => (input.value = 'no-such-area'));
-    await form.getByRole('button', { name: 'Deliver here' }).click();
+  expect(await storeContextCookie(page), 'a context to lose').toBeDefined();
+  const cartToken = await cartCookie(page);
+  expect(cartToken, 'a basket to keep').toBeDefined();
 
-    await expect(page).toHaveURL(/\/unserviceable/);
-    await expect(page.getByRole('heading', { name: /not in your area yet/i })).toBeVisible();
-    // No prices, and no shop: the page must not be the old store's in disguise.
-    await expect(page.getByText('₹')).toHaveCount(0);
-    expect(await storeContextCookie(page)).toBeUndefined();
-  });
+  // Submit the picker for an area that does not resolve — the shape of a form
+  // that has gone stale since it was rendered.
+  await page.goto('/locality');
+  const form = page.locator('form').filter({ hasText: 'Jayanagar 4th Block' });
+  await form
+    .locator('input[name="areaId"]')
+    .evaluate((input: HTMLInputElement) => (input.value = 'no-such-area'));
+  await form.getByRole('button', { name: 'Deliver here' }).click();
 
-  test('leaves the basket inert rather than usable', async ({ page }) => {
-    // Every storefront page needs a context, so with none they all lead back to
-    // the picker — including the basket that still holds the shopper's items.
-    for (const path of ['/', '/cart']) {
-      await page.goto(path);
-      await expect(page, path).toHaveURL(/\/locality$/);
-    }
-  });
+  await expect(page).toHaveURL(/\/unserviceable/);
+  await expect(page.getByRole('heading', { name: /not in your area yet/i })).toBeVisible();
+  // No prices, and no shop: the page must not be the old store's in disguise.
+  await expect(page.getByText('₹')).toHaveCount(0);
+  expect(await storeContextCookie(page)).toBeUndefined();
 
-  test('gives the basket back, unchanged, when a real area is chosen again', async ({ page }) => {
-    // D5: losing the context is a cookie-level event. Nothing deleted the cart.
-    await pickArea(page, 'Jayanagar 4th Block');
-    await page.goto('/cart');
-    await expect(page.getByRole('heading', { name: 'Your basket' })).toBeVisible();
-    await expect(page.getByText(/subtotal/i)).toBeVisible();
-  });
+  // Inert, not usable. Every storefront page needs a context, so with none they
+  // all lead back to the picker — including the basket that still holds the
+  // shopper's items, which is what used to open the old shop's cart.
+  for (const path of ['/', '/cart']) {
+    await page.goto(path);
+    await expect(page, path).toHaveURL(/\/locality$/);
+  }
+
+  // D5: losing the context is a cookie-level event, and nothing deleted the
+  // cart. The same basket comes back when a real area is chosen again.
+  expect(await cartCookie(page)).toBe(cartToken);
+  await pickArea(page, 'Jayanagar 4th Block');
+  await page.goto('/cart');
+  await expect(page.getByRole('heading', { name: 'Your basket' })).toBeVisible();
+  await expect(page.getByText(/subtotal/i)).toBeVisible();
 });

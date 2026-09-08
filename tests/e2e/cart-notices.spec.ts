@@ -50,14 +50,24 @@ async function openBackOffice(browser: Browser): Promise<Page> {
 /**
  * Point the back office at the same shop the shopper is buying from.
  *
- * The option's *value* is a store id nothing in this file may hardcode, so it is
- * read off the option whose label the seed guarantees.
+ * Navigated by the switcher's own href, so the store id stays out of this file —
+ * it is a uuid the seed mints, and hardcoding one would tie the suite to the
+ * database it was written against.
+ *
+ * The confirmation is the switcher's *selected* state, not the fixture's row.
+ * The row is on both stores' pages (S1 carries the listing too, unlisted), so
+ * asserting on it passes while the click's navigation is still in flight — which
+ * is how this read S1's price for an S2 basket and reported a price that had not
+ * moved.
  */
 async function selectFixtureStore(admin: Page): Promise<void> {
   await admin.goto('/admin/listings');
-  const option = admin.locator('select[name="store"] option', { hasText: /^S2 · / }).first();
-  const value = await option.getAttribute('value');
-  await admin.locator('select[name="store"]').selectOption(value ?? '');
+  const link = admin.getByRole('link', { name: /^S2 · / });
+  const href = await link.getAttribute('href');
+  expect(href, 'the S2 switcher link').not.toBeNull();
+
+  await admin.goto(href ?? '');
+  await expect(admin.getByRole('link', { name: /^S2 · / })).toHaveClass(/bg-slate-900/);
   await expect(admin.getByRole('cell', { name: FIXTURE }).first()).toBeVisible();
 }
 
@@ -66,11 +76,44 @@ function listingRow(admin: Page): ReturnType<Page['locator']> {
   return admin.locator('tr').filter({ has: admin.getByRole('cell', { name: FIXTURE }) });
 }
 
-async function setSellingPrice(admin: Page, paise: number): Promise<void> {
-  const form = listingRow(admin).locator('form').filter({ hasText: 'Set price' });
-  await form.getByLabel('Selling (paise)').fill(String(paise));
+/**
+ * Each assertion is scoped to its own form's notice.
+ *
+ * The page's first `role="status"` is whichever form was submitted last, so a
+ * price change straight after a listing change reads the listing change's
+ * message and the helper reports a failure that never happened.
+ */
+interface Price {
+  readonly mrpPaise: number;
+  readonly sellingPricePaise: number;
+}
+
+function priceForm(admin: Page): ReturnType<Page['locator']> {
+  return listingRow(admin).locator('form').filter({ hasText: 'Set price' });
+}
+
+async function currentPrice(admin: Page): Promise<Price> {
+  const form = priceForm(admin);
+  return {
+    mrpPaise: Number(await form.getByLabel('MRP (paise)').inputValue()),
+    sellingPricePaise: Number(await form.getByLabel('Selling (paise)').inputValue()),
+  };
+}
+
+/**
+ * Both fields, in one submit.
+ *
+ * `setPrice` refuses a selling price above MRP, and the seed prices a listing at
+ * a discount off its MRP — so raising the selling price alone is refused for a
+ * reason that has nothing to do with what is being tested. Sending both together
+ * also means a restore never passes through an invalid intermediate state.
+ */
+async function setPrice(admin: Page, price: Price): Promise<void> {
+  const form = priceForm(admin);
+  await form.getByLabel('MRP (paise)').fill(String(price.mrpPaise));
+  await form.getByLabel('Selling (paise)').fill(String(price.sellingPricePaise));
   await form.getByRole('button', { name: 'Set price' }).click();
-  await expect(admin.getByRole('status').first()).toContainText(/Price saved/i);
+  await expect(form.getByRole('status')).toContainText(/Price saved/i);
 }
 
 async function setListed(admin: Page, listed: boolean): Promise<void> {
@@ -79,14 +122,14 @@ async function setListed(admin: Page, listed: boolean): Promise<void> {
   if (listed) await box.check();
   else await box.uncheck();
   await form.getByRole('button', { name: 'Save' }).click();
-  await expect(admin.getByRole('status').first()).toContainText(/saved|updated|listed/i);
+  await expect(form.getByRole('status')).toContainText(/saved|updated|listed/i);
 }
 
 /** Put the fixture back the way the seed left it, whatever the test did. */
-async function restore(admin: Page, sellingPaise: number): Promise<void> {
+async function restore(admin: Page, price: Price): Promise<void> {
   await selectFixtureStore(admin);
   await setListed(admin, true);
-  await setSellingPrice(admin, sellingPaise);
+  await setPrice(admin, price);
 }
 
 async function addFixtureToBasket(page: Page): Promise<void> {
@@ -102,23 +145,31 @@ async function addFixtureToBasket(page: Page): Promise<void> {
 test.describe.serial('R1 — the shopper is told what the revalidation found', () => {
   test('a quantity change reports the price move it discovered', async ({ page, browser }) => {
     const admin = await openBackOffice(browser);
-    const original = Number(
-      await listingRow(admin)
-        .locator('form')
-        .filter({ hasText: 'Set price' })
-        .getByLabel('Selling (paise)')
-        .inputValue(),
-    );
+    const original = await currentPrice(admin);
+    const raised = original.sellingPricePaise + 5_000;
 
     try {
       await addFixtureToBasket(page);
-      await setSellingPrice(admin, original + 5_000);
 
-      // The shopper knows nothing about any of that; they simply change the
-      // quantity. This submission is the *only* response that can tell them,
-      // because it is the one whose revalidation consumed the difference.
+      // The basket is on screen, showing the old price, and then the shop
+      // changes it. The order matters: loading /cart is itself a revalidation,
+      // so a page opened *after* the change would consume the notice and this
+      // would be testing nothing. A tab left open is the real case.
       await page.goto('/cart');
       const row = page.locator('li').filter({ hasText: FIXTURE });
+      await expect(
+        row.getByText(`₹${(original.sellingPricePaise / 100).toFixed(2)} each`),
+      ).toBeVisible();
+
+      // A price *rise* on purpose: being charged more without being told is the
+      // half of this that actually costs the shopper something.
+      await setPrice(admin, { mrpPaise: raised + 10_000, sellingPricePaise: raised });
+
+      // The shopper knows nothing about any of that; they simply change the
+      // quantity, on the page they were already looking at. This submission is
+      // the *only* response that can tell them, because it is the one whose
+      // revalidation consumed the difference — the re-render behind it finds an
+      // already-updated snapshot and has nothing left to say.
       const qtyForm = row.locator('form').filter({ hasText: 'Update' });
       await qtyForm.getByLabel('Qty').fill('3');
       await qtyForm.getByRole('button', { name: 'Update' }).click();
@@ -128,7 +179,7 @@ test.describe.serial('R1 — the shopper is told what the revalidation found', (
 
       // …and the basket really is priced at the new price, not merely narrating.
       await page.goto('/cart');
-      await expect(row.getByText(`₹${((original + 5_000) / 100).toFixed(2)} each`)).toBeVisible();
+      await expect(row.getByText(`₹${(raised / 100).toFixed(2)} each`)).toBeVisible();
     } finally {
       await restore(admin, original);
       await admin.context().close();
@@ -140,13 +191,7 @@ test.describe.serial('R1 — the shopper is told what the revalidation found', (
     browser,
   }) => {
     const admin = await openBackOffice(browser);
-    const original = Number(
-      await listingRow(admin)
-        .locator('form')
-        .filter({ hasText: 'Set price' })
-        .getByLabel('Selling (paise)')
-        .inputValue(),
-    );
+    const original = await currentPrice(admin);
 
     try {
       await addFixtureToBasket(page);
