@@ -20,7 +20,12 @@ const superAdmin = { kind: 'user', userId: 'u1', role: 'SUPER_ADMIN', storeId: n
 const managerA = { kind: 'user', userId: 'u2', role: 'STORE_MANAGER', storeId: STORE_A } as const;
 const managerB = { kind: 'user', userId: 'u3', role: 'STORE_MANAGER', storeId: STORE_B } as const;
 const staffA = { kind: 'user', userId: 'u4', role: 'STORE_STAFF', storeId: STORE_A } as const;
-const guest = { kind: 'customer', customerId: 'c1' } as const;
+/** A visitor who has not picked a delivery area yet: no account, no store. */
+const visitor = { kind: 'customer', customerId: null, storeId: null } as const;
+/** A guest whose area resolved to store A. Still no account. */
+const shopperA = { kind: 'customer', customerId: null, storeId: STORE_A } as const;
+/** The same shopper once they have created an account. */
+const accountA = { kind: 'customer', customerId: 'c1', storeId: STORE_A } as const;
 const system = { kind: 'system' } as const;
 /** A manager row with no store — a data defect. It must read as *no* access. */
 const unassignedManager = {
@@ -37,11 +42,72 @@ function allows(principal: Principal, action: Action, resource: Resource = inA('
   return authorize(principal, action, resource).allowed;
 }
 
+/**
+ * Exactly what a storefront visitor may do. Everything else is denied, and the
+ * sweep below is what keeps this list honest as `Action` grows: a capability
+ * added for the back office is never silently handed to shoppers.
+ */
+const CUSTOMER_READS: readonly Action[] = [
+  'serviceability:resolve',
+  'category:read',
+  'product:read',
+  'store:read',
+  'store-settings:read',
+  'store-product:read',
+  'inventory:read',
+];
+
 describe('platform/authz — deny by default', () => {
-  it('denies every action to a customer principal', () => {
+  it('grants a shopper their own store’s reads and nothing else', () => {
     for (const action of ALL_ACTIONS) {
-      expect(allows(guest, action)).toBe(false);
+      expect(allows(shopperA, action)).toBe(CUSTOMER_READS.includes(action));
     }
+  });
+
+  // An account changes who you are, never what you may do.
+  it('gives a signed-in customer no more than a guest', () => {
+    for (const action of ALL_ACTIONS) {
+      expect(allows(accountA, action)).toBe(allows(shopperA, action));
+    }
+  });
+
+  it('denies a shopper every write, however the resource is dressed up', () => {
+    const writes = ALL_ACTIONS.filter((action) => !CUSTOMER_READS.includes(action));
+    expect(writes.length).toBeGreaterThan(20);
+    for (const action of writes) {
+      expect(allows(shopperA, action)).toBe(false);
+      expect(allows(shopperA, action, { type: 'Thing', storeId: null })).toBe(false);
+      expect(allows(accountA, action, inB('Thing'))).toBe(false);
+    }
+  });
+
+  it('denies a visitor with no delivery area every store-scoped read', () => {
+    for (const action of ALL_ACTIONS) {
+      const globalRead =
+        action === 'serviceability:resolve' ||
+        action === 'category:read' ||
+        action === 'product:read';
+      expect(allows(visitor, action)).toBe(globalRead);
+    }
+  });
+
+  it('confines a shopper to the store their area resolved to', () => {
+    expect(allows(shopperA, 'store-product:read', inA('StoreProduct'))).toBe(true);
+    expect(allows(shopperA, 'store-product:read', inB('StoreProduct'))).toBe(false);
+    expect(allows(shopperA, 'inventory:read', inB('InventoryItem'))).toBe(false);
+    // A store-scoped read whose resource names no store is refused, not widened.
+    expect(allows(shopperA, 'inventory:read', { type: 'InventoryItem', storeId: null })).toBe(
+      false,
+    );
+  });
+
+  // The two tables are unrelated: neither principal borrows the other's rules.
+  it('keeps the customer table separate from the staff tables', () => {
+    expect(allows(shopperA, 'inventory:adjust', inA('InventoryItem'))).toBe(false);
+    expect(allows(staffA, 'inventory:adjust', inA('InventoryItem'))).toBe(false);
+    expect(allows(managerA, 'inventory:adjust', inA('InventoryItem'))).toBe(true);
+    // …and a staff principal is not treated as a shopper either.
+    expect(allows(managerB, 'store-product:read', inA('StoreProduct'))).toBe(false);
   });
 
   it('denies a manager whose row carries no store, on every store-scoped action', () => {
@@ -195,14 +261,16 @@ describe('platform/authz — store scoping helpers', () => {
     expect(allowedStoreIds(system)).toBeNull();
     expect(allowedStoreIds(managerA)).toEqual([STORE_A]);
     expect(allowedStoreIds(unassignedManager)).toEqual([]);
-    expect(allowedStoreIds(guest)).toEqual([]);
+    expect(allowedStoreIds(visitor)).toEqual([]);
+    expect(allowedStoreIds(shopperA)).toEqual([STORE_A]);
   });
 
   it('isUnscoped agrees with allowedStoreIds', () => {
     expect(isUnscoped(superAdmin)).toBe(true);
     expect(isUnscoped(system)).toBe(true);
     expect(isUnscoped(managerA)).toBe(false);
-    expect(isUnscoped(guest)).toBe(false);
+    expect(isUnscoped(visitor)).toBe(false);
+    expect(isUnscoped(shopperA)).toBe(false);
   });
 
   it('canAccessStore is per-store, not per-role', () => {
@@ -216,7 +284,8 @@ describe('platform/authz — store scoping helpers', () => {
     expect(storeScopeFilter(superAdmin)).toEqual({});
     expect(storeScopeFilter(managerA)).toEqual({ storeId: { in: [STORE_A] } });
     // A principal with no stores must match nothing — never everything.
-    expect(storeScopeFilter(guest)).toEqual({ storeId: { in: [] } });
+    expect(storeScopeFilter(visitor)).toEqual({ storeId: { in: [] } });
+    expect(storeScopeFilter(shopperA)).toEqual({ storeId: { in: [STORE_A] } });
     expect(storeScopeFilter(managerA, 'store_id')).toEqual({ store_id: { in: [STORE_A] } });
   });
 });

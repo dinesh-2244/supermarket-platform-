@@ -78,7 +78,7 @@ describe('identity/domain — role assignment', () => {
 
   it('lets staff and customers assign nothing', () => {
     expect(assignableRoles(staff)).toEqual([]);
-    expect(assignableRoles({ kind: 'customer', customerId: 'c1' })).toEqual([]);
+    expect(assignableRoles({ kind: 'customer', customerId: 'c1', storeId: null })).toEqual([]);
     expect(assignableRoles({ kind: 'system' })).toEqual([]);
   });
 });

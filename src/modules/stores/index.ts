@@ -14,6 +14,7 @@ export {
   getSettings,
   getStore,
   listAreas,
+  listServiceableAreas,
   listStores,
   listZones,
   moduleDescriptor,
@@ -26,6 +27,7 @@ export {
   updateZone,
   type AreaRecord,
   type SettingsRecord,
+  type StorefrontArea,
   type StoreRecord,
   type ZoneRecord,
 } from './service';

@@ -406,6 +406,39 @@ export async function resolveServiceability(
   return resolveServiceabilityFrom(input, await repo.loadAreaCandidates());
 }
 
+/**
+ * The curated delivery areas a storefront visitor may choose between.
+ *
+ * Principal-less on purpose, and the only stores/areas read that is: the
+ * locality picker is the very first thing an anonymous visitor sees, before any
+ * store context exists, so there is nothing yet to scope a principal to. It
+ * returns exactly the routing data `resolveServiceability` already consumes —
+ * area, zone, store and whether that store is open — and nothing about the
+ * business behind it. Ordering is stable so the picker does not reshuffle.
+ */
+export async function listServiceableAreas(): Promise<readonly StorefrontArea[]> {
+  const candidates = await repo.loadAreaCandidates();
+  return candidates
+    .filter((candidate) => candidate.storeIsActive)
+    .map((candidate) => ({
+      areaId: candidate.areaId,
+      areaName: candidate.areaName,
+      pincode: candidate.pincode,
+      storeId: candidate.storeId,
+      isAcceptingOrders: candidate.isAcceptingOrders,
+    }))
+    .sort((a, b) => a.areaName.localeCompare(b.areaName));
+}
+
+/** One row of the locality picker. Deliberately narrower than `AreaCandidate`. */
+export interface StorefrontArea {
+  readonly areaId: string;
+  readonly areaName: string;
+  readonly pincode: string | null;
+  readonly storeId: string;
+  readonly isAcceptingOrders: boolean;
+}
+
 /** Record an out-of-zone attempt as a demand signal (§15). */
 export async function captureServiceabilityRequest(input: ServiceabilityInput): Promise<void> {
   const raw = [input.areaId, input.locality, input.pincode].filter(Boolean).join(' ').trim();
