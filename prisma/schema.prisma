@@ -132,6 +132,7 @@ model Store {
   inventoryItems InventoryItem[]
   stockLedger    StockLedger[]
   posSkuMaps     PosSkuMap[]
+  inventoryImports InventoryImport[]
   users          User[]
   carts          Cart[]
   orders         Order[]
@@ -154,6 +155,10 @@ model StoreSettings {
   priceVariancePercentBp   Int                @default(500)
   priceVarianceAbsCapPaise Int                @default(5000)
   isAcceptingOrders        Boolean            @default(true)
+  /// At or below this `websiteStock`, an item is reported low and a downward
+  /// crossing emits `stock.low`. A per-store business setting, not env (§22):
+  /// a small store and a large one do not agree on what "running out" means.
+  lowStockThreshold        Int                @default(5)
   createdAt                DateTime           @default(now())
   updatedAt                DateTime           @updatedAt
 
@@ -357,6 +362,29 @@ model StockLedger {
   @@index([refType, refId])
 }
 
+/// One stock-import attempt: who ran it, over what file, and what it did (D6).
+/// Kept whether the import applied or was rejected — a refused import with its
+/// per-row errors is exactly what the operator needs to fix the file.
+model InventoryImport {
+  id            String   @id @default(uuid())
+  storeId       String
+  filename      String
+  mode          String
+  /// `dry-run`, `applied` or `rejected`.
+  outcome       String
+  rowCount      Int      @default(0)
+  appliedCount  Int      @default(0)
+  errorCount    Int      @default(0)
+  /// Per-row errors, as `[{ line, sku, message }]`. Empty on success.
+  errorsJson    Json?
+  actorUserId   String?
+  createdAt     DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, createdAt])
+}
+
 /// Reserved for future POS inventory sync (R14 / ADR-0007). Unused in V1.
 model PosSkuMap {
   id        String   @id @default(uuid())
@@ -448,6 +476,12 @@ model AuditLog {
   action     String
   entityType String
   entityId   String
+  /// The store this change *belonged to*, stamped when the entry is written and
+  /// never updated. Null for genuinely global changes (the catalogue master, a
+  /// SUPER_ADMIN account). Historical tenancy must not be inferred from the
+  /// actor's current store assignment: transferring a manager between stores
+  /// would otherwise hand their new colleagues the old store's history.
+  storeId    String?
   beforeJson Json?
   afterJson  Json?
   ip         String?
@@ -455,6 +489,7 @@ model AuditLog {
 
   @@index([entityType, entityId, createdAt])
   @@index([actorId, createdAt])
+  @@index([storeId, createdAt])
 }
 
 // ---------------------------------------------------------------------------

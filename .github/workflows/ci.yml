@@ -30,8 +30,8 @@ jobs:
         run: npm run lint
       - name: Format check
         run: npm run format
-      - name: Unit tests + coverage gate
-        run: npm run test:coverage
+      - name: Unit tests
+        run: npm test
 
       - name: Audit dependencies
         run: npm audit --audit-level=high
@@ -78,5 +78,7 @@ jobs:
         run: npx prisma migrate deploy
       - name: Seed
         run: npm run db:seed
-      - name: Integration tests
-        run: npm run test:integration
+      # The coverage gate lives here, not in the static job: it measures the
+      # whole suite, and most of what it measures needs this database.
+      - name: Integration tests + coverage gate
+        run: npm run test:coverage
