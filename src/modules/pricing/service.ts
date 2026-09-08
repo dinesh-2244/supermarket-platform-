@@ -85,10 +85,15 @@ export async function setPrice(
   await getProduct(principal, productId);
 
   const outcome = await withTransaction(async (tx) => {
-    // The before-state is read *under the row lock*, inside the same transaction
-    // as the write and the history row. Reading it beforehand meant two
-    // concurrent edits both recorded the same stale "old price", so the history
-    // stopped reconstructing the actual sequence of prices.
+    // Take the *key* lock before asking whether the listing exists: a missing
+    // row has no row lock, so without this two simultaneous first prices both
+    // saw `before === null` and both recorded a history entry starting at zero.
+    await repo.lockListingPair(tx, storeId, productId);
+
+    // The before-state is read *under the lock*, inside the same transaction as
+    // the write and the history row. Reading it beforehand meant two concurrent
+    // edits both recorded the same stale "old price", so the history stopped
+    // reconstructing the actual sequence of prices.
     const before = await repo.lockListingForPair(tx, storeId, productId);
 
     const listing = await repo.upsertListing(tx, {
@@ -155,8 +160,13 @@ export async function setListed(
   assertAuthorized(principal, 'store-product:list', { type: 'StoreProduct', storeId });
 
   return withTransaction(async (tx) => {
-    // Same reasoning as setPrice: read under the lock, so a concurrent toggle
-    // cannot be overwritten from a stale value.
+    // Same reasoning as setPrice, and the same pair lock: listing and pricing
+    // mutate the same row, so they must contend for the same lock or a toggle
+    // could interleave with the upsert that creates the listing.
+    await repo.lockListingPair(tx, storeId, productId);
+
+    // Read under the lock, so a concurrent toggle cannot be overwritten from a
+    // stale value.
     const before = await repo.lockListingForPair(tx, storeId, productId);
     if (before === null) {
       throw new NotFoundError('That product is not set up for this store yet — set a price first', {

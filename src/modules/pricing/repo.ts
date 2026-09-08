@@ -100,14 +100,44 @@ export async function listListings(
 }
 
 /**
+ * Serialise every mutation of one store's listing of one product, whether or not
+ * that listing exists yet.
+ *
+ * `lockListingForPair` below locks a row — which is exactly nothing when the row
+ * is missing. Two concurrent *first* prices therefore both read `before === null`
+ * and both recorded a history entry starting from zero (0→300 and 0→200), so the
+ * very first price of a product had the same broken history R4 was raised about.
+ * There is no row whose lock the two transactions would contend for, so the lock
+ * has to be on the *key* rather than on the row.
+ *
+ * A transaction-scoped advisory lock on `(classid, hash(storeId:productId))` is
+ * that key lock, taken before existence is read. It is released automatically
+ * when the transaction ends, so a failure cannot strand it, and a hash collision
+ * only makes two unrelated pairs briefly serial — never incorrect. Setting a
+ * price is a rare human action; making it strictly serial per product costs
+ * nothing anyone will notice.
+ */
+const LISTING_PAIR_LOCK = 0x0_11_57;
+
+export async function lockListingPair(tx: Tx, storeId: string, productId: string): Promise<void> {
+  await auditedExecutor(tx).$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      ${LISTING_PAIR_LOCK}::int,
+      hashtext(${`${storeId}:${productId}`})
+    )
+  `;
+}
+
+/**
  * Read a listing for mutation, holding its row lock until the transaction ends.
  *
  * Reading the before-state *outside* the transaction meant two concurrent edits
  * both saw the original price, and both wrote a `PriceChange` claiming to start
  * from it — so a 100→200→300 sequence was recorded as 100→200 and 100→300, and
  * the history no longer reconstructed the actual path. Raw SQL because Prisma
- * has no `FOR UPDATE`. Returns `null` when the store has no listing yet, in
- * which case there is nothing to lock and the upsert creates it.
+ * has no `FOR UPDATE`. Returns `null` when the store has no listing yet — the
+ * caller must already hold {@link lockListingPair}, which is what serialises the
+ * missing-row case.
  */
 export async function lockListingForPair(
   tx: Tx,

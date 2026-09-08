@@ -27,6 +27,8 @@ let productA: string;
 let skuA: string;
 let categoryId: string;
 const userIds: string[] = [];
+/** Products created inside a test, torn down with the rest of the fixture. */
+const extraProductIds: string[] = [];
 
 /** Wait until `check()` is true, polling — for "has the writer blocked yet?". */
 async function until(check: () => Promise<boolean>, timeoutMs = 10_000): Promise<void> {
@@ -99,7 +101,7 @@ afterAll(async () => {
   await prisma.auditLog.deleteMany({ where: { actorId: { in: [...userIds, 'con-bootstrap'] } } });
   await prisma.priceChange.deleteMany({ where: { storeProduct: { storeId: storeA } } });
   await prisma.storeProduct.deleteMany({ where: { storeId: storeA } });
-  await prisma.product.deleteMany({ where: { id: productA } });
+  await prisma.product.deleteMany({ where: { id: { in: [productA, ...extraProductIds] } } });
   await prisma.category.deleteMany({ where: { name: { contains: suffix } } });
   await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
   await prisma.user.deleteMany({ where: { id: { in: userIds } } });
@@ -304,6 +306,100 @@ describe('R4 — concurrent price edits must record the real previous price', ()
     } finally {
       await holder.$disconnect();
     }
+  }, 60_000);
+});
+
+describe('R4 — the *first* price of a product must chain too', () => {
+  /**
+   * OSCAR's residual: the row lock protects an existing listing, but a listing
+   * that does not exist yet has no row to lock, so two simultaneous first prices
+   * both read `before === null` and both recorded a change starting from zero
+   * (0→300 *and* 0→200) instead of chaining. Reachable from the first-price UI
+   * with entirely valid input.
+   *
+   * The barrier is the `Product` row: inserting a `StoreProduct` takes a
+   * `FOR KEY SHARE` lock on its parent, which a held `FOR UPDATE` blocks — so
+   * both writers are stopped in the middle of creating the listing.
+   */
+  it('serialises two simultaneous first prices on the pair, not on the row', async () => {
+    const fresh = await createProduct(admin, {
+      sku: `CONF-${suffix}`,
+      name: `First Price ${suffix}`,
+      packSize: '1 kg',
+      categoryId,
+    });
+    extraProductIds.push(fresh.id);
+
+    const holder = new PrismaClient();
+    try {
+      const writers: Promise<unknown>[] = [];
+
+      await holder.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Product" WHERE "id" = ${fresh.id} FOR UPDATE`;
+
+        writers.push(
+          setPrice(managerA, storeA, fresh.id, { mrpPaise: 10_000, sellingPricePaise: 300 }),
+        );
+        await until(() => waitingBackends(1));
+        writers.push(
+          setPriceAgain(managerA, storeA, fresh.id, { mrpPaise: 10_000, sellingPricePaise: 200 }),
+        );
+        // Both are stopped: one on the foreign key, one on the pair lock.
+        await until(() => waitingBackends(2));
+      });
+
+      await Promise.all(writers);
+
+      const listing = await getListing(admin, storeA, fresh.id);
+      expect(listing).not.toBeNull();
+
+      const history = await listPriceHistory(admin, listing!.id, 20);
+      const chain = [...history].reverse();
+      expect(chain).toHaveLength(2);
+
+      // Exactly one entry may start from "no price". The old behaviour had two.
+      expect(chain.filter((change) => change.oldSellingPricePaise === 0)).toHaveLength(1);
+      expect(chain[0]?.oldSellingPricePaise).toBe(0);
+
+      for (const [index, change] of chain.entries()) {
+        if (index === 0) continue;
+        expect(change.oldSellingPricePaise).toBe(chain[index - 1]!.newSellingPricePaise);
+        expect(change.oldMrpPaise).toBe(chain[index - 1]!.newMrpPaise);
+      }
+
+      // …and the end of the chain is the price the store is actually charging.
+      expect(chain.at(-1)?.newSellingPricePaise).toBe(listing?.sellingPricePaise);
+      expect([200, 300]).toContain(listing?.sellingPricePaise);
+    } finally {
+      await holder.$disconnect();
+    }
+  }, 60_000);
+
+  // Whichever order they land in, the same invariant must hold with no barrier
+  // at all — the fix must not depend on the shape of the repro.
+  it('chains an unbarriered pair of first prices', async () => {
+    const fresh = await createProduct(admin, {
+      sku: `CONF2-${suffix}`,
+      name: `First Price Two ${suffix}`,
+      packSize: '1 kg',
+      categoryId,
+    });
+    extraProductIds.push(fresh.id);
+
+    await Promise.all([
+      setPrice(managerA, storeA, fresh.id, { mrpPaise: 10_000, sellingPricePaise: 111 }),
+      setPriceAgain(managerA, storeA, fresh.id, { mrpPaise: 10_000, sellingPricePaise: 222 }),
+    ]);
+
+    const listing = await getListing(admin, storeA, fresh.id);
+    const chain = [...(await listPriceHistory(admin, listing!.id, 20))].reverse();
+
+    expect(chain.filter((change) => change.oldSellingPricePaise === 0)).toHaveLength(1);
+    for (const [index, change] of chain.entries()) {
+      if (index === 0) continue;
+      expect(change.oldSellingPricePaise).toBe(chain[index - 1]!.newSellingPricePaise);
+    }
+    expect(chain.at(-1)?.newSellingPricePaise).toBe(listing?.sellingPricePaise);
   }, 60_000);
 });
 
