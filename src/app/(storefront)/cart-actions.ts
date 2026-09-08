@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { addItem, ensureCart, removeItem, setQuantity } from '@/modules/cart';
 import { isAppError } from '@/modules/platform';
 import {
+  clearCartMoveNotice,
   currentCartToken,
   currentStoreContext,
   setCartTokenCookie,
@@ -21,6 +22,10 @@ import {
  */
 async function run(body: () => Promise<string>): Promise<string> {
   try {
+    // Any deliberate action on the basket supersedes the "your basket moved"
+    // notice from an earlier area change, so it goes here rather than being
+    // consumed by the page — which Next.js does not allow.
+    await clearCartMoveNotice();
     return await body();
   } catch (error) {
     if (isAppError(error)) return `!${error.message}`;

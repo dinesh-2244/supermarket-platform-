@@ -116,3 +116,101 @@ export async function setCartTokenCookie(token: string): Promise<void> {
     secure: process.env.NODE_ENV === 'production',
   });
 }
+
+// ---------------------------------------------------------------------------
+// One-shot notices
+// ---------------------------------------------------------------------------
+
+/**
+ * A message that survives a redirect.
+ *
+ * Moving a basket between shops happens during a redirect, so the page that
+ * must explain what carried over and what was dropped is not the page that did
+ * the work. A short-lived `HttpOnly` cookie carries the summary across.
+ *
+ * Deliberately not a query string: the summary names products, and a URL people
+ * bookmark and share is the wrong place for the contents of their basket.
+ *
+ * **It is cleared by the next server action, not by reading it.** Next.js only
+ * permits cookie mutation in a server action or route handler — a page that
+ * deleted it while rendering crashes the request — so the notice is dropped by
+ * `clearCartMoveNotice` at the start of every basket action and every area
+ * change, and expires on its own after a minute regardless. The effect a
+ * shopper sees is the same: it appears once, and goes as soon as they do
+ * anything at all.
+ */
+export const CART_NOTICE_COOKIE = 'cartNotice';
+
+export interface CartMoveNotice {
+  readonly storeName: string;
+  readonly carried: readonly string[];
+  readonly dropped: readonly string[];
+}
+
+/** Names are capped so a large basket cannot produce an unusable header. */
+const MAX_NAMED = 6;
+
+export async function setCartMoveNotice(notice: CartMoveNotice): Promise<void> {
+  const jar = await cookies();
+  jar.set(
+    CART_NOTICE_COOKIE,
+    JSON.stringify({
+      storeName: notice.storeName,
+      carried: notice.carried.slice(0, MAX_NAMED),
+      dropped: notice.dropped.slice(0, MAX_NAMED),
+      carriedTotal: notice.carried.length,
+      droppedTotal: notice.dropped.length,
+    }),
+    {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60,
+      secure: process.env.NODE_ENV === 'production',
+    },
+  );
+}
+
+export interface ReadCartMoveNotice extends CartMoveNotice {
+  readonly carriedTotal: number;
+  readonly droppedTotal: number;
+}
+
+/**
+ * Read the notice, if there is one.
+ *
+ * Everything is re-validated on the way out, because a cookie is a cookie: a
+ * hand-written one can only ever produce a harmless message, never a claim the
+ * page acts on.
+ */
+export async function readCartMoveNotice(): Promise<ReadCartMoveNotice | null> {
+  const jar = await cookies();
+  const raw = jar.get(CART_NOTICE_COOKIE)?.value ?? '';
+  if (raw === '') return null;
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const value = parsed as Record<string, unknown>;
+    return {
+      storeName: typeof value.storeName === 'string' ? value.storeName : 'your new shop',
+      carried: stringList(value.carried),
+      dropped: stringList(value.dropped),
+      carriedTotal: typeof value.carriedTotal === 'number' ? value.carriedTotal : 0,
+      droppedTotal: typeof value.droppedTotal === 'number' ? value.droppedTotal : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function stringList(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === 'string').slice(0, MAX_NAMED);
+}
+
+/** Drop the notice. Only callable from a server action — see the note above. */
+export async function clearCartMoveNotice(): Promise<void> {
+  const jar = await cookies();
+  jar.delete(CART_NOTICE_COOKIE);
+}

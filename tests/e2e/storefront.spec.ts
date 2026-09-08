@@ -19,6 +19,14 @@ async function pickFirstArea(page: Page): Promise<string> {
   return (name ?? '').trim();
 }
 
+/** Pick a named seeded area — S1 and S2 are served by different shops. */
+async function pickArea(page: Page, areaName: string): Promise<void> {
+  await page.goto('/locality');
+  const row = page.locator('form').filter({ hasText: areaName });
+  await row.getByRole('button', { name: 'Deliver here' }).click();
+  await expect(page).toHaveURL(/\/$|\/\?/);
+}
+
 test.describe.serial('storefront', () => {
   test('a first-time visitor is asked where they live before seeing any prices', async ({
     page,
@@ -299,6 +307,45 @@ test.describe.serial('storefront', () => {
     await expect(page.getByText(/your basket is empty/i)).toBeVisible();
     await page.getByRole('link', { name: 'Start shopping' }).click();
     await expect(page).toHaveURL(/\/$|\/\?/);
+  });
+
+  test('moving to an area served by the other shop rebuilds the basket', async ({ page }) => {
+    // "Jayanagar 4th Block" is served by S1; "Indiranagar 1st Stage" by S2.
+    await pickArea(page, 'Jayanagar 4th Block');
+    const firstStore = await page.getByRole('heading', { name: /shopping at/i }).textContent();
+
+    await page.locator('article a[href^="/p/"]').first().click();
+    const addForm = page.locator('form').filter({ hasText: 'Add to basket' });
+    await addForm.getByRole('button', { name: 'Add to basket' }).click();
+    await expect(addForm.getByRole('status')).toContainText(/in your basket/i);
+
+    await pickArea(page, 'Indiranagar 1st Stage');
+    const secondStore = await page.getByRole('heading', { name: /shopping at/i }).textContent();
+    // Genuinely the other shop, or this test proves nothing.
+    expect(secondStore).not.toBe(firstStore);
+
+    await page.goto('/cart');
+    const notice = page.getByRole('status').first();
+    await expect(notice).toContainText(/your basket moved to/i);
+    // The summary names what happened, rather than only counting it.
+    await expect(notice).toContainText(/came with you|removed/i);
+  });
+
+  test('moving within the same shop leaves the basket alone', async ({ page }) => {
+    // Both areas are served by S1.
+    await pickArea(page, 'Jayanagar 4th Block');
+    await page.locator('article a[href^="/p/"]').first().click();
+    const addForm = page.locator('form').filter({ hasText: 'Add to basket' });
+    await addForm.getByLabel('Quantity').fill('2');
+    await addForm.getByRole('button', { name: 'Add to basket' }).click();
+    await expect(addForm.getByRole('status')).toContainText(/in your basket/i);
+
+    await pickArea(page, 'Jayanagar 7th Block');
+
+    await page.goto('/cart');
+    // No move notice, and the basket is exactly as it was.
+    await expect(page.getByText(/your basket moved to/i)).toHaveCount(0);
+    await expect(page.getByText(/subtotal \(2 item\(s\)\)/i)).toBeVisible();
   });
 
   test('the storefront does not scroll sideways on a small phone', async ({ page }) => {

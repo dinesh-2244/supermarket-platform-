@@ -2,9 +2,17 @@
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { rebuildForStore } from '@/modules/cart';
 import { isAppError } from '@/modules/platform';
-import { captureServiceabilityRequest, resolveServiceability } from '@/modules/stores';
-import { STORE_CONTEXT_COOKIE, STORE_CONTEXT_MAX_AGE_SECONDS } from '@/storefront';
+import { captureServiceabilityRequest, getStore, resolveServiceability } from '@/modules/stores';
+import {
+  clearCartMoveNotice,
+  currentCartToken,
+  setCartMoveNotice,
+  STORE_CONTEXT_COOKIE,
+  STORE_CONTEXT_MAX_AGE_SECONDS,
+  storefrontPrincipal,
+} from '@/storefront';
 
 /**
  * Server actions for the storefront shell.
@@ -59,6 +67,32 @@ export async function chooseAreaAction(
       maxAge: STORE_CONTEXT_MAX_AGE_SECONDS,
       secure: process.env.NODE_ENV === 'production',
     });
+
+    // The basket follows the shopper (D5). `rebuildForStore` is a no-op when the
+    // new area is served by the same shop, and otherwise re-prices what the new
+    // shop sells and drops what it does not — as one transaction, so the basket
+    // is never half-moved between two stores.
+    const cartToken = await currentCartToken();
+    if (cartToken === null) {
+      await clearCartMoveNotice();
+    } else {
+      const context = { areaId, serviceability: result };
+      const principal = storefrontPrincipal(context);
+      const outcome = await rebuildForStore(principal, cartToken, result.storeId);
+
+      if (outcome.carried.length > 0 || outcome.dropped.length > 0) {
+        const store = await getStore(principal, result.storeId);
+        await setCartMoveNotice({
+          storeName: store.name,
+          carried: outcome.carried,
+          dropped: outcome.dropped,
+        });
+      } else {
+        // Same shop, or an empty basket: nothing moved, so a leftover notice
+        // from an earlier switch must not be shown again.
+        await clearCartMoveNotice();
+      }
+    }
     return 'ok';
   });
 

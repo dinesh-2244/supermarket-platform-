@@ -2,7 +2,13 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { MAX_LINE_QUANTITY, viewCart, type CartLine, type LineIssue } from '@/modules/cart';
-import { currentCartToken, currentStoreContext, storefrontPrincipal } from '@/storefront';
+import {
+  currentCartToken,
+  currentStoreContext,
+  storefrontPrincipal,
+  readCartMoveNotice,
+} from '@/storefront';
+import type { ReadCartMoveNotice } from '@/storefront';
 import { removeFromCartAction, setCartQuantityAction } from '../cart-actions';
 import { ActionForm } from '../form';
 import { rupees, Card, Empty, PageHeading } from '../ui';
@@ -26,11 +32,15 @@ export default async function CartPage(): Promise<React.ReactElement> {
 
   const cartToken = await currentCartToken();
   const cart = cartToken === null ? null : await viewCart(storefrontPrincipal(context), cartToken);
+  // Written by the area switch that produced it, cleared by the next basket
+  // action — a page may not mutate cookies while rendering (D5).
+  const moved = await readCartMoveNotice();
 
   if (cart === null || cart.lines.length === 0) {
     return (
       <>
         <PageHeading title="Your basket" />
+        {moved === null ? null : <MoveNotice notice={moved} />}
         <Card>
           <Empty>Your basket is empty.</Empty>
           <p className="text-center text-sm">
@@ -51,6 +61,8 @@ export default async function CartPage(): Promise<React.ReactElement> {
         title="Your basket"
         subtitle="Prices and availability are checked against the shop every time you look."
       />
+
+      {moved === null ? null : <MoveNotice notice={moved} />}
 
       {cart.removed.length === 0 ? null : (
         <p className="mb-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -114,6 +126,44 @@ export default async function CartPage(): Promise<React.ReactElement> {
         </div>
       </Card>
     </>
+  );
+}
+
+/**
+ * What happened when the basket followed the shopper to another shop.
+ *
+ * Both halves are named, not counted: "3 items were dropped" tells a shopper
+ * nothing they can act on, and the whole point of a rebuild is that the two
+ * shops stock different things.
+ */
+function MoveNotice({ notice }: { notice: ReadCartMoveNotice }): React.ReactElement {
+  return (
+    <p
+      role="status"
+      className="mb-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+    >
+      Your basket moved to {notice.storeName}, and is now priced there.
+      {notice.carriedTotal === 0 ? null : (
+        <>
+          {' '}
+          Came with you: {notice.carried.join(', ')}
+          {notice.carriedTotal > notice.carried.length
+            ? ` and ${String(notice.carriedTotal - notice.carried.length)} more`
+            : ''}
+          .
+        </>
+      )}
+      {notice.droppedTotal === 0 ? null : (
+        <>
+          {' '}
+          Not sold or not in stock there, so removed: {notice.dropped.join(', ')}
+          {notice.droppedTotal > notice.dropped.length
+            ? ` and ${String(notice.droppedTotal - notice.dropped.length)} more`
+            : ''}
+          .
+        </>
+      )}
+    </p>
   );
 }
 
