@@ -7,6 +7,7 @@ import { isAppError } from '@/modules/platform';
 import { captureServiceabilityRequest, getStore, resolveServiceability } from '@/modules/stores';
 import {
   clearCartMoveNotice,
+  clearStoreContext,
   currentCartToken,
   setCartMoveNotice,
   STORE_CONTEXT_COOKIE,
@@ -57,7 +58,15 @@ export async function chooseAreaAction(
     if (areaId === '') return '!Choose a delivery area first.';
 
     const result = await resolveServiceability({ areaId });
-    if (!result.servable) return `!unserviceable:${result.reason}`;
+    if (!result.servable) {
+      // The *previous* context has to go too. Leaving it meant the redirect to
+      // /unserviceable was cosmetic: the shopper's cookie still named the old
+      // area, so /cart opened the old shop's basket and add/update kept working
+      // against a store they had just been told does not serve them (R5).
+      await clearStoreContext();
+      await clearCartMoveNotice();
+      return `!unserviceable:${result.reason}`;
+    }
 
     const jar = await cookies();
     jar.set(STORE_CONTEXT_COOKIE, areaId, {
@@ -112,8 +121,7 @@ export async function chooseAreaAction(
  * still has their basket when they choose again (D5).
  */
 export async function clearAreaAction(): Promise<void> {
-  const jar = await cookies();
-  jar.delete(STORE_CONTEXT_COOKIE);
+  await clearStoreContext();
   redirect('/locality');
 }
 

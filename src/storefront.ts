@@ -28,6 +28,22 @@ export const STORE_CONTEXT_COOKIE = 'storeContext';
 /** A month. Long enough that a returning shopper is not re-asked constantly. */
 export const STORE_CONTEXT_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
+/**
+ * Forget which area the visitor picked.
+ *
+ * Called wherever a context stops being valid, not only from the header's
+ * "change area" control: a picker submission that turns out to be unserviceable
+ * used to leave the *previous* context in place, so the shopper was sent to the
+ * "we are not there yet" page and could then walk straight back into the old
+ * shop's basket and buy from it (R5). The cart cookie is deliberately untouched
+ * — a shopper between addresses keeps their basket (D5); it simply has no shop
+ * to be rendered against until they choose again.
+ */
+export async function clearStoreContext(): Promise<void> {
+  const jar = await cookies();
+  jar.delete(STORE_CONTEXT_COOKIE);
+}
+
 /** The resolved context for this request: which area, and the store it serves. */
 export interface StoreContext {
   readonly areaId: string;
