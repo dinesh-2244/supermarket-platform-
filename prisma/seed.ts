@@ -21,6 +21,11 @@ import argon2 from 'argon2';
 const prisma = new PrismaClient();
 
 /** Shared dev password. Never used outside a local/CI database. */
+/** Dev-only demo shopper. Never a real credential — see the README. */
+const DEV_CUSTOMER_EMAIL = 'shopper@munderfresh.local';
+const DEV_CUSTOMER_PHONE = '9800000001';
+const DEV_CUSTOMER_PASSWORD = 'ShopperPass1';
+
 const DEV_PASSWORD = 'DevPassw0rd!';
 
 const CATEGORIES = [
@@ -517,6 +522,62 @@ async function seedUsers(storeIds: Map<string, string>): Promise<void> {
   }
 }
 
+/**
+ * One demo shopper, so the storefront can be opened signed-in without anybody
+ * having to sign up first (D8).
+ *
+ * Deliberately **one**: the storefront's whole point is that an account is
+ * optional, and a seed full of customers would suggest otherwise. The default
+ * address points at a real seeded area so the account area has something
+ * truthful to show.
+ *
+ * Idempotent like the rest of the seed — re-running it leaves exactly this.
+ */
+async function seedCustomer(): Promise<void> {
+  const passwordHash = await argon2.hash(DEV_CUSTOMER_PASSWORD, {
+    type: argon2.argon2id,
+    memoryCost: 19_456,
+    timeCost: 2,
+    parallelism: 1,
+  });
+
+  const customer = await prisma.customer.upsert({
+    where: { email: DEV_CUSTOMER_EMAIL },
+    update: { passwordHash, isBlocked: false },
+    create: {
+      email: DEV_CUSTOMER_EMAIL,
+      name: 'Demo Shopper',
+      phone: DEV_CUSTOMER_PHONE,
+      passwordHash,
+    },
+  });
+
+  // Their default address, in an area store 1 really serves.
+  const area = await prisma.deliveryArea.findFirst({
+    where: { name: 'Jayanagar 4th Block' },
+    select: { id: true, pincode: true },
+  });
+
+  const existing = await prisma.customerAddress.findFirst({
+    where: { customerId: customer.id, label: 'Home', isDeleted: false },
+    select: { id: true },
+  });
+  if (existing !== null) return;
+
+  await prisma.customerAddress.create({
+    data: {
+      customerId: customer.id,
+      label: 'Home',
+      line1: '221, 9th Main',
+      line2: 'Jayanagar 4th Block',
+      landmark: 'Opposite the park',
+      areaId: area?.id ?? null,
+      pincode: area?.pincode ?? null,
+      isDefault: true,
+    },
+  });
+}
+
 async function seedFeatureFlags(): Promise<void> {
   const flags = [
     {
@@ -555,6 +616,7 @@ async function main(): Promise<void> {
   }
 
   await seedUsers(storeIds);
+  await seedCustomer();
   await seedFeatureFlags();
 
   const counts = {
@@ -564,6 +626,7 @@ async function main(): Promise<void> {
     inventoryItems: await prisma.inventoryItem.count(),
     deliveryAreas: await prisma.deliveryArea.count(),
     users: await prisma.user.count(),
+    customers: await prisma.customer.count(),
     featureFlags: await prisma.featureFlag.count(),
   };
   console.log('Seed complete:', counts);
