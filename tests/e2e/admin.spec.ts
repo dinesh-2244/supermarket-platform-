@@ -395,6 +395,71 @@ test.describe.serial('back office', () => {
     await expect(notice).toContainText('→ 77');
   });
 
+  /**
+   * R10/R12 interaction: a dry run that found problems is not a successful
+   * preview. It used to render "Dry run — nothing was written. 0 row(s) would
+   * change", which hid the unknown SKU entirely and looked like a clean file.
+   */
+  test('an invalid dry run shows the errors instead of a clean preview', async ({ page }) => {
+    await signIn(page, managerEmail, MANAGER_PASSWORD);
+    await page.goto('/admin/inventory');
+
+    const importForm = page.locator('form').filter({ hasText: 'Run import' });
+    const filename = `e2e-invalid-dry-${run}.csv`;
+    await importForm.getByLabel('CSV file').setInputFiles({
+      name: filename,
+      mimeType: 'text/csv',
+      buffer: Buffer.from(`sku,quantity
+NO-SUCH-SKU-${run},1
+`),
+    });
+    // Dry run stays checked — this is the default path an operator takes first.
+    await importForm.getByRole('button', { name: 'Run import' }).click();
+
+    const notice = importForm.getByRole('status');
+    await expect(notice).toContainText(/No product with that SKU/i);
+    await expect(notice).toContainText(/would be refused/i);
+    // The reassuring "0 row(s) would change" preview must not appear.
+    await expect(notice).not.toContainText(/row\(s\) would change/i);
+
+    // A dry run still writes nothing at all: no history row for this file.
+    await expect(page.getByRole('cell', { name: filename })).toHaveCount(0);
+  });
+
+  test('a mixed valid/invalid dry run previews nothing and names the bad row', async ({ page }) => {
+    await signIn(page, managerEmail, MANAGER_PASSWORD);
+    await page.goto('/admin/inventory');
+
+    const stockCell = page
+      .getByRole('row')
+      .filter({ hasText: FIXTURE_SKU })
+      .first()
+      .getByRole('cell')
+      .nth(2);
+    const before = (await stockCell.textContent())?.trim();
+
+    const importForm = page.locator('form').filter({ hasText: 'Run import' });
+    const filename = `e2e-mixed-dry-${run}.csv`;
+    await importForm.getByLabel('CSV file').setInputFiles({
+      name: filename,
+      mimeType: 'text/csv',
+      buffer: Buffer.from(
+        `sku,quantity,mode\n${FIXTURE_SKU},4321,set\nSTILL-NO-SKU-${run},9,set\n`,
+      ),
+    });
+    await importForm.getByRole('button', { name: 'Run import' }).click();
+
+    const notice = importForm.getByRole('status');
+    await expect(notice).toContainText(/No product with that SKU/i);
+    // The valid row must NOT be previewed as though it would apply: one bad row
+    // rejects the whole file, so "4321" is not what would happen.
+    await expect(notice).not.toContainText('4321');
+
+    await expect(page.getByRole('cell', { name: filename })).toHaveCount(0);
+    // …and the stock this file claimed to set is untouched.
+    await expect(stockCell).toHaveText(before ?? '');
+  });
+
   test('the ledger can be filtered by reason', async ({ page }) => {
     await signIn(page, managerEmail, MANAGER_PASSWORD);
     await page.goto('/admin/inventory');

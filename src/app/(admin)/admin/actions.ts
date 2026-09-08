@@ -482,12 +482,21 @@ export async function importStockAction(_state: ActionState, form: FormData): Pr
 
     revalidatePath('/admin/inventory');
 
-    if (result.outcome === 'rejected') {
+    // Errors first, whatever the outcome. A dry run that found problems is not a
+    // successful preview: reporting it as "0 row(s) would change" hid the very
+    // reason the real import would be refused, and a mixed file previewed only
+    // its valid rows although one bad row rejects the whole file.
+    if (!result.ok) {
       const first = result.errors
         .slice(0, 3)
         .map((error) => `line ${String(error.line)}: ${error.message}`)
         .join('; ');
-      return `!Nothing was imported — ${String(result.errors.length)} problem(s). ${first}`;
+      const more = result.errors.length > 3 ? ` …and ${String(result.errors.length - 3)} more` : '';
+      const lead =
+        result.outcome === 'dry-run'
+          ? 'Dry run — nothing was written, and this file would be refused'
+          : 'Nothing was imported';
+      return `!${lead} — ${String(result.errors.length)} problem(s). ${first}${more}`;
     }
     if (result.outcome === 'dry-run') {
       // The per-row diff, not just a count: "12 rows would change" is not enough
