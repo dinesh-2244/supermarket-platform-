@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Prisma } from '@prisma/client';
 import { getPrisma, type Principal } from '@/modules/platform';
-import { addAddress, listAddresses, signUp } from '@/modules/customers';
+import {
+  addAddress,
+  listAddresses,
+  removeAddress,
+  signUp,
+  updateAddress,
+} from '@/modules/customers';
 import { adoptCart, ensureCart } from '@/modules/cart';
 import { createStore } from '../factories/index';
 
@@ -31,6 +37,7 @@ let storeB: string;
 let customerId: string;
 let racerId: string;
 let cartCustomerId: string;
+let residualId: string;
 const cartTokens: string[] = [];
 
 async function makeCustomer(tag: string, digit: string): Promise<string> {
@@ -91,10 +98,11 @@ beforeAll(async () => {
   customerId = await makeCustomer('race-addr', '91');
   racerId = await makeCustomer('race-cart', '92');
   cartCustomerId = await makeCustomer('race-bind', '93');
+  residualId = await makeCustomer('race-default', '94');
 });
 
 afterAll(async () => {
-  const customers = [customerId, racerId, cartCustomerId];
+  const customers = [customerId, racerId, cartCustomerId, residualId];
   await prisma.cartItem.deleteMany({ where: { cart: { cartToken: { in: cartTokens } } } });
   await prisma.cart.deleteMany({ where: { cartToken: { in: cartTokens } } });
   await prisma.customerAddress.deleteMany({ where: { customerId: { in: customers } } });
@@ -133,6 +141,63 @@ describe('R2 — two addresses claiming the default at once', () => {
     const listed = await listAddresses(shopper);
     expect(listed.filter((row) => row.isDefault)).toHaveLength(1);
     expect(listed[0]?.isDefault).toBe(true);
+  });
+});
+
+describe('R2 residual — promoting an address while it is being removed', () => {
+  it('never leaves live addresses with no default', async () => {
+    const shopper: Principal = { kind: 'customer', customerId: residualId, storeId: storeA };
+    const keeper = await addAddress(shopper, { line1: `10 Keeper Street ${suffix}` });
+    const contested = await addAddress(shopper, { line1: `11 Contested Street ${suffix}` });
+    expect(keeper.isDefault).toBe(true);
+    expect(contested.isDefault).toBe(false);
+
+    // The two requests must decide the *same* question — "is this address the
+    // default?" — from the same state. Taking the lock is not enough on its own:
+    // the removal read `isDefault: false` before it queued, and acted on that
+    // answer after the promotion had already made it wrong.
+    let both: Promise<unknown> = Promise.resolve();
+    await whileHolding(
+      Prisma.sql`SELECT "id" FROM "CustomerAddress" WHERE "id" = ${contested.id} FOR UPDATE`,
+      async () => {
+        both = Promise.allSettled([
+          updateAddress(shopper, contested.id, {
+            line1: `11 Contested Street ${suffix}`,
+            isDefault: true,
+          }),
+          removeAddress(shopper, contested.id),
+        ]);
+        await sleep(400);
+      },
+    );
+    await both;
+
+    const live = await prisma.customerAddress.findMany({
+      where: { customerId: residualId, isDeleted: false },
+    });
+    // Whichever order they land in, the book is coherent: something is live and
+    // exactly one thing is the default. An address book with addresses and no
+    // default is one checkout has to guess from.
+    expect(live.length).toBeGreaterThan(0);
+    expect(live.filter((row) => row.isDefault)).toHaveLength(1);
+  });
+
+  it('refuses to update an address a concurrent request has already removed', async () => {
+    const shopper: Principal = { kind: 'customer', customerId: residualId, storeId: storeA };
+    const doomed = await addAddress(shopper, { line1: `12 Doomed Street ${suffix}` });
+
+    await removeAddress(shopper, doomed.id);
+    // Sequentially this already held — it is pinned here because moving the
+    // existence read inside the lock is exactly the kind of change that could
+    // quietly lose it, and an update that revives a deleted row is the other
+    // half of what a stale pre-lock read makes possible.
+    await expect(
+      updateAddress(shopper, doomed.id, { line1: 'Back from the dead' }),
+    ).rejects.toThrow(/not found/i);
+
+    const row = await prisma.customerAddress.findUniqueOrThrow({ where: { id: doomed.id } });
+    expect(row.isDeleted).toBe(true);
+    expect(row.line1).toBe(`12 Doomed Street ${suffix}`);
   });
 });
 

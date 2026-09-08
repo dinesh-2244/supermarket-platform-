@@ -32,6 +32,7 @@ import {
   ValidationError,
   withTransaction,
   type Principal,
+  type Tx,
 } from '../platform/index';
 import { isDeliverableArea } from '../stores/index';
 import {
@@ -363,12 +364,18 @@ export async function updateAddress(
   input: AddressInput,
 ): Promise<repo.AddressRecord> {
   const customerId = requireCustomer(principal);
-  // Ownership first: everything after this is about a row we know is theirs.
-  await getAddress(principal, addressId);
+  // Validation first, because it asks `stores` whether an area is deliverable
+  // and there is no reason to hold the address-book lock across that.
   const fields = await validateAddress(input);
 
   return withTransaction(async (tx) => {
     await repo.lockAddressBook(tx, customerId);
+    // Ownership and existence are read *after* the lock. A pre-lock read is a
+    // statement about the address book as it was before whoever we queued
+    // behind changed it — and acting on it can revive a row a concurrent
+    // removal has already soft-deleted.
+    await requireOwnedAddress(tx, customerId, addressId);
+
     const address = await repo.updateAddressRow(tx, addressId, {
       ...fields,
       ...(input.isDefault === true ? { isDefault: true } : {}),
@@ -388,13 +395,21 @@ export async function updateAddress(
  */
 export async function removeAddress(principal: Principal, addressId: string): Promise<void> {
   const customerId = requireCustomer(principal);
-  const address = await getAddress(principal, addressId);
 
   await withTransaction(async (tx) => {
     // Removing the default hands it to another address, which is a decision
     // about the whole book and so takes the same lock the other two do — a
     // removal racing an insert must not end with two defaults or none.
     await repo.lockAddressBook(tx, customerId);
+
+    // `isDefault` is re-read here, under the lock, and this is the whole fix.
+    // Reading it beforehand answered a question about the address book as it
+    // was *before* we queued: a removal that started while another request was
+    // promoting this very address saw `isDefault: false`, deleted the row that
+    // had since become the default, and skipped the handover — leaving an
+    // address book with live addresses and no default at all.
+    const address = await requireOwnedAddress(tx, customerId, addressId);
+
     await repo.updateAddressRow(tx, addressId, { isDeleted: true, isDefault: false });
     if (!address.isDefault) return;
 
@@ -402,6 +417,25 @@ export async function removeAddress(principal: Principal, addressId: string): Pr
     const next = remaining.find((row) => row.id !== addressId);
     if (next !== undefined) await repo.updateAddressRow(tx, next.id, { isDefault: true });
   });
+}
+
+/**
+ * The shopper's own live address, as it stands *now*.
+ *
+ * Deliberately inside the caller's transaction and after its lock: this is the
+ * row every decision below it is made from, so reading it any earlier makes
+ * those decisions statements about a past that may no longer be true. A row
+ * another request has soft-deleted in the meantime is a "not found" here, which
+ * is also what stops an update reviving it.
+ */
+async function requireOwnedAddress(
+  tx: Tx,
+  customerId: string,
+  addressId: string,
+): Promise<repo.AddressRecord> {
+  const address = await repo.findAddress(customerId, addressId, tx);
+  if (address === null) throw new NotFoundError('Address not found', {});
+  return address;
 }
 
 async function validateAddress(input: AddressInput): Promise<{
