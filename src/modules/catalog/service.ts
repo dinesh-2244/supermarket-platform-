@@ -462,6 +462,15 @@ export async function removeProductImage(principal: Principal, imageId: string):
 export interface SearchOptions {
   readonly limit?: number;
   readonly includeInactive?: boolean;
+  /**
+   * Restrict the search to these products.
+   *
+   * The storefront passes the ids its store actually lists, so a shopper's
+   * search cannot surface the other store's exclusives — the scope is applied
+   * *inside* the query rather than by filtering results afterwards, which would
+   * let the other store's products consume the row limit.
+   */
+  readonly productIds?: readonly string[];
 }
 
 /**
@@ -481,10 +490,15 @@ export async function searchProducts(
   const query = normalizeSearchQuery(rawQuery);
   if (query === '') return [];
 
+  // An explicitly empty scope means "this store lists nothing", which must
+  // return nothing — not everything, which is what an ignored empty filter does.
+  if (options.productIds?.length === 0) return [];
+
   return repo.searchProducts(query, {
     limit: Math.min(options.limit ?? 50, 200),
     minScore: query.length < MIN_TRIGRAM_QUERY_LENGTH ? 1.1 : 0.3,
     includeInactive: options.includeInactive ?? false,
+    ...(options.productIds === undefined ? {} : { productIds: options.productIds }),
   });
 }
 

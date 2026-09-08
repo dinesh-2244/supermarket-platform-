@@ -173,12 +173,59 @@ test.describe.serial('storefront', () => {
     }
   });
 
+  test('search finds this shop’s products and handles an empty query', async ({ page }) => {
+    await page.goto('/locality');
+    await pickFirstArea(page);
+
+    // Take a real product name from the shop window, then search for it.
+    const name = (
+      (await page.locator('article a[href^="/p/"]').first().textContent()) ?? ''
+    ).trim();
+    const term = name.split(' ').slice(0, 2).join(' ');
+
+    await page.getByRole('link', { name: 'Search' }).click();
+    await expect(page).toHaveURL(/\/search/);
+    // An empty query prompts rather than dumping the catalogue.
+    await expect(page.getByText(/type something above to search/i)).toBeVisible();
+
+    await page.getByLabel(/what are you looking for/i).fill(term);
+    await page.getByRole('button', { name: 'Search' }).click();
+
+    await expect(page.getByText(/result\(s\) for/i)).toBeVisible();
+    await expect(page.locator('article').first()).toBeVisible();
+  });
+
+  test('a search that matches nothing says so', async ({ page }) => {
+    await page.goto('/locality');
+    await pickFirstArea(page);
+    await page.goto('/search?q=zzzzqqqqxxxx');
+
+    await expect(page.getByText(/nothing matched/i)).toBeVisible();
+    await expect(page.locator('article')).toHaveCount(0);
+  });
+
+  test('a hostile search query is text, not syntax', async ({ page }) => {
+    await page.goto('/locality');
+    await pickFirstArea(page);
+
+    for (const query of ['\'; DROP TABLE "Product"; --', '%', '_', '<script>alert(1)</script>']) {
+      const response = await page.goto(`/search?q=${encodeURIComponent(query)}`);
+      expect(response?.status(), query).toBe(200);
+      // The query is echoed back as *text* in the heading, never as markup.
+      await expect(page.locator('script:has-text("alert")')).toHaveCount(0);
+    }
+
+    // The catalogue is still there, which is the point of the first query.
+    await page.goto('/');
+    await expect(page.locator('article').first()).toBeVisible();
+  });
+
   test('the storefront does not scroll sideways on a small phone', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 780 });
     await page.goto('/locality');
     await pickFirstArea(page);
 
-    for (const path of ['/', '/locality', '/unserviceable']) {
+    for (const path of ['/', '/locality', '/unserviceable', '/search?q=rice']) {
       await page.goto(path);
       const overflows = await page.evaluate(
         () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,

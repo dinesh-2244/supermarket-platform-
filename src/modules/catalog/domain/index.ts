@@ -162,7 +162,36 @@ export function depthOf(categoryId: string, all: readonly CategoryNode[]): numbe
 export const MIN_TRIGRAM_QUERY_LENGTH = 3;
 
 export function normalizeSearchQuery(query: string): string {
-  return query.trim().replace(/\s+/g, ' ');
+  return query.trim().replace(/\s+/g, ' ').slice(0, MAX_SEARCH_QUERY_LENGTH);
+}
+
+/**
+ * The longest search query worth running.
+ *
+ * Nobody types a hundred characters looking for rice; what does send one is a
+ * crawler, a paste accident, or somebody probing. Trigram similarity over a
+ * very long string is expensive and its answer is meaningless, so the query is
+ * *truncated* rather than rejected — a shopper who pasted a paragraph still
+ * gets results for the start of it instead of an error page.
+ */
+export const MAX_SEARCH_QUERY_LENGTH = 100;
+
+/**
+ * Turn a search query into an `ILIKE` pattern that means what it says.
+ *
+ * Parameterising the query stops SQL injection, but it does **not** stop
+ * `LIKE` metacharacters: `%` and `_` are wildcards *inside* the pattern
+ * whatever route the text took to get there, so a shopper searching for `%`
+ * was matching the entire catalogue and one searching for "100% Pure" was
+ * really searching for "100(anything) Pure".
+ *
+ * Escaping them — and the escape character itself, first, or the escaping is
+ * itself escapable — makes the pattern a literal substring search. Pairs with
+ * `ESCAPE '\'` on the query side.
+ */
+export function likePattern(query: string): string {
+  const escaped = query.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+  return `%${escaped}%`;
 }
 
 /**

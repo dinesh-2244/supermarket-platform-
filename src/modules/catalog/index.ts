@@ -39,6 +39,8 @@ export {
   categoryTrail,
   descendantCategoryIds,
   depthOf,
+  likePattern,
+  MAX_SEARCH_QUERY_LENGTH,
   MIN_TRIGRAM_QUERY_LENGTH,
   slugify,
   type CategoryNode,

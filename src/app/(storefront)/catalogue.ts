@@ -1,6 +1,7 @@
 import {
   categoryTrail,
   countProducts,
+  searchProducts,
   getProductBySlug,
   listCategories,
   listProductImages,
@@ -220,3 +221,63 @@ export async function shopCategories(
       descendantCategoryIds(categories, category.id).some((id) => stocked.has(id)),
   );
 }
+
+/**
+ * Search this store's shelves (D3).
+ *
+ * The scope is pushed *into* the query as an id list rather than applied to the
+ * results: filtering afterwards would let the other store's products consume
+ * the row limit and quietly shorten a shopper's results — worst exactly when
+ * the two catalogues overlap least.
+ *
+ * The query itself never reaches SQL as text: `catalog.searchProducts`
+ * parameterises it, so `%`, `_` and quotes are ordinary characters to search
+ * for rather than syntax.
+ */
+export async function searchShop(
+  context: StoreContext,
+  rawQuery: string,
+  options: { page?: number } = {},
+  customerId: string | null = null,
+): Promise<ShopPage> {
+  const principal = storefrontPrincipal(context, customerId);
+  const storeId = context.serviceability.storeId;
+  const page = Math.max(1, Math.trunc(options.page ?? 1));
+
+  const { ids, priceOf } = await listedProductIds(principal, storeId);
+  if (ids.length === 0) return { items: [], total: 0, page: 1, pageCount: 1 };
+
+  const hits = await searchProducts(principal, rawQuery, {
+    productIds: ids,
+    limit: SEARCH_RESULT_LIMIT,
+  });
+  if (hits.length === 0) return { items: [], total: 0, page: 1, pageCount: 1 };
+
+  // Paged in memory: the ranking is the whole value of a search result, and it
+  // is computed by the query, so the page has to be a window on that order.
+  const pageCount = Math.max(1, Math.ceil(hits.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const window = hits.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  const availability = await availabilityFor(
+    principal,
+    storeId,
+    window.map((hit) => hit.id),
+  );
+
+  return {
+    items: window.flatMap((hit) => toShopItem(hit, priceOf, availability)),
+    total: hits.length,
+    page: safePage,
+    pageCount,
+  };
+}
+
+/**
+ * How deep a search goes before it stops ranking.
+ *
+ * Beyond a few pages nobody is reading results, they are refining the query —
+ * and an unbounded trigram scan is the one storefront query that could get
+ * expensive on a shared database.
+ */
+export const SEARCH_RESULT_LIMIT = 120;

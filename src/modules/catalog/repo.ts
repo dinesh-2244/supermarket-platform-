@@ -8,7 +8,7 @@
  * nothing else — see `auditedExecutor` (§17).
  */
 import { getPrisma, Prisma, type DbExecutor, type Tx } from '../platform/index';
-import type { CategoryNode } from './domain/index';
+import { likePattern, type CategoryNode } from './domain/index';
 
 /** The executor to run a *read* on: the caller's transaction, or the singleton. */
 export function executor(db?: DbExecutor): DbExecutor {
@@ -283,24 +283,35 @@ export interface SearchHit extends ProductRecord {
  */
 export async function searchProducts(
   query: string,
-  options: { limit: number; minScore: number; includeInactive: boolean },
+  options: {
+    limit: number;
+    minScore: number;
+    includeInactive: boolean;
+    /** When given, only these products may match — the storefront's store scope. */
+    productIds?: readonly string[];
+  },
   db?: DbExecutor,
 ): Promise<readonly SearchHit[]> {
-  const pattern = `%${query}%`;
+  const pattern = likePattern(query);
+  // `null` means "no id restriction". Passed as a parameter like everything
+  // else: the id list is data, and a query that interpolated it would be the
+  // one place in this file where a caller could shape the SQL.
+  const ids = options.productIds === undefined ? null : [...options.productIds];
   return executor(db).$queryRaw<SearchHit[]>`
     SELECT "id", "sku", "name", "slug", "description", "brand", "packSize",
            "categoryId", "aisleSortKey", "isActive",
            GREATEST(
              similarity("name", ${query}),
              similarity(COALESCE("brand", ''), ${query}),
-             CASE WHEN "name" ILIKE ${pattern} THEN 1.0 ELSE 0 END,
-             CASE WHEN COALESCE("brand", '') ILIKE ${pattern} THEN 0.9 ELSE 0 END
+             CASE WHEN "name" ILIKE ${pattern} ESCAPE '\\' THEN 1.0 ELSE 0 END,
+             CASE WHEN COALESCE("brand", '') ILIKE ${pattern} ESCAPE '\\' THEN 0.9 ELSE 0 END
            )::float8 AS "score"
     FROM "Product"
     WHERE (${options.includeInactive} OR "isActive" = true)
+      AND (${ids}::text[] IS NULL OR "id" = ANY(${ids}::text[]))
       AND (
-        "name" ILIKE ${pattern}
-        OR COALESCE("brand", '') ILIKE ${pattern}
+        "name" ILIKE ${pattern} ESCAPE '\\'
+        OR COALESCE("brand", '') ILIKE ${pattern} ESCAPE '\\' 
         OR similarity("name", ${query}) >= ${options.minScore}
         OR similarity(COALESCE("brand", ''), ${query}) >= ${options.minScore}
       )
