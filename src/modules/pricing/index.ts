@@ -7,12 +7,14 @@
 export {
   discountBp,
   getListing,
+  listListedProductIds,
   listListings,
   listPriceHistory,
   moduleDescriptor,
   setListed,
   setPrice,
   type SetPriceInput,
+  type ListListingsOptions,
   type PriceChangeRecord,
   type StoreProductRecord,
 } from './service';

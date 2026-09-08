@@ -24,7 +24,7 @@ import {
 } from '../platform/index';
 import { listProducts, type ProductRecord } from '../catalog/index';
 import { checkAvailability } from '../inventory/index';
-import { listListings } from '../pricing/index';
+import { getListing, listListings } from '../pricing/index';
 import { getStorefrontSettings } from '../stores/index';
 import {
   assertQuantity,
@@ -197,7 +197,12 @@ async function revalidateInTx(tx: Tx, principal: Principal, cartToken: string): 
 
   const productIds = items.map((item) => item.productId);
   const [listings, products, stock] = await Promise.all([
-    listListings(principal, { storeId: cart.storeId, listedOnly: true, limit: 500 }),
+    listListings(principal, {
+      storeId: cart.storeId,
+      listedOnly: true,
+      productIds,
+      limit: productIds.length,
+    }),
     listProducts(principal, { productIds, limit: productIds.length }),
     checkAvailability(
       principal,
@@ -301,7 +306,14 @@ export async function rebuildForStore(
     const productIds = items.map((item) => item.productId);
 
     const [listings, products, stock] = await Promise.all([
-      listListings(principal, { storeId, listedOnly: true, limit: 500 }),
+      productIds.length === 0
+        ? Promise.resolve([])
+        : listListings(principal, {
+            storeId,
+            listedOnly: true,
+            productIds,
+            limit: productIds.length,
+          }),
       productIds.length === 0
         ? Promise.resolve([])
         : listProducts(principal, { productIds, limit: productIds.length }),
@@ -422,9 +434,10 @@ async function requireListing(
   storeId: string,
   productId: string,
 ): Promise<{ sellingPricePaise: number }> {
-  const listings = await listListings(principal, { storeId, listedOnly: true, limit: 500 });
-  const listing = listings.find((row) => row.productId === productId);
-  if (listing === undefined) {
+  // By key, not by scanning a page of listings: a store with more listings than
+  // whatever limit that page used would refuse to sell its own products (R6).
+  const listing = await getListing(principal, storeId, productId);
+  if (listing?.isListed !== true) {
     throw new NotFoundError('That product is not available at your shop', { productId });
   }
   return listing;

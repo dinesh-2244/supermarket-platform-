@@ -81,10 +81,23 @@ export async function findListingForPair(
 /**
  * Listings the principal may see. The scope filter lives here rather than in the
  * caller: a store-bound list that forgets it is an IDOR.
+ *
+ * `productIds` narrows the query to specific products **in the database**, which
+ * is the only safe way to ask "does this store list this?". Asking for a page of
+ * listings and searching it in memory answers a different question — "is it in
+ * the first `limit` of them?" — and a store with more listings than the limit
+ * then reports its own products as unlisted (R6).
  */
+export interface ListListingsOptions {
+  readonly storeId?: string;
+  readonly listedOnly?: boolean;
+  readonly productIds?: readonly string[];
+  readonly limit?: number;
+}
+
 export async function listListings(
   principal: Principal,
-  options: { storeId?: string; listedOnly?: boolean; limit?: number },
+  options: ListListingsOptions,
   db?: DbExecutor,
 ): Promise<readonly StoreProductRecord[]> {
   return executor(db).storeProduct.findMany({
@@ -92,11 +105,34 @@ export async function listListings(
       ...storeScopeFilter(principal),
       ...(options.storeId !== undefined ? { storeId: options.storeId } : {}),
       ...(options.listedOnly === true ? { isListed: true } : {}),
+      ...(options.productIds !== undefined ? { productId: { in: [...options.productIds] } } : {}),
     },
     select: listingSelect,
     orderBy: [{ storeId: 'asc' }, { productId: 'asc' }],
     take: options.limit ?? 500,
   });
+}
+
+/**
+ * Every product id this store lists, complete and unpaginated.
+ *
+ * Deliberately **not** `listListings(...).map(...)`: that has a row limit, and a
+ * truncated id set is indistinguishable from a small catalogue — which is how
+ * the 501st listing became invisible to browse, search and the basket alike.
+ * Only the id column is read, so "complete" costs one narrow index scan rather
+ * than the whole listing table.
+ */
+export async function listListedProductIds(
+  principal: Principal,
+  storeId: string,
+  db?: DbExecutor,
+): Promise<readonly string[]> {
+  const rows = await executor(db).storeProduct.findMany({
+    where: { ...storeScopeFilter(principal), storeId, isListed: true },
+    select: { productId: true },
+    orderBy: { productId: 'asc' },
+  });
+  return rows.map((row) => row.productId);
 }
 
 /**

@@ -11,7 +11,7 @@ import {
   type ProductRecord,
 } from '@/modules/catalog';
 import { availabilityFor, type AvailabilityRecord } from '@/modules/inventory';
-import { listListings } from '@/modules/pricing';
+import { getListing, listListedProductIds, listListings } from '@/modules/pricing';
 import { type Principal } from '@/modules/platform';
 import type { StoreContext } from '@/storefront';
 import { storefrontPrincipal } from '@/storefront';
@@ -50,27 +50,45 @@ export interface ShopPage {
 export const PAGE_SIZE = 24;
 
 /**
- * The ids this store actually sells.
+ * The ids this store actually sells — **all** of them.
  *
  * `listedOnly` is the whole point: a product in the master that this shop has
- * not listed must not appear, at any price, on any page. The limit is generous
- * because it bounds a two-store pilot's whole catalogue, and paging happens
- * afterwards on the product query where the ordering lives.
+ * not listed must not appear, at any price, on any page. What is equally the
+ * point is that the set is *complete*. It is used as a filter on the product
+ * query, and a truncated filter is not a smaller shop window, it is a wrong one:
+ * a store whose listings ran past the old 500-row limit hid its own products
+ * from browse, from search and from the basket, with no symptom to notice (R6).
+ * Only the id column is read, so completeness costs one narrow index scan.
  */
-async function listedProductIds(
+async function listedProductIds(principal: Principal, storeId: string): Promise<readonly string[]> {
+  return listListedProductIds(principal, storeId);
+}
+
+/**
+ * This store's prices for the products on the page in front of the shopper.
+ *
+ * Looked up by explicit ids after paging rather than fetched wholesale before
+ * it: a page shows two dozen products, and reading every listing in the store to
+ * price them is both the slow way and the way that reintroduces a row limit.
+ */
+async function pricesFor(
   principal: Principal,
   storeId: string,
-): Promise<{ ids: readonly string[]; priceOf: ReadonlyMap<string, ShopPrice> }> {
-  const listings = await listListings(principal, { storeId, listedOnly: true, limit: 500 });
-  return {
-    ids: listings.map((listing) => listing.productId),
-    priceOf: new Map(
-      listings.map((listing) => [
-        listing.productId,
-        { sellingPricePaise: listing.sellingPricePaise, mrpPaise: listing.mrpPaise },
-      ]),
-    ),
-  };
+  productIds: readonly string[],
+): Promise<ReadonlyMap<string, ShopPrice>> {
+  if (productIds.length === 0) return new Map();
+  const listings = await listListings(principal, {
+    storeId,
+    listedOnly: true,
+    productIds,
+    limit: productIds.length,
+  });
+  return new Map(
+    listings.map((listing) => [
+      listing.productId,
+      { sellingPricePaise: listing.sellingPricePaise, mrpPaise: listing.mrpPaise },
+    ]),
+  );
 }
 
 interface ShopPrice {
@@ -95,7 +113,7 @@ export async function shopPage(
   const storeId = context.serviceability.storeId;
   const page = Math.max(1, Math.trunc(options.page ?? 1));
 
-  const { ids, priceOf } = await listedProductIds(principal, storeId);
+  const ids = await listedProductIds(principal, storeId);
   if (ids.length === 0) return { items: [], total: 0, page: 1, pageCount: 1 };
 
   const categoryIds =
@@ -118,11 +136,11 @@ export async function shopPage(
     offset: (safePage - 1) * PAGE_SIZE,
   });
 
-  const availability = await availabilityFor(
-    principal,
-    storeId,
-    products.map((product) => product.id),
-  );
+  const pageIds = products.map((product) => product.id);
+  const [availability, priceOf] = await Promise.all([
+    availabilityFor(principal, storeId, pageIds),
+    pricesFor(principal, storeId, pageIds),
+  ]);
 
   return {
     items: products.flatMap((product) => toShopItem(product, priceOf, availability)),
@@ -172,9 +190,10 @@ export async function productPage(
   const product = await getProductBySlug(principal, slug);
   if (!product?.isActive) return null;
 
-  const listings = await listListings(principal, { storeId, listedOnly: true, limit: 500 });
-  const listing = listings.find((row) => row.productId === product.id);
-  if (listing === undefined) return null;
+  // By key. Scanning a page of listings for this product answers "is it in the
+  // first N?", which is a different question with the same shape (R6).
+  const listing = await getListing(principal, storeId, product.id);
+  if (listing?.isListed !== true) return null;
 
   const [availability, images, categories] = await Promise.all([
     availabilityFor(principal, storeId, [product.id]),
@@ -207,10 +226,10 @@ export async function shopCategories(
   customerId: string | null = null,
 ): Promise<readonly CategoryRecord[]> {
   const principal = storefrontPrincipal(context, customerId);
-  const { ids } = await listedProductIds(principal, context.serviceability.storeId);
+  const ids = await listedProductIds(principal, context.serviceability.storeId);
   if (ids.length === 0) return [];
 
-  const products = await listProducts(principal, { productIds: ids, limit: 500 });
+  const products = await listProducts(principal, { productIds: ids, limit: ids.length });
   const stocked = new Set(products.map((product) => product.categoryId));
   const categories = await listCategories(principal);
 
@@ -244,7 +263,7 @@ export async function searchShop(
   const storeId = context.serviceability.storeId;
   const page = Math.max(1, Math.trunc(options.page ?? 1));
 
-  const { ids, priceOf } = await listedProductIds(principal, storeId);
+  const ids = await listedProductIds(principal, storeId);
   if (ids.length === 0) return { items: [], total: 0, page: 1, pageCount: 1 };
 
   const hits = await searchProducts(principal, rawQuery, {
@@ -259,11 +278,11 @@ export async function searchShop(
   const safePage = Math.min(page, pageCount);
   const window = hits.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
-  const availability = await availabilityFor(
-    principal,
-    storeId,
-    window.map((hit) => hit.id),
-  );
+  const windowIds = window.map((hit) => hit.id);
+  const [availability, priceOf] = await Promise.all([
+    availabilityFor(principal, storeId, windowIds),
+    pricesFor(principal, storeId, windowIds),
+  ]);
 
   return {
     items: window.flatMap((hit) => toShopItem(hit, priceOf, availability)),
