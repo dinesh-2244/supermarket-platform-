@@ -160,10 +160,46 @@ export async function deactivateCategory(
 
 export async function listProducts(
   principal: Principal,
-  options: { categoryId?: string; includeInactive?: boolean; limit?: number } = {},
+  options: {
+    categoryId?: string;
+    categoryIds?: readonly string[];
+    productIds?: readonly string[];
+    includeInactive?: boolean;
+    limit?: number;
+    offset?: number;
+  } = {},
 ): Promise<readonly repo.ProductRecord[]> {
   assertAuthorized(principal, 'product:read', CATALOG);
   return repo.listProducts(options);
+}
+
+/** The total a browse query would return, for paging. */
+export async function countProducts(
+  principal: Principal,
+  options: {
+    categoryIds?: readonly string[];
+    productIds?: readonly string[];
+    includeInactive?: boolean;
+  } = {},
+): Promise<number> {
+  assertAuthorized(principal, 'product:read', CATALOG);
+  return repo.countProducts(options);
+}
+
+/**
+ * Resolve a product by its **global** slug.
+ *
+ * The slug identifies a product across the whole platform (§8); which store the
+ * request came from decides whether it is listed, what it costs and whether it
+ * is in stock. Keeping those two questions separate is what lets one URL be
+ * shared between customers of either shop.
+ */
+export async function getProductBySlug(
+  principal: Principal,
+  slug: string,
+): Promise<repo.ProductRecord | null> {
+  assertAuthorized(principal, 'product:read', CATALOG);
+  return repo.findProductBySlug(slug);
 }
 
 export async function getProduct(

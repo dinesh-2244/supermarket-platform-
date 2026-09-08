@@ -164,3 +164,62 @@ export const MIN_TRIGRAM_QUERY_LENGTH = 3;
 export function normalizeSearchQuery(query: string): string {
   return query.trim().replace(/\s+/g, ' ');
 }
+
+/**
+ * A category and everything under it.
+ *
+ * Browsing "Staples" must show the rice in "Staples > Rice", so a category page
+ * is a *subtree* query, not an equality one. Written against the edge list the
+ * cycle check already loads, and it tolerates a cycle rather than hanging on
+ * one: `seen` bounds the walk even if the data is somehow broken.
+ */
+export function descendantCategoryIds(
+  nodes: readonly CategoryNode[],
+  rootId: string,
+): readonly string[] {
+  const childrenOf = new Map<string, string[]>();
+  for (const node of nodes) {
+    if (node.parentId === null) continue;
+    const siblings = childrenOf.get(node.parentId) ?? [];
+    siblings.push(node.id);
+    childrenOf.set(node.parentId, siblings);
+  }
+
+  const seen = new Set<string>([rootId]);
+  const queue = [rootId];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    for (const child of childrenOf.get(current) ?? []) {
+      if (seen.has(child)) continue;
+      seen.add(child);
+      queue.push(child);
+    }
+  }
+  return [...seen];
+}
+
+/**
+ * The path from the root down to a category, for a breadcrumb.
+ *
+ * Returns the trail it managed to walk rather than throwing on a broken parent
+ * link: a missing breadcrumb is a cosmetic problem, and a product page that 500s
+ * because of one is not.
+ */
+export function categoryTrail<T extends CategoryNode>(
+  nodes: readonly T[],
+  categoryId: string,
+): readonly T[] {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const trail: T[] = [];
+  const seen = new Set<string>();
+
+  let cursor: string | null = categoryId;
+  while (cursor !== null && !seen.has(cursor)) {
+    seen.add(cursor);
+    const node = byId.get(cursor);
+    if (node === undefined) break;
+    trail.unshift(node);
+    cursor = node.parentId;
+  }
+  return trail;
+}

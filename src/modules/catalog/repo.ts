@@ -151,18 +151,57 @@ export async function findProductBySku(
 }
 
 export async function listProducts(
-  options: { categoryId?: string; includeInactive?: boolean; limit?: number },
+  options: {
+    categoryId?: string;
+    categoryIds?: readonly string[];
+    productIds?: readonly string[];
+    includeInactive?: boolean;
+    limit?: number;
+    offset?: number;
+  },
   db?: DbExecutor,
 ): Promise<readonly ProductRecord[]> {
   return executor(db).product.findMany({
     where: {
       ...(options.categoryId !== undefined ? { categoryId: options.categoryId } : {}),
+      ...(options.categoryIds !== undefined
+        ? { categoryId: { in: [...options.categoryIds] } }
+        : {}),
+      ...(options.productIds !== undefined ? { id: { in: [...options.productIds] } } : {}),
       ...(options.includeInactive === true ? {} : { isActive: true }),
     },
     select: productSelect,
     orderBy: [{ aisleSortKey: 'asc' }, { name: 'asc' }],
     take: options.limit ?? 200,
+    ...(options.offset !== undefined ? { skip: options.offset } : {}),
   });
+}
+
+/** How many products a browse query has in total, for "page 2 of 5". */
+export async function countProducts(
+  options: {
+    categoryIds?: readonly string[];
+    productIds?: readonly string[];
+    includeInactive?: boolean;
+  },
+  db?: DbExecutor,
+): Promise<number> {
+  return executor(db).product.count({
+    where: {
+      ...(options.categoryIds !== undefined
+        ? { categoryId: { in: [...options.categoryIds] } }
+        : {}),
+      ...(options.productIds !== undefined ? { id: { in: [...options.productIds] } } : {}),
+      ...(options.includeInactive === true ? {} : { isActive: true }),
+    },
+  });
+}
+
+export async function findProductBySlug(
+  slug: string,
+  db?: DbExecutor,
+): Promise<ProductRecord | null> {
+  return executor(db).product.findUnique({ where: { slug }, select: productSelect });
 }
 
 export interface InsertProductRow {

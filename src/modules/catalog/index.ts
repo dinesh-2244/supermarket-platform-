@@ -7,12 +7,14 @@
 export {
   addProductImage,
   createCategory,
+  countProducts,
   createProduct,
   type CreateProductInput,
   deactivateCategory,
   deactivateProduct,
   getProduct,
   getProductBySku,
+  getProductBySlug,
   listCategories,
   listProductImages,
   listProducts,
@@ -34,6 +36,8 @@ export {
 export {
   assertSku,
   assertSlug,
+  categoryTrail,
+  descendantCategoryIds,
   depthOf,
   MIN_TRIGRAM_QUERY_LENGTH,
   slugify,

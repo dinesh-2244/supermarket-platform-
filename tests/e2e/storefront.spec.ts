@@ -93,6 +93,86 @@ test.describe.serial('storefront', () => {
     await expect(page.getByText('script')).toHaveCount(0);
   });
 
+  test('the catalogue shows this store’s products, prices and availability', async ({ page }) => {
+    await page.goto('/locality');
+    await pickFirstArea(page);
+
+    // The seed lists products for the store; the shop window is not empty.
+    await expect(page.getByRole('heading', { name: /shopping at/i })).toBeVisible();
+    await expect(page.getByText(/product\(s\)/i).first()).toBeVisible();
+    const cards = page.locator('article');
+    expect(await cards.count()).toBeGreaterThan(0);
+
+    // Every card carries a price and a stock band — the two things a shopper
+    // compares — and no raw stock count above the low threshold.
+    await expect(cards.first().getByText('₹').first()).toBeVisible();
+    await expect(
+      cards
+        .first()
+        .getByText(/in stock|only \d+ left|out of stock/i)
+        .first(),
+    ).toBeVisible();
+  });
+
+  test('an aisle browses its whole subtree and links back', async ({ page }) => {
+    await page.goto('/locality');
+    await pickFirstArea(page);
+
+    const aisle = page.locator('a[href^="/c/"]').first();
+    await expect(aisle).toBeVisible();
+    await aisle.click();
+
+    await expect(page).toHaveURL(/\/c\//);
+    await expect(page.getByText(/product\(s\) in this aisle/i)).toBeVisible();
+    await page.getByRole('link', { name: 'All products' }).first().click();
+    await expect(page).toHaveURL(/\/$|\/\?/);
+  });
+
+  test('a product page shows the store’s price and a breadcrumb', async ({ page }) => {
+    await page.goto('/locality');
+    await pickFirstArea(page);
+
+    const first = page.locator('article a[href^="/p/"]').first();
+    const name = (await first.textContent())?.trim() ?? '';
+    await first.click();
+
+    await expect(page).toHaveURL(/\/p\//);
+    await expect(page.getByRole('heading', { name })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toBeVisible();
+    await expect(page.getByText('₹').first()).toBeVisible();
+
+    // Checkout is Phase 4: the control exists, is disabled, and says so.
+    const add = page.getByRole('button', { name: /add to basket|out of stock/i });
+    await expect(add).toBeDisabled();
+  });
+
+  test('an unknown product slug is a 404, not an empty page', async ({ page }) => {
+    await page.goto('/locality');
+    await pickFirstArea(page);
+
+    const response = await page.goto('/p/no-such-product-anywhere');
+    expect(response?.status()).toBe(404);
+  });
+
+  test('an unknown aisle is a 404', async ({ page }) => {
+    await page.goto('/locality');
+    await pickFirstArea(page);
+
+    const response = await page.goto('/c/no-such-aisle');
+    expect(response?.status()).toBe(404);
+  });
+
+  test('a nonsense page number lands on page one rather than erroring', async ({ page }) => {
+    await page.goto('/locality');
+    await pickFirstArea(page);
+
+    for (const query of ['?page=-4', '?page=abc', '?page=999999']) {
+      const response = await page.goto(`/${query}`);
+      expect(response?.status(), query).toBe(200);
+      await expect(page.getByRole('heading', { name: /shopping at/i })).toBeVisible();
+    }
+  });
+
   test('the storefront does not scroll sideways on a small phone', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 780 });
     await page.goto('/locality');
