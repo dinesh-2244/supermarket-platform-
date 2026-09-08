@@ -1,7 +1,12 @@
 import Link from 'next/link';
 import { cartItemCount } from '@/modules/cart';
 import { getStore } from '@/modules/stores';
-import { currentCartToken, currentStoreContext, storefrontPrincipal } from '@/storefront';
+import {
+  currentCartToken,
+  currentCustomer,
+  currentStoreContext,
+  storefrontPrincipal,
+} from '@/storefront';
 import { clearAreaAction } from './actions';
 
 /**
@@ -30,6 +35,7 @@ export default async function StorefrontLayout({
       ? null
       : await getStore(storefrontPrincipal(context), context.serviceability.storeId);
   const basketCount = await cartItemCount(await currentCartToken());
+  const customer = await currentCustomer();
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -53,6 +59,9 @@ export default async function StorefrontLayout({
                   {basketCount}
                 </span>
               )}
+            </Link>
+            <Link href="/account" className="text-slate-600 hover:text-slate-900">
+              {customer === null ? 'Sign in' : 'Account'}
             </Link>
           </nav>
 

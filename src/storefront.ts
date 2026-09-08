@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { readCustomerSession, type CustomerProfile } from '@/modules/customers';
 import { type Principal } from '@/modules/platform';
 import { resolveServiceability, type ServiceableResult } from '@/modules/stores';
 
@@ -213,4 +214,74 @@ function stringList(value: unknown): readonly string[] {
 export async function clearCartMoveNotice(): Promise<void> {
   const jar = await cookies();
   jar.delete(CART_NOTICE_COOKIE);
+}
+
+// ---------------------------------------------------------------------------
+// Customer session
+// ---------------------------------------------------------------------------
+
+/**
+ * The shopper's session cookie (ADR-0010).
+ *
+ * A **different cookie from the staff one**, pointing at a row in a different
+ * table. That is what makes the isolation structural rather than conditional:
+ * a staff cookie names no `CustomerSession` row and this one names no
+ * `Session` row, so neither can be mistaken for the other even by mistake.
+ *
+ * `HttpOnly`, `SameSite=Lax`, and carrying only a 256-bit opaque id — the name,
+ * the addresses and the account state are all re-read from the row on every
+ * request.
+ */
+export const CUSTOMER_SESSION_COOKIE = 'customerSession';
+
+export async function currentCustomerToken(): Promise<string | null> {
+  const jar = await cookies();
+  const token = jar.get(CUSTOMER_SESSION_COOKIE)?.value ?? '';
+  return token === '' ? null : token;
+}
+
+export async function setCustomerSessionCookie(token: string, expiresAt: Date): Promise<void> {
+  const jar = await cookies();
+  jar.set(CUSTOMER_SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    expires: expiresAt,
+    secure: process.env.NODE_ENV === 'production',
+  });
+}
+
+export async function clearCustomerSessionCookie(): Promise<void> {
+  const jar = await cookies();
+  jar.delete(CUSTOMER_SESSION_COOKIE);
+}
+
+/**
+ * The signed-in shopper for this request, or `null`.
+ *
+ * Built from the freshly-read `CustomerSession` + `Customer` rows, never from
+ * the cookie — so blocking an account takes effect on the next page load rather
+ * than whenever the token happens to expire.
+ */
+export async function currentCustomer(): Promise<CustomerProfile | null> {
+  const token = await currentCustomerToken();
+  if (token === null) return null;
+  const session = await readCustomerSession(token);
+  return session?.customer ?? null;
+}
+
+/**
+ * The storefront principal for this request, with the shopper folded in.
+ *
+ * One call, so no page can accidentally build a principal that knows the store
+ * but not the shopper (an account page that read nobody's addresses) or the
+ * shopper but not the store (a basket that could reach the other shop).
+ */
+export async function currentStorefrontPrincipal(): Promise<{
+  context: StoreContext | null;
+  customer: CustomerProfile | null;
+  principal: Principal;
+}> {
+  const [context, customer] = await Promise.all([currentStoreContext(), currentCustomer()]);
+  return { context, customer, principal: storefrontPrincipal(context, customer?.id ?? null) };
 }
