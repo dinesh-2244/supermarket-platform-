@@ -12,6 +12,7 @@ import {
   currentCartToken,
   currentStoreContext,
   storefrontPrincipal,
+  readCartChangeNotice,
   readCartMoveNotice,
 } from '@/storefront';
 import type { ReadCartMoveNotice } from '@/storefront';
@@ -38,15 +39,21 @@ export default async function CartPage(): Promise<React.ReactElement> {
 
   const cartToken = await currentCartToken();
   const cart = cartToken === null ? null : await viewCart(storefrontPrincipal(context), cartToken);
-  // Written by the area switch that produced it, cleared by the next basket
-  // action — a page may not mutate cookies while rendering (D5).
+  // Both written by the action that produced them and cleared by the next one —
+  // a page may not mutate cookies while rendering (D5).
   const moved = await readCartMoveNotice();
+  // What the last basket action's revalidation found. It arrives here rather
+  // than in that action's own response because the remove button's form is
+  // inside the row it removes, and a notice rendered there dies with the row
+  // (R1 residual).
+  const changed = await readCartChangeNotice();
 
   if (cart === null || cart.lines.length === 0) {
     return (
       <>
         <PageHeading title="Your basket" />
         {moved === null ? null : <MoveNotice notice={moved} />}
+        {changed === null ? null : <ChangeNotice message={changed} />}
         {/* A basket emptied *by this revalidation* is the case that most needs
             explaining, and it was the one case with no explanation: the early
             return said "your basket is empty" and dropped the reasons on the
@@ -77,6 +84,7 @@ export default async function CartPage(): Promise<React.ReactElement> {
       />
 
       {moved === null ? null : <MoveNotice notice={moved} />}
+      {changed === null ? null : <ChangeNotice message={changed} />}
 
       {cart.removed.length === 0 ? null : <RemovedNotice removed={cart.removed} />}
 
@@ -129,6 +137,24 @@ export default async function CartPage(): Promise<React.ReactElement> {
         </div>
       </Card>
     </>
+  );
+}
+
+/**
+ * What the last basket action found when it revalidated.
+ *
+ * Rendered at basket level and in both branches, including the empty one: a
+ * removal that empties the basket is precisely when the shopper has least left
+ * on screen to explain itself.
+ */
+function ChangeNotice({ message }: { message: string }): React.ReactElement {
+  return (
+    <p
+      role="status"
+      className="mb-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+    >
+      {message}
+    </p>
   );
 }
 
