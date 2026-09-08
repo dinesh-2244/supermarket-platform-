@@ -584,6 +584,16 @@ model Cart {
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 
+  /// What the last basket mutation's revalidation found, kept until the next one.
+  ///
+  /// Revalidation is consuming: it advances every line's price snapshot, so the
+  /// old->new evidence exists only in the transaction that produced it. Carrying
+  /// it in a cookie meant a bounded header had to hold an unbounded number of
+  /// affected lines, and a basket large enough simply lost the overflow. It
+  /// belongs here instead, written in the same transaction as the change it
+  /// describes, so it cannot be partial and cannot be dropped.
+  pendingNoticeJson Json?
+
   customer Customer?  @relation(fields: [customerId], references: [id])
   store    Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
   items    CartItem[]

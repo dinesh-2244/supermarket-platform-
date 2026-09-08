@@ -232,54 +232,6 @@ export async function clearCartMoveNotice(): Promise<void> {
   jar.delete(CART_NOTICE_COOKIE);
 }
 
-/**
- * What the last basket mutation's revalidation found, carried to the page.
- *
- * A basket action's own response is not a safe place to put this. The remove
- * button's form lives *inside the row it removes*, so the row — and the notice
- * with it — is unmounted by the very revalidation that produced the notice, and
- * a shopper who removed one line never heard that another line's price had
- * moved. The notice belongs to the basket, not to the control that happened to
- * trigger it, so it travels at basket level.
- *
- * Same one-shot rules as the move notice above, for the same Next.js reason: set
- * by an action, cleared by the *next* action rather than by being read, and
- * short-lived regardless so it cannot follow a shopper around the site.
- */
-export const CART_CHANGE_COOKIE = 'cartChange';
-
-/** Long enough to survive the refresh that follows an action, and no longer. */
-const CART_CHANGE_MAX_AGE_SECONDS = 30;
-
-/** A cookie is a header; a very long summary would be a broken request. */
-const MAX_CHANGE_LENGTH = 600;
-
-export async function setCartChangeNotice(message: string): Promise<void> {
-  const jar = await cookies();
-  if (message === '') {
-    jar.delete(CART_CHANGE_COOKIE);
-    return;
-  }
-  jar.set(CART_CHANGE_COOKIE, message.slice(0, MAX_CHANGE_LENGTH), {
-    httpOnly: true,
-    sameSite: 'lax',
-    path: '/',
-    maxAge: CART_CHANGE_MAX_AGE_SECONDS,
-    secure: process.env.NODE_ENV === 'production',
-  });
-}
-
-export async function readCartChangeNotice(): Promise<string | null> {
-  const jar = await cookies();
-  const raw = jar.get(CART_CHANGE_COOKIE)?.value ?? '';
-  return raw === '' ? null : raw.slice(0, MAX_CHANGE_LENGTH);
-}
-
-export async function clearCartChangeNotice(): Promise<void> {
-  const jar = await cookies();
-  jar.delete(CART_CHANGE_COOKIE);
-}
-
 // ---------------------------------------------------------------------------
 // Customer session
 // ---------------------------------------------------------------------------

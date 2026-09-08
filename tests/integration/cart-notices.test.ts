@@ -27,6 +27,8 @@ let shopper: Principal;
 let categoryId: string;
 let rice: string;
 let dal: string;
+/** Enough lines that their combined notice text passes any header-sized cap. */
+const manyIds: string[] = [];
 const productIds: string[] = [];
 const cartTokens: string[] = [];
 
@@ -83,11 +85,15 @@ beforeAll(async () => {
   categoryId = (await createCategory(admin, { name: `Notices ${suffix}` })).id;
   rice = await makeProduct(`Notice Rice ${suffix}`);
   dal = await makeProduct(`Notice Dal ${suffix}`);
+  for (let index = 0; index < 12; index += 1) {
+    manyIds.push(await makeProduct(`Notice Bulk Product Number ${index} ${suffix}`));
+  }
 });
 
 beforeEach(async () => {
   await priceAndStock(rice, 10_000, 20);
   await priceAndStock(dal, 5_000, 20);
+  for (const productId of manyIds) await priceAndStock(productId, 10_000, 20);
 });
 
 afterAll(async () => {
@@ -194,6 +200,71 @@ describe('R1 — a basket emptied by a revalidation still says why', () => {
     expect(view?.removed).toEqual([
       { productId: rice, name: `Notice Rice ${suffix}`, reason: 'unlisted' },
     ]);
+  });
+});
+
+describe('R1 residual — every affected line is recorded, however many there are', () => {
+  it('keeps all twelve notices, where a bounded header kept seven', async () => {
+    const token = await newCart();
+    for (const productId of manyIds) {
+      await addItem(shopper, { cartToken: token, storeId, productId, qty: 1 });
+    }
+
+    // Every line's price moves at once. This is the shape the cookie transport
+    // failed on: the sentences are ~65 characters each, so a dozen of them is
+    // comfortably past the 600-character slice that used to truncate them.
+    for (const productId of manyIds) {
+      await setPrice(admin, storeId, productId, { mrpPaise: 100_000, sellingPricePaise: 20_000 });
+    }
+    await setQuantity(shopper, { cartToken: token, productId: manyIds[0]!, qty: 2 });
+
+    const view = await viewCart(shopper, token);
+    const notice = view?.notice;
+    expect(notice).not.toBeNull();
+
+    // Not "most of them", and not "the first N and a count of the rest".
+    expect(notice?.changed).toHaveLength(manyIds.length);
+    expect(notice?.changed.map((line) => line.productId).sort()).toEqual([...manyIds].sort());
+    for (const line of notice?.changed ?? []) {
+      expect(line.issues).toContainEqual({
+        kind: 'price-changed',
+        oldPricePaise: 10_000,
+        newPricePaise: 20_000,
+      });
+    }
+
+    // …and the rendered text really is longer than the limit that used to cut
+    // it, so this test would have failed by truncation rather than by luck.
+    const rendered = (notice?.changed ?? [])
+      .map((line) => `${line.name} changed from x to y`)
+      .join(' ');
+    expect(rendered.length).toBeGreaterThan(600);
+  });
+
+  it('replaces the record rather than accumulating it', async () => {
+    const token = await newCart();
+    await addItem(shopper, { cartToken: token, storeId, productId: rice, qty: 1 });
+    await setPrice(admin, storeId, rice, { mrpPaise: 100_000, sellingPricePaise: 30_000 });
+    await setQuantity(shopper, { cartToken: token, productId: rice, qty: 2 });
+    expect((await viewCart(shopper, token))?.notice?.changed).toHaveLength(1);
+
+    // A mutation that finds nothing must clear the last one's notice, or the
+    // shopper is told about a price move their latest action did not cause.
+    await setQuantity(shopper, { cartToken: token, productId: rice, qty: 3 });
+    expect((await viewCart(shopper, token))?.notice).toBeNull();
+  });
+
+  it('does not let merely looking at the basket destroy the explanation', async () => {
+    const token = await newCart();
+    await addItem(shopper, { cartToken: token, storeId, productId: rice, qty: 1 });
+    await setPrice(admin, storeId, rice, { mrpPaise: 100_000, sellingPricePaise: 40_000 });
+    await setQuantity(shopper, { cartToken: token, productId: rice, qty: 2 });
+
+    // Reading the cart revalidates, and revalidation is what consumes the old
+    // snapshot. The stored notice has to be read before that happens, or the
+    // first page load after a mutation is the thing that erases its own message.
+    expect((await viewCart(shopper, token))?.notice?.changed).toHaveLength(1);
+    expect((await viewCart(shopper, token))?.notice?.changed).toHaveLength(1);
   });
 });
 

@@ -13,9 +13,11 @@ import {
   advisoryXactLock,
   getPrisma,
   LOCK_NAMESPACE,
+  Prisma,
   type DbExecutor,
   type Tx,
 } from '../platform/index';
+import type { CartNotice } from './domain/index';
 
 /** The executor to run a *read* on: the caller's transaction, or the singleton. */
 export function executor(db?: DbExecutor): DbExecutor {
@@ -41,6 +43,8 @@ export interface CartRecord {
   readonly customerId: string | null;
   readonly storeId: string;
   readonly status: 'ACTIVE' | 'CONVERTED' | 'ABANDONED';
+  /** Raw `Json`; the domain parses it, because a column is not a type. */
+  readonly pendingNoticeJson: unknown;
 }
 
 export interface CartItemRecord {
@@ -57,6 +61,7 @@ const cartSelect = {
   customerId: true,
   storeId: true,
   status: true,
+  pendingNoticeJson: true,
 } as const;
 
 export async function findCartByToken(
@@ -75,7 +80,7 @@ export async function findCartByToken(
  */
 export async function lockCartByToken(tx: Tx, cartToken: string): Promise<CartRecord | null> {
   const rows = await cartExecutor(tx).$queryRaw<CartRecord[]>`
-    SELECT "id", "cartToken", "customerId", "storeId", "status"
+    SELECT "id", "cartToken", "customerId", "storeId", "status", "pendingNoticeJson"
     FROM "Cart"
     WHERE "cartToken" = ${cartToken}
     FOR UPDATE
@@ -157,6 +162,29 @@ export async function setCartStore(tx: Tx, cartId: string, storeId: string): Pro
 }
 
 /** Bind a guest cart to a customer once they sign in (D6). */
+/**
+ * Record what this mutation's revalidation found, replacing whatever the last
+ * one left. `null` clears it — a mutation that found nothing to say must not
+ * leave the previous mutation's notice standing.
+ */
+export async function setPendingNotice(
+  tx: Tx,
+  cartId: string,
+  notice: CartNotice | null,
+): Promise<void> {
+  await cartExecutor(tx).cart.update({
+    where: { id: cartId },
+    // Round-tripped through JSON so the value handed to Prisma is plain data,
+    // not a structure with `readonly` arrays its `InputJsonValue` cannot name.
+    data: {
+      pendingNoticeJson:
+        notice === null
+          ? Prisma.DbNull
+          : (JSON.parse(JSON.stringify(notice)) as Prisma.InputJsonValue),
+    },
+  });
+}
+
 export async function setCartCustomer(tx: Tx, cartId: string, customerId: string): Promise<void> {
   await cartExecutor(tx).cart.update({ where: { id: cartId }, data: { customerId } });
 }

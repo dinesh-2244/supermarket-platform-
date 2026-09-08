@@ -21,13 +21,18 @@ export {
 
 export {
   assertQuantity,
+  CART_NOTICE_TTL_MS,
   issuesFor,
   MAX_LINE_QUANTITY,
+  noticeFrom,
+  parseCartNotice,
   totalsFor,
   type CartLine,
+  type CartNotice,
   type CartTotals,
   type LineIssue,
   type ModuleDescriptor,
+  type NoticedLine,
   type RemovalReason,
   type RemovedLine,
 } from './domain/index';

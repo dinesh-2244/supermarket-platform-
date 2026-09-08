@@ -4,11 +4,9 @@ import { revalidatePath } from 'next/cache';
 import { addItem, ensureCart, removeItem, setQuantity } from '@/modules/cart';
 import { isAppError } from '@/modules/platform';
 import {
-  clearCartChangeNotice,
   clearCartMoveNotice,
   currentCartToken,
   currentStorefrontPrincipal,
-  setCartChangeNotice,
   setCartTokenCookie,
 } from '@/storefront';
 import { changeSummary, withSummary } from './cart-notices';
@@ -28,11 +26,12 @@ import { changeSummary, withSummary } from './cart-notices';
  */
 async function run(body: () => Promise<string>): Promise<string> {
   try {
-    // Any deliberate action on the basket supersedes the notices an earlier one
-    // left behind, so they go here rather than being consumed by the page —
-    // which Next.js does not allow.
+    // Any deliberate action on the basket supersedes the "your basket moved"
+    // notice from an earlier area change, so it goes here rather than being
+    // consumed by the page — which Next.js does not allow. The revalidation
+    // notices below need no equivalent: each mutation replaces the record on the
+    // cart row, so there is nothing stale to clear.
     await clearCartMoveNotice();
-    await clearCartChangeNotice();
     return await body();
   } catch (error) {
     if (isAppError(error)) return `!${error.message}`;
@@ -106,11 +105,10 @@ export async function setCartQuantityAction(
     const qty = quantity(form, 'qty');
     if (!Number.isFinite(qty)) return '!Enter a whole number of items.';
 
-    const view = await setQuantity(principal, { cartToken, productId, qty });
-    // Basket level, not this row's form: see `setCartChangeNotice`. Quantity
-    // changes do not unmount their own form, but a revalidation they trigger can
-    // remove a *different* line, and one place for these is better than two.
-    await setCartChangeNotice(changeSummary(view));
+    // The service records what its revalidation found on the cart row, in the
+    // same transaction as the change; the basket page renders it. Nothing to
+    // pass back here beyond the outcome.
+    await setQuantity(principal, { cartToken, productId, qty });
     revalidatePath('/cart');
     return 'Basket updated.';
   });
@@ -125,16 +123,14 @@ export async function removeFromCartAction(
     const cartToken = await currentCartToken();
     if (context === null || cartToken === null) return '!Your basket is empty.';
 
-    const view = await removeItem(principal, {
+    // This action's form is inside the row it just removed, so anything returned
+    // here is unmounted along with the row — and a removal revalidates the whole
+    // basket, so it can be exactly the thing that discovers a price move on a
+    // line the shopper is keeping. The findings go on the cart row instead.
+    await removeItem(principal, {
       cartToken,
       productId: text(form, 'productId'),
     });
-    // The whole reason this is a cookie and not a return value: this action's
-    // form is inside the row it just removed, so anything returned here is
-    // unmounted along with the row. A removal revalidates the whole basket and
-    // can be exactly the thing that discovers a price move on a line the
-    // shopper is keeping (R1 residual).
-    await setCartChangeNotice(changeSummary(view));
     revalidatePath('/cart');
     return 'Removed from your basket.';
   });

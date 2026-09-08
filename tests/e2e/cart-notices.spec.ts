@@ -18,11 +18,45 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 const SEED_ADMIN = 'admin@munderfresh.local';
 const SEED_PASSWORD = 'DevPassw0rd!';
 
+/**
+ * Products are addressed by SKU, not by name.
+ *
+ * The listings table's product cell holds the name *and* a "history" link, and
+ * their text is concatenated into one accessible name with nothing between them
+ * — so neither an exact name match nor a substring one is safe (a substring
+ * would also match "Potato" against the "Potato Chips Classic" row). The SKU
+ * cell contains exactly one thing.
+ */
+interface Fixture {
+  readonly name: string;
+  readonly sku: string;
+}
+
 /** Listed and stocked at S2, unlisted at S1 — and used by no other spec. */
-const FIXTURE = 'Green Tea Bags';
+const FIXTURE: Fixture = { name: 'Green Tea Bags', sku: '8901234500189' };
 
 /** A second line, so a removal can leave something behind to report about. */
-const COMPANION = 'Filter Coffee Powder';
+const COMPANION: Fixture = { name: 'Filter Coffee Powder', sku: '8901234500172' };
+
+/**
+ * Enough lines that their notices together run well past 600 characters.
+ *
+ * All listed and stocked at S2 by the seed. Deliberately not the two products
+ * S2 leaves off its shelves, and not the low-stock fixture the back-office suite
+ * adjusts.
+ */
+const BULK: readonly Fixture[] = [
+  { name: 'Toor Dal', sku: '8901234500028' },
+  { name: 'Whole Wheat Atta', sku: '8901234500035' },
+  { name: 'Iodised Salt', sku: '8901234500059' },
+  { name: 'Sugar', sku: '8901234500066' },
+  { name: 'Banana Robusta', sku: '8901234500073' },
+  { name: 'Tomato', sku: '8901234500080' },
+  { name: 'Onion', sku: '8901234500097' },
+  { name: 'Toned Milk', sku: '8901234500110' },
+  { name: 'Curd', sku: '8901234500127' },
+  { name: 'Marie Biscuits', sku: '8901234500165' },
+];
 /** Indiranagar is S2's area. */
 const AREA = 'Indiranagar 1st Stage';
 
@@ -63,7 +97,7 @@ async function openBackOffice(browser: Browser): Promise<Page> {
  * is how this read S1's price for an S2 basket and reported a price that had not
  * moved.
  */
-async function selectFixtureStore(admin: Page): Promise<void> {
+async function selectFixtureStore(admin: Page, product: Fixture = FIXTURE): Promise<void> {
   await admin.goto('/admin/listings');
   const link = admin.getByRole('link', { name: /^S2 · / });
   const href = await link.getAttribute('href');
@@ -71,12 +105,21 @@ async function selectFixtureStore(admin: Page): Promise<void> {
 
   await admin.goto(href ?? '');
   await expect(admin.getByRole('link', { name: /^S2 · / })).toHaveClass(/bg-slate-900/);
-  await expect(admin.getByRole('cell', { name: FIXTURE }).first()).toBeVisible();
+  await expect(listingRow(admin, product).first()).toBeVisible();
 }
 
-/** The `<tr>` for the fixture product on the listings page. */
-function listingRow(admin: Page): ReturnType<Page['locator']> {
-  return admin.locator('tr').filter({ has: admin.getByRole('cell', { name: FIXTURE }) });
+/**
+ * The `<tr>` for one product on the listings page.
+ *
+ * Anchored on the whole cell, not a substring of it. The product cell also holds
+ * a "history" link, so its accessible name is `<product> history` — which rules
+ * out `exact: true`, and a bare substring would match "Potato" against the
+ * "Potato Chips Classic" row and act on the wrong listing.
+ */
+function listingRow(admin: Page, product: Fixture = FIXTURE): ReturnType<Page['locator']> {
+  return admin
+    .locator('tr')
+    .filter({ has: admin.getByRole('cell', { name: product.sku, exact: true }) });
 }
 
 /**
@@ -91,12 +134,12 @@ interface Price {
   readonly sellingPricePaise: number;
 }
 
-function priceForm(admin: Page): ReturnType<Page['locator']> {
-  return listingRow(admin).locator('form').filter({ hasText: 'Set price' });
+function priceForm(admin: Page, product: Fixture = FIXTURE): ReturnType<Page['locator']> {
+  return listingRow(admin, product).locator('form').filter({ hasText: 'Set price' });
 }
 
-async function currentPrice(admin: Page): Promise<Price> {
-  const form = priceForm(admin);
+async function currentPrice(admin: Page, product: Fixture = FIXTURE): Promise<Price> {
+  const form = priceForm(admin, product);
   return {
     mrpPaise: Number(await form.getByLabel('MRP (paise)').inputValue()),
     sellingPricePaise: Number(await form.getByLabel('Selling (paise)').inputValue()),
@@ -111,16 +154,16 @@ async function currentPrice(admin: Page): Promise<Price> {
  * reason that has nothing to do with what is being tested. Sending both together
  * also means a restore never passes through an invalid intermediate state.
  */
-async function setPrice(admin: Page, price: Price): Promise<void> {
-  const form = priceForm(admin);
+async function setPrice(admin: Page, price: Price, product: Fixture = FIXTURE): Promise<void> {
+  const form = priceForm(admin, product);
   await form.getByLabel('MRP (paise)').fill(String(price.mrpPaise));
   await form.getByLabel('Selling (paise)').fill(String(price.sellingPricePaise));
   await form.getByRole('button', { name: 'Set price' }).click();
   await expect(form.getByRole('status')).toContainText(/Price saved/i);
 }
 
-async function setListed(admin: Page, listed: boolean): Promise<void> {
-  const form = listingRow(admin).locator('form').filter({ hasText: 'Listed' });
+async function setListed(admin: Page, listed: boolean, product: Fixture = FIXTURE): Promise<void> {
+  const form = listingRow(admin, product).locator('form').filter({ hasText: 'Listed' });
   const box = form.getByLabel('Listed');
   if (listed) await box.check();
   else await box.uncheck();
@@ -146,7 +189,7 @@ async function addToBasket(page: Page, product: string): Promise<void> {
 
 async function addFixtureToBasket(page: Page): Promise<void> {
   await pickArea(page, AREA);
-  await addToBasket(page, FIXTURE);
+  await addToBasket(page, FIXTURE.name);
 }
 
 test.describe.serial('R1 — the shopper is told what the revalidation found', () => {
@@ -170,11 +213,11 @@ test.describe.serial('R1 — the shopper is told what the revalidation found', (
     try {
       // Two lines: the one whose price will move, and the one to be removed.
       await addFixtureToBasket(page);
-      await addToBasket(page, COMPANION);
+      await addToBasket(page, COMPANION.name);
 
       await page.goto('/cart');
-      const kept = page.locator('li').filter({ hasText: FIXTURE });
-      const doomed = page.locator('li').filter({ hasText: COMPANION });
+      const kept = page.locator('li').filter({ hasText: FIXTURE.name });
+      const doomed = page.locator('li').filter({ hasText: COMPANION.name });
       await expect(kept).toBeVisible();
       await expect(doomed).toBeVisible();
 
@@ -186,11 +229,85 @@ test.describe.serial('R1 — the shopper is told what the revalidation found', (
 
       await expect(doomed).toHaveCount(0);
       await expect(page.getByRole('status').filter({ hasText: /changed from/i })).toContainText(
-        FIXTURE,
+        FIXTURE.name,
       );
       await expect(kept.getByText(`₹${(raised / 100).toFixed(2)} each`)).toBeVisible();
     } finally {
       await restore(admin, original);
+      await admin.context().close();
+    }
+  });
+
+  /**
+   * R1 residual (round 3) — more notices than a header can hold.
+   *
+   * The round-2 transport was a cookie, and a cookie is a response header, so it
+   * had a length limit and a basket with enough affected lines silently lost the
+   * ones past it. Raising the limit moves the boundary rather than removing it,
+   * which is why the evidence now lives on the cart row. This basket's combined
+   * notice text is comfortably over the 600 characters that used to be the cut,
+   * and **every** product must still be named.
+   */
+  test('names every affected line when the notices run past any header limit', async ({
+    page,
+    browser,
+  }) => {
+    const admin = await openBackOffice(browser);
+    const originals = new Map<Fixture, Price>();
+
+    try {
+      await pickArea(page, AREA);
+      for (const product of BULK) await addToBasket(page, product.name);
+      await page.goto('/cart');
+
+      // Every line's price moves while the basket sits open.
+      // One navigation: the listings page carries every product this store
+      // sells, so the rows are all already on screen.
+      await selectFixtureStore(admin, BULK[0] ?? FIXTURE);
+      for (const product of BULK) {
+        const before = await currentPrice(admin, product);
+        originals.set(product, before);
+        const raised = before.sellingPricePaise + 5_000;
+        await setPrice(admin, { mrpPaise: raised + 10_000, sellingPricePaise: raised }, product);
+      }
+
+      // Remove one of them — the case that unmounts the submitting row.
+      const removed = BULK[0]?.name ?? '';
+      await page
+        .locator('li')
+        .filter({ hasText: removed })
+        .locator('form')
+        .filter({ hasText: 'Remove' })
+        .getByRole('button')
+        .click();
+
+      await expect(page.locator('li').filter({ hasText: removed })).toHaveCount(0);
+
+      // Each surviving product is named in full. Not most of them, and not the
+      // first few plus a count — the failure this replaces cut a sentence
+      // mid-word and dropped the last product entirely.
+      const notice = page.getByRole('status').filter({ hasText: /changed from/i });
+      for (const product of BULK.slice(1)) {
+        await expect(notice, `${product.name} is named`).toContainText(product.name);
+        await expect(
+          notice.getByText(
+            new RegExp(`${product.name} changed from .+ to .+ uses the new price`, 'i'),
+          ),
+          `${product.name}'s sentence is complete`,
+        ).toBeVisible();
+      }
+
+      // …and the text really is past the old limit, so this passes on merit
+      // rather than because the basket happened to be small.
+      const text = (await notice.textContent()) ?? '';
+      expect(text.length, 'the notice is longer than the old 600-character cut').toBeGreaterThan(
+        600,
+      );
+    } finally {
+      await selectFixtureStore(admin, BULK[0] ?? FIXTURE);
+      for (const [product, price] of originals) {
+        await setPrice(admin, price, product);
+      }
       await admin.context().close();
     }
   });
@@ -201,7 +318,7 @@ test.describe.serial('R1 — the shopper is told what the revalidation found', (
 
     try {
       await addFixtureToBasket(page);
-      await addToBasket(page, COMPANION);
+      await addToBasket(page, COMPANION.name);
       await page.goto('/cart');
 
       // The companion is delisted, then the shopper removes the other line
@@ -210,7 +327,7 @@ test.describe.serial('R1 — the shopper is told what the revalidation found', (
       await setListed(admin, false);
       await page
         .locator('li')
-        .filter({ hasText: COMPANION })
+        .filter({ hasText: COMPANION.name })
         .locator('form')
         .filter({ hasText: 'Remove' })
         .getByRole('button')
@@ -219,7 +336,7 @@ test.describe.serial('R1 — the shopper is told what the revalidation found', (
       await expect(page.getByText(/your basket is empty/i)).toBeVisible();
       await expect(
         page.getByRole('status').filter({ hasText: /no longer sold at your shop/i }),
-      ).toContainText(FIXTURE);
+      ).toContainText(FIXTURE.name);
     } finally {
       await restore(admin, original);
       await admin.context().close();
@@ -239,7 +356,7 @@ test.describe.serial('R1 — the shopper is told what the revalidation found', (
       // so a page opened *after* the change would consume the notice and this
       // would be testing nothing. A tab left open is the real case.
       await page.goto('/cart');
-      const row = page.locator('li').filter({ hasText: FIXTURE });
+      const row = page.locator('li').filter({ hasText: FIXTURE.name });
       await expect(
         row.getByText(`₹${(original.sellingPricePaise / 100).toFixed(2)} each`),
       ).toBeVisible();
@@ -261,7 +378,7 @@ test.describe.serial('R1 — the shopper is told what the revalidation found', (
       // same place, because the remove button's form does not survive its own
       // action and two homes for one kind of message is how one of them rots.
       const notice = page.getByRole('status').filter({ hasText: /changed from/i });
-      await expect(notice).toContainText(FIXTURE);
+      await expect(notice).toContainText(FIXTURE.name);
       await expect(notice).toContainText(/uses the new price/i);
 
       // …and the basket really is priced at the new price, not merely narrating.
@@ -290,7 +407,7 @@ test.describe.serial('R1 — the shopper is told what the revalidation found', (
       await expect(page.getByText(/your basket is empty/i)).toBeVisible();
       await expect(
         page.getByRole('status').filter({ hasText: /no longer sold here/i }),
-      ).toContainText(FIXTURE);
+      ).toContainText(FIXTURE.name);
     } finally {
       await restore(admin, original);
       await admin.context().close();

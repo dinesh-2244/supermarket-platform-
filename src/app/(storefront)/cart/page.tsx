@@ -5,6 +5,7 @@ import {
   MAX_LINE_QUANTITY,
   viewCart,
   type CartLine,
+  type CartNotice,
   type LineIssue,
   type RemovedLine,
 } from '@/modules/cart';
@@ -12,11 +13,11 @@ import {
   currentCartToken,
   currentStoreContext,
   storefrontPrincipal,
-  readCartChangeNotice,
   readCartMoveNotice,
 } from '@/storefront';
 import type { ReadCartMoveNotice } from '@/storefront';
 import { removeFromCartAction, setCartQuantityAction } from '../cart-actions';
+import { noticeSentences } from '../cart-notices';
 import { ActionForm } from '../form';
 import { rupees, Card, Empty, PageHeading } from '../ui';
 
@@ -42,18 +43,13 @@ export default async function CartPage(): Promise<React.ReactElement> {
   // Both written by the action that produced them and cleared by the next one —
   // a page may not mutate cookies while rendering (D5).
   const moved = await readCartMoveNotice();
-  // What the last basket action's revalidation found. It arrives here rather
-  // than in that action's own response because the remove button's form is
-  // inside the row it removes, and a notice rendered there dies with the row
-  // (R1 residual).
-  const changed = await readCartChangeNotice();
 
   if (cart === null || cart.lines.length === 0) {
     return (
       <>
         <PageHeading title="Your basket" />
         {moved === null ? null : <MoveNotice notice={moved} />}
-        {changed === null ? null : <ChangeNotice message={changed} />}
+        {cart?.notice == null ? null : <ChangeNotice notice={cart.notice} />}
         {/* A basket emptied *by this revalidation* is the case that most needs
             explaining, and it was the one case with no explanation: the early
             return said "your basket is empty" and dropped the reasons on the
@@ -84,7 +80,7 @@ export default async function CartPage(): Promise<React.ReactElement> {
       />
 
       {moved === null ? null : <MoveNotice notice={moved} />}
-      {changed === null ? null : <ChangeNotice message={changed} />}
+      {cart.notice === null ? null : <ChangeNotice notice={cart.notice} />}
 
       {cart.removed.length === 0 ? null : <RemovedNotice removed={cart.removed} />}
 
@@ -147,14 +143,22 @@ export default async function CartPage(): Promise<React.ReactElement> {
  * removal that empties the basket is precisely when the shopper has least left
  * on screen to explain itself.
  */
-function ChangeNotice({ message }: { message: string }): React.ReactElement {
+function ChangeNotice({ notice }: { notice: CartNotice }): React.ReactElement {
+  const sentences = noticeSentences(notice);
   return (
-    <p
+    <div
       role="status"
       className="mb-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
     >
-      {message}
-    </p>
+      {/* One line per affected product, and every affected product. A basket can
+          have as many as it likes; nothing here counts or caps them, because the
+          record this reads from is not a header with a length limit (R1). */}
+      <ul className="flex flex-col gap-1">
+        {sentences.map((sentence) => (
+          <li key={sentence}>{sentence}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

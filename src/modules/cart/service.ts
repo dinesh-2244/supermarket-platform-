@@ -31,8 +31,11 @@ import {
   descriptor,
   issuesFor,
   MAX_LINE_QUANTITY,
+  noticeFrom,
+  parseCartNotice,
   totalsFor,
   type CartLine,
+  type CartNotice,
   type CartTotals,
   type ModuleDescriptor,
   type RemovedLine,
@@ -54,6 +57,14 @@ export interface CartView {
   /** Lines this revalidation took out, so the page can say why. */
   readonly removed: readonly RemovedLine[];
   readonly totals: CartTotals;
+  /**
+   * What the *last mutation's* revalidation found, if it is still fresh.
+   *
+   * Only ever populated by {@link viewCart}: a mutation's own findings are
+   * already in `removed` and `lines[].issues`, and this is how they reach the
+   * page that renders afterwards. See {@link CartNotice}.
+   */
+  readonly notice: CartNotice | null;
 }
 
 /**
@@ -67,7 +78,15 @@ export interface CartView {
 export async function viewCart(principal: Principal, cartToken: string): Promise<CartView | null> {
   const cart = await repo.findCartByToken(cartToken);
   if (cart?.status !== 'ACTIVE') return null;
-  return withTransaction(async (tx) => revalidateInTx(tx, principal, cartToken));
+
+  return withTransaction(async (tx) => {
+    // Read the stored notice *before* revalidating: this revalidation is about
+    // to consume the very snapshots the last mutation's notice describes, and a
+    // page load must not be what destroys the explanation it is meant to show.
+    const locked = await repo.lockCartByToken(tx, cartToken);
+    const notice = parseCartNotice(locked?.pendingNoticeJson);
+    return { ...(await revalidateInTx(tx, principal, cartToken)), notice };
+  });
 }
 
 /**
@@ -171,7 +190,7 @@ export async function addItem(principal: Principal, input: AddItemInput): Promis
       unitPriceSnapshotPaise: existing?.unitPriceSnapshotPaise ?? listing.sellingPricePaise,
     });
 
-    return revalidateInTx(tx, principal, input.cartToken);
+    return revalidateAndRecord(tx, principal, input.cartToken);
   });
 }
 
@@ -192,7 +211,7 @@ export async function setQuantity(
     }
 
     await repo.setItemQty(tx, item.id, input.qty);
-    return revalidateInTx(tx, principal, input.cartToken);
+    return revalidateAndRecord(tx, principal, input.cartToken);
   });
 }
 
@@ -203,7 +222,7 @@ export async function removeItem(
   return withTransaction(async (tx) => {
     const cart = await lockActiveCart(tx, input.cartToken);
     await repo.deleteItemForProduct(tx, cart.id, input.productId);
-    return revalidateInTx(tx, principal, input.cartToken);
+    return revalidateAndRecord(tx, principal, input.cartToken);
   });
 }
 
@@ -233,6 +252,7 @@ async function revalidateInTx(tx: Tx, principal: Principal, cartToken: string): 
       lines: [],
       removed: [],
       totals: totalsFor([], settings),
+      notice: null,
     };
   }
 
@@ -316,7 +336,30 @@ async function revalidateInTx(tx: Tx, principal: Principal, cartToken: string): 
     lines,
     removed,
     totals: totalsFor(lines, settings),
+    notice: null,
   };
+}
+
+/**
+ * Revalidate, and record what that found on the cart itself.
+ *
+ * Every mutation goes through here rather than through `revalidateInTx`
+ * directly. The record is written in the same transaction as the change it
+ * describes, so it can be neither partial nor lost — which a response header
+ * carrying an unbounded list of affected lines could be, and was (R1).
+ *
+ * A mutation that finds nothing writes `null`, because leaving the previous
+ * mutation's notice standing would attribute it to this one.
+ */
+async function revalidateAndRecord(
+  tx: Tx,
+  principal: Principal,
+  cartToken: string,
+): Promise<CartView> {
+  const view = await revalidateInTx(tx, principal, cartToken);
+  const cart = await repo.lockCartByToken(tx, cartToken);
+  if (cart !== null) await repo.setPendingNotice(tx, cart.id, noticeFrom(view));
+  return view;
 }
 
 /**
@@ -340,7 +383,11 @@ export async function rebuildForStore(
     if (cart.storeId === storeId) {
       // Same store: nothing to rebuild. A revalidation still runs, because the
       // prices may have moved for entirely unrelated reasons.
-      return { view: await revalidateInTx(tx, principal, cartToken), carried: [], dropped: [] };
+      return {
+        view: await revalidateAndRecord(tx, principal, cartToken),
+        carried: [],
+        dropped: [],
+      };
     }
 
     const items = await repo.listItems(cart.id, tx);
@@ -401,7 +448,7 @@ export async function rebuildForStore(
       carried.push(product.name);
     }
 
-    return { view: await revalidateInTx(tx, principal, cartToken), carried, dropped };
+    return { view: await revalidateAndRecord(tx, principal, cartToken), carried, dropped };
   });
 }
 

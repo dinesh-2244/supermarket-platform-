@@ -72,6 +72,111 @@ export interface RemovedLine {
   readonly reason: RemovalReason;
 }
 
+/**
+ * What one mutation's revalidation found, kept until the next one runs.
+ *
+ * Structured, not prose: product ids, names and the old/new prices, with the
+ * wording built in the app layer where the rest of the copy lives. Storing the
+ * sentence would put UI language in a database column and, worse, would make the
+ * record only as complete as whatever rendered it.
+ */
+export interface CartNotice {
+  /** When the mutation ran, so a stale notice cannot follow a shopper around. */
+  readonly at: string;
+  readonly removed: readonly RemovedLine[];
+  readonly changed: readonly NoticedLine[];
+}
+
+export interface NoticedLine {
+  readonly productId: string;
+  readonly name: string;
+  readonly issues: readonly LineIssue[];
+}
+
+/** How long a notice is worth showing. Past this it is history, not news. */
+export const CART_NOTICE_TTL_MS = 60_000;
+
+/**
+ * Read back a notice written by an earlier request.
+ *
+ * The column is `Json`, which is `unknown` as far as the type system is
+ * concerned, and a row that predates a change to this shape is a real
+ * possibility — so every field is checked rather than asserted. Anything that
+ * does not parse is simply no notice, which is the safe direction: a shopper
+ * sees one message fewer, never a wrong one.
+ */
+export function parseCartNotice(value: unknown, now: number = Date.now()): CartNotice | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const raw = value as Record<string, unknown>;
+
+  const at = typeof raw.at === 'string' ? raw.at : '';
+  const stamped = Date.parse(at);
+  if (Number.isNaN(stamped) || now - stamped > CART_NOTICE_TTL_MS) return null;
+
+  const removed = asArray(raw.removed).flatMap(toRemovedLine);
+  const changed = asArray(raw.changed).flatMap(toNoticedLine);
+  if (removed.length === 0 && changed.length === 0) return null;
+
+  return { at, removed, changed };
+}
+
+/** The notice a revalidation produced, or `null` when it found nothing to say. */
+export function noticeFrom(
+  input: { removed: readonly RemovedLine[]; lines: readonly CartLine[] },
+  at: Date = new Date(),
+): CartNotice | null {
+  const changed = input.lines
+    .filter((line) => line.issues.length > 0)
+    .map((line) => ({ productId: line.productId, name: line.name, issues: line.issues }));
+
+  if (input.removed.length === 0 && changed.length === 0) return null;
+  return { at: at.toISOString(), removed: [...input.removed], changed };
+}
+
+function asArray(value: unknown): readonly unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function toRemovedLine(value: unknown): RemovedLine[] {
+  if (typeof value !== 'object' || value === null) return [];
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.productId !== 'string' || typeof raw.name !== 'string') return [];
+  if (raw.reason !== 'unlisted' && raw.reason !== 'discontinued') return [];
+  return [{ productId: raw.productId, name: raw.name, reason: raw.reason }];
+}
+
+function toNoticedLine(value: unknown): NoticedLine[] {
+  if (typeof value !== 'object' || value === null) return [];
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.productId !== 'string' || typeof raw.name !== 'string') return [];
+  const issues = asArray(raw.issues).flatMap(toIssue);
+  if (issues.length === 0) return [];
+  return [{ productId: raw.productId, name: raw.name, issues }];
+}
+
+function toIssue(value: unknown): LineIssue[] {
+  if (typeof value !== 'object' || value === null) return [];
+  const raw = value as Record<string, unknown>;
+  if (
+    raw.kind === 'price-changed' &&
+    typeof raw.oldPricePaise === 'number' &&
+    typeof raw.newPricePaise === 'number'
+  ) {
+    return [
+      {
+        kind: 'price-changed',
+        oldPricePaise: raw.oldPricePaise,
+        newPricePaise: raw.newPricePaise,
+      },
+    ];
+  }
+  if (raw.kind === 'insufficient-stock' && typeof raw.available === 'number') {
+    return [{ kind: 'insufficient-stock', available: raw.available }];
+  }
+  if (raw.kind === 'out-of-stock') return [{ kind: 'out-of-stock' }];
+  return [];
+}
+
 export interface CartLine {
   readonly productId: string;
   readonly name: string;
