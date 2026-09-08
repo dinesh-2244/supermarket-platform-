@@ -5,6 +5,7 @@ import { createUser, updateUser } from '@/modules/identity';
 import { createCategory, createProduct, updateProduct } from '@/modules/catalog';
 import { setPrice } from '@/modules/pricing';
 import { updateSettings } from '@/modules/stores';
+import { reconcileStock } from '@/modules/inventory';
 import { createStore, createStoreSettings } from '../factories/index';
 
 /**
@@ -82,6 +83,8 @@ afterAll(async () => {
   await prisma.auditLog.deleteMany({
     where: { actorId: { in: [...userIds, 'aud-bootstrap'] } },
   });
+  await prisma.stockLedger.deleteMany({ where: { storeId: { in: stores } } });
+  await prisma.inventoryItem.deleteMany({ where: { storeId: { in: stores } } });
   await prisma.priceChange.deleteMany({ where: { storeProduct: { storeId: { in: stores } } } });
   await prisma.storeProduct.deleteMany({ where: { storeId: { in: stores } } });
   await prisma.product.deleteMany({ where: { id: productId } });
@@ -179,6 +182,32 @@ describe('R3 — audit scope is stamped, not inferred', () => {
     const stores = new Set(all.map((entry) => entry.storeId));
     expect(stores.has(storeA)).toBe(true);
     expect(stores.has(storeB)).toBe(true);
+  });
+
+  /**
+   * N4: the reconcile branch that finds the count already correct still writes
+   * an audit entry (it records *when* the shelf was counted), and it omitted
+   * `storeId` — so under the SQL scope filter the manager who did the count
+   * could not see their own entry.
+   */
+  it('stamps the store on both reconcile branches', async () => {
+    // Non-zero: the count disagrees and stock moves.
+    await reconcileStock(managerA, { storeId: storeA, productId, counted: 7 });
+    // Zero: the count agrees, only countedAt moves.
+    await reconcileStock(managerA, { storeId: storeA, productId, counted: 7 });
+
+    const entries = await prisma.auditLog.findMany({
+      where: { entityType: 'InventoryItem', entityId: `${storeA}:${productId}` },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(entries).toHaveLength(2);
+    expect(entries.map((entry) => entry.storeId)).toEqual([storeA, storeA]);
+    expect(entries[1]?.afterJson).toMatchObject({ counted: 7, delta: 0 });
+
+    // Both are visible to the manager who made them — the point of the stamp.
+    const visible = await auditEntries(managerA, { entityType: 'InventoryItem', limit: 50 });
+    const ids = visible.map((entry) => entry.id);
+    for (const entry of entries) expect(ids).toContain(entry.id);
   });
 
   it('refuses a principal with no audit grant', async () => {

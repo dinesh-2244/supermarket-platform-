@@ -230,6 +230,10 @@ export async function reconcileStock(
         action: 'reconcile',
         entityType: 'InventoryItem',
         entityId: `${input.storeId}:${input.productId}`,
+        // Stamped like every other branch: R3 filters audit visibility by this
+        // column in SQL, so an unstamped entry is invisible to the very manager
+        // who did the count.
+        storeId: input.storeId,
         before: { websiteStock: locked.websiteStock },
         after: { websiteStock: locked.websiteStock, counted: input.counted, delta: 0 },
       });
