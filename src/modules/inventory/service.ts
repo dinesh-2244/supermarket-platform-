@@ -9,6 +9,7 @@
  */
 import {
   assertAuthorized,
+  AuthzError,
   emit,
   NotFoundError,
   withTransaction,
@@ -17,11 +18,15 @@ import {
   type Tx,
 } from '../platform/index';
 import {
+  availabilityOf,
   crossedLowThresholdDownward,
   descriptor,
+  displayableRemaining,
   isLow,
   nextBalance,
   reconcileDelta,
+  LOW_STOCK_DISPLAY_THRESHOLD,
+  type Availability,
   type ModuleDescriptor,
   type StockReason,
 } from './domain/index';
@@ -276,7 +281,71 @@ export async function listStock(
     type: 'InventoryItem',
     storeId: options.storeId ?? scopeOf(principal),
   });
+  refuseCustomer(principal);
   return repo.listItems(principal, options);
+}
+
+/**
+ * Refuse a shopper a raw balance.
+ *
+ * The grant table says a customer may read their store's inventory; this says
+ * *in what shape*. `listStock` and `getStock` return `websiteStock` itself,
+ * which is a live inventory feed — the storefront gets {@link availabilityFor}
+ * instead, and the difference is enforced here rather than trusted to whoever
+ * writes the next page.
+ */
+function refuseCustomer(principal: Principal): void {
+  if (principal.kind === 'customer') {
+    throw new AuthzError('You do not have permission to perform this action', {
+      resourceType: 'InventoryItem',
+      reason: 'a storefront reads availability bands, never raw stock',
+    });
+  }
+}
+
+/** What one product's stock looks like to a shopper. */
+export interface AvailabilityRecord {
+  readonly productId: string;
+  readonly availability: Availability;
+  /** Populated only in the `LOW` and `OUT_OF_STOCK` bands — see the domain note. */
+  readonly remaining: number | null;
+}
+
+/**
+ * Availability for a storefront page: bands, never counts (D2).
+ *
+ * A product with no inventory row at all is `OUT_OF_STOCK` rather than missing,
+ * so a caller cannot accidentally render "in stock" for something that has
+ * never been stocked.
+ */
+export async function availabilityFor(
+  principal: Principal,
+  storeId: string,
+  productIds: readonly string[],
+): Promise<ReadonlyMap<string, AvailabilityRecord>> {
+  assertAuthorized(principal, 'inventory:read', { type: 'InventoryItem', storeId });
+  if (productIds.length === 0) return new Map();
+
+  const items = await repo.listItems(principal, {
+    storeId,
+    productIds,
+    limit: productIds.length,
+  });
+  const stockByProduct = new Map(items.map((item) => [item.productId, item.websiteStock]));
+
+  return new Map(
+    productIds.map((productId) => {
+      const stock = stockByProduct.get(productId) ?? 0;
+      return [
+        productId,
+        {
+          productId,
+          availability: availabilityOf(stock),
+          remaining: displayableRemaining(stock),
+        },
+      ];
+    }),
+  );
 }
 
 export async function getStock(
@@ -285,6 +354,7 @@ export async function getStock(
   productId: string,
 ): Promise<repo.InventoryRecord | null> {
   assertAuthorized(principal, 'inventory:read', { type: 'InventoryItem', storeId });
+  refuseCustomer(principal);
   return repo.findItem(storeId, productId);
 }
 
@@ -323,7 +393,7 @@ export async function listLedger(
   return repo.listLedger(principal, { ...query, limit: Math.min(query.limit ?? 200, 500) });
 }
 
-export { isLow };
+export { availabilityOf, displayableRemaining, isLow, LOW_STOCK_DISPLAY_THRESHOLD };
 
 /** The store a scoped principal acts in; `null` when it is unscoped. */
 function scopeOf(principal: Principal): string | null {

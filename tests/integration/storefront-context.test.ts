@@ -4,12 +4,13 @@ import {
   captureServiceabilityRequest,
   getSettings,
   getStore,
+  getStorefrontSettings,
   listServiceableAreas,
   resolveServiceability,
 } from '@/modules/stores';
 import { listProducts } from '@/modules/catalog';
 import { listListings } from '@/modules/pricing';
-import { listStock } from '@/modules/inventory';
+import { availabilityFor, getStock, listLedger, listStock } from '@/modules/inventory';
 import { createStore, createStoreSettings } from '../factories/index';
 
 /**
@@ -137,29 +138,61 @@ describe('P3-1 — the picker and store binding', () => {
 });
 
 describe('P3-1 — what a storefront principal may read', () => {
-  it('reads its own store, settings, listings and stock', async () => {
+  it('reads its own store, listings and display settings', async () => {
     const principal = shopper(storeA);
     await expect(getStore(principal, storeA)).resolves.toMatchObject({ id: storeA });
-    await expect(getSettings(principal, storeA)).resolves.toMatchObject({ storeId: storeA });
     await expect(listListings(principal, { storeId: storeA })).resolves.toBeInstanceOf(Array);
-    await expect(listStock(principal, { storeId: storeA })).resolves.toBeInstanceOf(Array);
     // The master is global — a slug resolves the same everywhere (§8).
     await expect(listProducts(principal)).resolves.toBeInstanceOf(Array);
+
+    const settings = await getStorefrontSettings(principal, storeA);
+    expect(Object.keys(settings).sort()).toEqual([
+      'deliveryFeePaise',
+      'isAcceptingOrders',
+      'minOrderPaise',
+      'slotCapacity',
+      'slotLengthMinutes',
+      'storeId',
+    ]);
+  });
+
+  /**
+   * The grant says a shopper may read their store's settings and inventory; the
+   * *shape* is what stops that becoming a live stock feed and an operations
+   * dump. Both halves are needed, so both are asserted.
+   */
+  it('is refused the back-office shapes of the things it may read', async () => {
+    const principal = shopper(storeA);
+    // Carries posMode, substitutionPolicy and the variance thresholds.
+    await expect(getSettings(principal, storeA)).rejects.toThrow(/permission/i);
+    // Carries raw websiteStock.
+    await expect(listStock(principal, { storeId: storeA })).rejects.toThrow(/permission/i);
+    await expect(getStock(principal, storeA, 'anything')).rejects.toThrow(/permission/i);
+    // …and the movement history is not granted at all.
+    await expect(listLedger(principal, { storeId: storeA })).rejects.toThrow(/permission/i);
+
+    // What it gets instead: a band, and a count only when the count is urgency.
+    const bands = await availabilityFor(principal, storeA, ['never-stocked']);
+    expect(bands.get('never-stocked')).toEqual({
+      productId: 'never-stocked',
+      availability: 'OUT_OF_STOCK',
+      remaining: 0,
+    });
   });
 
   it('cannot read the other store, whatever it asks for', async () => {
     const principal = shopper(storeA);
     await expect(getStore(principal, storeB)).rejects.toThrow(/permission/i);
-    await expect(getSettings(principal, storeB)).rejects.toThrow(/permission/i);
+    await expect(getStorefrontSettings(principal, storeB)).rejects.toThrow(/permission/i);
     await expect(listListings(principal, { storeId: storeB })).rejects.toThrow(/permission/i);
-    await expect(listStock(principal, { storeId: storeB })).rejects.toThrow(/permission/i);
+    await expect(availabilityFor(principal, storeB, ['x'])).rejects.toThrow(/permission/i);
   });
 
   it('gives a visitor with no area chosen nothing store-scoped', async () => {
     const visitor = shopper(null);
     await expect(getStore(visitor, storeA)).rejects.toThrow(/permission/i);
     await expect(listListings(visitor, { storeId: storeA })).rejects.toThrow(/permission/i);
-    await expect(listStock(visitor, { storeId: storeA })).rejects.toThrow(/permission/i);
+    await expect(availabilityFor(visitor, storeA, ['x'])).rejects.toThrow(/permission/i);
   });
 
   /**

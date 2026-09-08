@@ -4,6 +4,7 @@
  */
 import {
   assertAuthorized,
+  AuthzError,
   ConflictError,
   NotFoundError,
   Prisma,
@@ -138,9 +139,66 @@ export async function getSettings(
   storeId: string,
 ): Promise<repo.SettingsRecord> {
   assertAuthorized(principal, 'store-settings:read', { type: 'StoreSettings', storeId });
+  // A shopper reads settings through `getStorefrontSettings`. This shape carries
+  // the POS mode, the substitution policy and the price-variance thresholds —
+  // operational configuration that has no business on a customer-facing page,
+  // and which a narrower return type is the only reliable way to keep off it.
+  refuseCustomer(principal, 'StoreSettings');
   const settings = await repo.findSettings(storeId);
   if (settings === null) throw new NotFoundError('Store settings not found', { storeId });
   return settings;
+}
+
+/** The only store settings a storefront page may see: what it has to display. */
+export interface StorefrontSettings {
+  readonly storeId: string;
+  readonly deliveryFeePaise: number;
+  readonly minOrderPaise: number;
+  readonly isAcceptingOrders: boolean;
+  readonly slotLengthMinutes: number;
+  readonly slotCapacity: number;
+}
+
+/**
+ * Store settings for the storefront — a deliberately narrow projection.
+ *
+ * Everything here is a fact the shopper is entitled to before they order: what
+ * delivery costs, what the minimum is, whether the shop is taking orders, and
+ * (for Phase 4) how slots are shaped. `posMode`, `substitutionPolicy` and the
+ * price-variance thresholds are absent by construction, not by filtering at the
+ * call site.
+ */
+export async function getStorefrontSettings(
+  principal: Principal,
+  storeId: string,
+): Promise<StorefrontSettings> {
+  assertAuthorized(principal, 'store-settings:read', { type: 'StoreSettings', storeId });
+  const settings = await repo.findSettings(storeId);
+  if (settings === null) throw new NotFoundError('Store settings not found', { storeId });
+  return {
+    storeId: settings.storeId,
+    deliveryFeePaise: settings.deliveryFeePaise,
+    minOrderPaise: settings.minOrderPaise,
+    isAcceptingOrders: settings.isAcceptingOrders,
+    slotLengthMinutes: settings.slotLengthMinutes,
+    slotCapacity: settings.slotCapacity,
+  };
+}
+
+/**
+ * Refuse a shopper a shape built for the back office.
+ *
+ * The grant table says a customer may *read* their store's settings; this says
+ * which projection they get. Both are needed: without the grant they could read
+ * nothing, and without this they would read everything.
+ */
+function refuseCustomer(principal: Principal, type: string): void {
+  if (principal.kind === 'customer') {
+    throw new AuthzError('You do not have permission to perform this action', {
+      resourceType: type,
+      reason: 'this shape is for the back office; a storefront has a narrower one',
+    });
+  }
 }
 
 /**

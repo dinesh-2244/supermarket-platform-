@@ -291,3 +291,67 @@ services and in every repository query (`storeScopeFilter`), never in a template
 one the module owns. **The Phase 1 grant-all exception is resolved.**
 
 **Status.** Accepted (Phase 2).
+
+---
+
+## ADR-0010 — A shopper is a separate principal, with a separate session
+
+**Context.** Phase 3 puts a public storefront in front of the Phase 2 catalogue.
+Two things had no design yet, and both have a tempting wrong answer.
+
+*Reading.* Every Phase 2 service opens with `assertAuthorized(principal, …)`,
+and a shopper has no staff role — so the storefront could not read a category,
+let alone a price. The tempting answer is to pass `{kind:'system'}`, which
+already has `product:read` and `inventory:read`. It also has `inventory:adjust`.
+A storefront bug running as `system` could move stock, which is precisely the
+invariant this phase exists to hold.
+
+*Signing in.* Optional customer accounts need a session. The tempting answer is a
+second Auth.js credentials provider — but Auth.js v5 has **one** session cookie
+per app, so staff and shoppers would share `authjs.session-token` and the
+separation between them would rest on a discriminator *inside* one credential.
+`Session.userId` is also a non-null foreign key to `User`, so a customer session
+cannot be a `Session` row without a schema change in any case.
+
+**Decision.**
+
+1. **A customer is a first-class principal with its own grant table.**
+   `Principal`'s customer variant carries `customerId: string | null` — `null` is
+   a guest, because an account is never a prerequisite to browse or cart (§5,
+   R2) — and `storeId`, the store their delivery area resolved to.
+   `CUSTOMER_GRANTS` is a table of its own, read-only, and the staff
+   `ROLE_GRANTS` and `SYSTEM_GRANTS` are untouched. Store scoping runs through
+   the same `allowedStoreIds` machinery the back office uses, so a shopper bound
+   to one store cannot read the other's prices or stock.
+
+2. **The grant says what may be read; the return type says in what shape.**
+   A customer may read their store's settings and inventory — but `getSettings`
+   and `listStock` refuse them, because those shapes carry the POS mode, the
+   substitution policy, the price-variance thresholds and raw `websiteStock`.
+   The storefront gets `getStorefrontSettings` (six display fields) and
+   `availabilityFor` (in-stock / low / out, with a count only inside the low
+   band). Publishing exact stock on a public page is a live inventory feed for
+   anyone who wants one; the band is what the shopper actually needs.
+
+3. **Customer sessions live in their own table and their own cookie.**
+   `CustomerSession` (customer, unique opaque token, expiry) and a separate
+   `HttpOnly` `SameSite=Lax` cookie, using exactly the Phase 2 mechanism: 256
+   bits of CSPRNG, a real row, the principal re-read on every request, the row
+   deleted on sign-out. Staff authentication is not touched at all.
+
+**Consequences.** The isolation between staff and shoppers is **structural**
+rather than conditional: a staff cookie names no `CustomerSession` row and a
+customer cookie names no `Session` row, so no coding error can make one act as
+the other — there is no shared credential to get the discriminator wrong on.
+"Phase 3 writes no `websiteStock`" likewise becomes a property of the grant
+table rather than of the code review: the principal every storefront page runs
+as holds no write grant of any kind.
+
+The cost is a second session mechanism to maintain, and a second table to
+consult when asking "who may do this". Both are accepted: the alternative was a
+single mechanism in which the two most different users of the system shared a
+credential. This supersedes the letter of the Phase 3 plan's D6 ("Auth.js
+credentials provider for the customer principal"), which was written before the
+one-cookie constraint was known.
+
+**Status.** Accepted (Phase 3).

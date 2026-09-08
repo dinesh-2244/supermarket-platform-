@@ -12,6 +12,7 @@ export {
   type CreateStoreInput,
   createZone,
   getSettings,
+  getStorefrontSettings,
   getStore,
   listAreas,
   listServiceableAreas,
@@ -28,6 +29,7 @@ export {
   type AreaRecord,
   type SettingsRecord,
   type StorefrontArea,
+  type StorefrontSettings,
   type StoreRecord,
   type ZoneRecord,
 } from './service';

@@ -112,3 +112,46 @@ export function crossedLowThresholdDownward(
 export function isLow(balance: number, threshold: number): boolean {
   return balance <= threshold;
 }
+
+// ---------------------------------------------------------------------------
+// Storefront availability
+// ---------------------------------------------------------------------------
+
+/**
+ * What a shopper is told about stock.
+ *
+ * Deliberately a *band*, not a number. Publishing an exact `websiteStock` on a
+ * public page hands a competitor a live inventory feed and tells anyone who
+ * cares exactly how much they can buy before the shelf empties. What the shopper
+ * actually needs to decide is whether to add the item and whether to hurry, and
+ * three bands answer both.
+ */
+export type Availability = 'IN_STOCK' | 'LOW' | 'OUT_OF_STOCK';
+
+/**
+ * At or below this many units the storefront says "only N left" and names N.
+ *
+ * The exact figure is disclosed *only* inside this band, where it is urgency
+ * the shopper needs rather than intelligence anyone can harvest. It is a display
+ * constant, deliberately separate from `StoreSettings.lowStockThreshold`, which
+ * is an operational alert level a store manager tunes for their own restocking —
+ * the two answer different questions and must be free to differ.
+ */
+export const LOW_STOCK_DISPLAY_THRESHOLD = 5;
+
+export function availabilityOf(
+  websiteStock: number,
+  threshold: number = LOW_STOCK_DISPLAY_THRESHOLD,
+): Availability {
+  if (websiteStock <= 0) return 'OUT_OF_STOCK';
+  return websiteStock <= threshold ? 'LOW' : 'IN_STOCK';
+}
+
+/** The count to show, or `null` when the band is all the shopper is told. */
+export function displayableRemaining(
+  websiteStock: number,
+  threshold: number = LOW_STOCK_DISPLAY_THRESHOLD,
+): number | null {
+  const band = availabilityOf(websiteStock, threshold);
+  return band === 'IN_STOCK' ? null : Math.max(0, websiteStock);
+}
