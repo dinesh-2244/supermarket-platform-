@@ -3,13 +3,18 @@
 import { redirect } from 'next/navigation';
 import { adoptCart } from '@/modules/cart';
 import {
+  addAddress,
   changePassword,
+  getAddress,
   createSessionForCustomer,
   destroyCustomerSession,
+  removeAddress,
   signUp,
+  updateAddress,
   updateProfile,
   verifyCustomerCredentials,
 } from '@/modules/customers';
+import { revalidatePath } from 'next/cache';
 import { isAppError } from '@/modules/platform';
 import {
   clearCustomerSessionCookie,
@@ -135,4 +140,101 @@ export async function changePasswordAction(
 
   if (outcome !== 'ok') return outcome;
   redirect('/account/sign-in?changed=1');
+}
+
+// ---------------------------------------------------------------------------
+// Address book (D7)
+// ---------------------------------------------------------------------------
+
+/**
+ * Every address action is scoped to the session's customer.
+ *
+ * The address id comes from the form — it has to — but the *owner* never does:
+ * `customers` looks a row up by id **and** customer, so another shopper's id is
+ * simply "not found". A `customerId` field on any of these forms would be the
+ * bug, so there is none.
+ */
+function addressFields(form: FormData): {
+  label: string | null;
+  line1: string;
+  line2: string | null;
+  landmark: string | null;
+  areaId: string | null;
+  pincode: string | null;
+  isDefault: boolean;
+} {
+  const areaId = text(form, 'areaId');
+  return {
+    label: nullable(form, 'label'),
+    line1: text(form, 'line1'),
+    line2: nullable(form, 'line2'),
+    landmark: nullable(form, 'landmark'),
+    areaId: areaId === '' ? null : areaId,
+    pincode: nullable(form, 'pincode'),
+    isDefault: form.get('isDefault') !== null,
+  };
+}
+
+function nullable(form: FormData, key: string): string | null {
+  const value = text(form, key);
+  return value === '' ? null : value;
+}
+
+export async function addAddressAction(
+  _state: string | undefined,
+  form: FormData,
+): Promise<string> {
+  return run(async () => {
+    const { principal } = await currentStorefrontPrincipal();
+    await addAddress(principal, addressFields(form));
+    revalidatePath('/account/addresses');
+    return 'Address saved.';
+  });
+}
+
+export async function updateAddressAction(
+  _state: string | undefined,
+  form: FormData,
+): Promise<string> {
+  return run(async () => {
+    const { principal } = await currentStorefrontPrincipal();
+    await updateAddress(principal, text(form, 'addressId'), addressFields(form));
+    revalidatePath('/account/addresses');
+    return 'Address updated.';
+  });
+}
+
+/** Make one address the default. The service clears the others in the same tx. */
+export async function makeDefaultAddressAction(
+  _state: string | undefined,
+  form: FormData,
+): Promise<string> {
+  return run(async () => {
+    const { principal } = await currentStorefrontPrincipal();
+    const addressId = text(form, 'addressId');
+    const current = await getAddress(principal, addressId);
+    await updateAddress(principal, addressId, {
+      label: current.label,
+      line1: current.line1,
+      line2: current.line2,
+      landmark: current.landmark,
+      areaId: current.areaId,
+      pincode: current.pincode,
+      isDefault: true,
+    });
+    revalidatePath('/account/addresses');
+    return 'Default delivery address updated.';
+  });
+}
+
+export async function removeAddressAction(
+  _state: string | undefined,
+  form: FormData,
+): Promise<string> {
+  return run(async () => {
+    const { principal } = await currentStorefrontPrincipal();
+    await removeAddress(principal, text(form, 'addressId'));
+    revalidatePath('/account/addresses');
+    return 'Address removed.';
+  });
 }

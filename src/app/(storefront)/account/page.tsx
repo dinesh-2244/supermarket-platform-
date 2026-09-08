@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { MIN_CUSTOMER_PASSWORD_LENGTH } from '@/modules/customers';
 import { currentStorefrontPrincipal } from '@/storefront';
@@ -30,6 +31,17 @@ export default async function AccountPage(): Promise<React.ReactElement> {
         title="Your account"
         {...(customer.email === null ? {} : { subtitle: customer.email })}
       />
+
+      <Card>
+        <nav className="flex flex-wrap gap-4 text-sm">
+          <Link href="/account/addresses" className="text-emerald-800 underline">
+            Your addresses
+          </Link>
+          <Link href="/account/orders" className="text-emerald-800 underline">
+            Your orders
+          </Link>
+        </nav>
+      </Card>
 
       <Card title="Your details">
         <ActionForm
