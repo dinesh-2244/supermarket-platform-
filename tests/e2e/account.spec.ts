@@ -21,6 +21,30 @@ const ROTATED_PASSWORD = 'AnotherPassw0rd';
  */
 let currentPassword = PASSWORD;
 
+/** The seeded super-admin, for the one case that needs a staff form on screen. */
+const STAFF_EMAIL = 'admin@munderfresh.local';
+const STAFF_PASSWORD = 'DevPassw0rd!';
+
+/**
+ * Replace whatever session this page has with a shopper's, without reloading.
+ *
+ * Done through the real sign-in in a second tab so the cookie is a genuine one:
+ * a hand-written cookie would prove that a *forged* session is refused, which is
+ * a different and easier claim.
+ */
+async function signInAsShopper(page: Page): Promise<void> {
+  const other = await page.context().newPage();
+  await other.goto('/account/sign-in');
+  await other.getByLabel('Email').fill(email);
+  await other.getByLabel('Password', { exact: true }).fill(currentPassword);
+  await other.getByRole('button', { name: 'Sign in' }).click();
+  await expect(other).toHaveURL(/\/account$/);
+  await other.close();
+
+  await page.context().clearCookies({ name: 'authjs.session-token' });
+  await page.context().clearCookies({ name: '__Secure-authjs.session-token' });
+}
+
 async function pickArea(page: Page, areaName: string): Promise<void> {
   await page.goto('/locality');
   await page
@@ -120,6 +144,48 @@ test.describe.serial('customer accounts', () => {
     await expect(page).toHaveURL(/\/admin\/sign-in/);
     await page.goto('/admin/inventory');
     await expect(page).toHaveURL(/\/admin\/sign-in/);
+  });
+
+  /**
+   * N1 — a staff form whose session has gone while it sat open.
+   *
+   * Submitting it used to throw a client-side application error, because Next.js
+   * posts a Server Action with a `Next-Action` header and expects a Server Action
+   * response; middleware answered with a 307 to an HTML sign-in page, which is
+   * not one. The shopper cookie here is just the tidiest way to produce the
+   * state — an expired session or a sign-out in another tab is the same event.
+   *
+   * The refusal itself was never in doubt and is asserted anyway: middleware
+   * authorizes nothing, and the action's own database-read principal is what
+   * says no.
+   */
+  test('a staff form whose session has gone refuses gracefully, not with a crash', async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+
+    await page.goto('/admin/sign-in');
+    await page.getByLabel('Email').fill(STAFF_EMAIL);
+    await page.getByLabel('Password').fill(STAFF_PASSWORD);
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page).toHaveURL(/\/admin(\?|$)/);
+
+    await page.goto('/admin/inventory');
+    const form = page.locator('form').filter({ hasText: 'Adjust' }).first();
+    await expect(form).toBeVisible();
+
+    // The session goes while the form sits open, and a shopper's cookie takes
+    // its place. The page is not reloaded: this is the form the person is
+    // already looking at.
+    await signInAsShopper(page);
+
+    await form.getByLabel('Change by').fill('1');
+    await form.getByLabel('Note').fill('n1 probe');
+    await form.getByRole('button', { name: 'Adjust' }).click();
+
+    await expect(form.getByRole('status')).toContainText(/signed in/i);
+    expect(errors, 'no client-side application error').toEqual([]);
   });
 
   test('signing out invalidates the session immediately', async ({ page }) => {

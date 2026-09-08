@@ -31,8 +31,29 @@ const CUSTOMER_SESSION_COOKIE = 'customerSession';
 /** Pages under `/account` that exist precisely for people with no session. */
 const PUBLIC_ACCOUNT_PATHS = new Set(['/account/sign-in', '/account/sign-up']);
 
+/**
+ * A Server Action submission, which must be answered rather than redirected.
+ *
+ * Next.js posts these with a `Next-Action` header and expects a Server Action
+ * response; a 307 to an HTML sign-in page is not one, and the client throws an
+ * application error rather than showing anything a person can act on. That is
+ * what a staff form does when the session behind it has gone — expired, signed
+ * out in another tab, or replaced by a shopper's cookie (N1).
+ *
+ * Letting it through costs no authorization. Middleware runs on the edge with no
+ * database and never authorized anything (see the note above): the action's own
+ * `requirePrincipal()` reads the session from the database and refuses, and the
+ * refusal renders in the form's own notice — the graceful transition instead of
+ * a crash.
+ */
+function isServerAction(request: NextRequest): boolean {
+  return request.method === 'POST' && request.headers.has('next-action');
+}
+
 export function middleware(request: NextRequest): NextResponse {
   const { pathname, search } = request.nextUrl;
+
+  if (isServerAction(request)) return NextResponse.next();
 
   if (pathname.startsWith('/account')) {
     // A guard that redirected these would make its own sign-in page
