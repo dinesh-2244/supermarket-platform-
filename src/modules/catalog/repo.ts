@@ -8,7 +8,7 @@
  * nothing else — see `auditedExecutor` (§17).
  */
 import { getPrisma, Prisma, type DbExecutor, type Tx } from '../platform/index';
-import type { CategoryNode } from './domain/index';
+import { likePattern, type CategoryNode } from './domain/index';
 
 /** The executor to run a *read* on: the caller's transaction, or the singleton. */
 export function executor(db?: DbExecutor): DbExecutor {
@@ -151,18 +151,57 @@ export async function findProductBySku(
 }
 
 export async function listProducts(
-  options: { categoryId?: string; includeInactive?: boolean; limit?: number },
+  options: {
+    categoryId?: string;
+    categoryIds?: readonly string[];
+    productIds?: readonly string[];
+    includeInactive?: boolean;
+    limit?: number;
+    offset?: number;
+  },
   db?: DbExecutor,
 ): Promise<readonly ProductRecord[]> {
   return executor(db).product.findMany({
     where: {
       ...(options.categoryId !== undefined ? { categoryId: options.categoryId } : {}),
+      ...(options.categoryIds !== undefined
+        ? { categoryId: { in: [...options.categoryIds] } }
+        : {}),
+      ...(options.productIds !== undefined ? { id: { in: [...options.productIds] } } : {}),
       ...(options.includeInactive === true ? {} : { isActive: true }),
     },
     select: productSelect,
     orderBy: [{ aisleSortKey: 'asc' }, { name: 'asc' }],
     take: options.limit ?? 200,
+    ...(options.offset !== undefined ? { skip: options.offset } : {}),
   });
+}
+
+/** How many products a browse query has in total, for "page 2 of 5". */
+export async function countProducts(
+  options: {
+    categoryIds?: readonly string[];
+    productIds?: readonly string[];
+    includeInactive?: boolean;
+  },
+  db?: DbExecutor,
+): Promise<number> {
+  return executor(db).product.count({
+    where: {
+      ...(options.categoryIds !== undefined
+        ? { categoryId: { in: [...options.categoryIds] } }
+        : {}),
+      ...(options.productIds !== undefined ? { id: { in: [...options.productIds] } } : {}),
+      ...(options.includeInactive === true ? {} : { isActive: true }),
+    },
+  });
+}
+
+export async function findProductBySlug(
+  slug: string,
+  db?: DbExecutor,
+): Promise<ProductRecord | null> {
+  return executor(db).product.findUnique({ where: { slug }, select: productSelect });
 }
 
 export interface InsertProductRow {
@@ -244,24 +283,35 @@ export interface SearchHit extends ProductRecord {
  */
 export async function searchProducts(
   query: string,
-  options: { limit: number; minScore: number; includeInactive: boolean },
+  options: {
+    limit: number;
+    minScore: number;
+    includeInactive: boolean;
+    /** When given, only these products may match — the storefront's store scope. */
+    productIds?: readonly string[];
+  },
   db?: DbExecutor,
 ): Promise<readonly SearchHit[]> {
-  const pattern = `%${query}%`;
+  const pattern = likePattern(query);
+  // `null` means "no id restriction". Passed as a parameter like everything
+  // else: the id list is data, and a query that interpolated it would be the
+  // one place in this file where a caller could shape the SQL.
+  const ids = options.productIds === undefined ? null : [...options.productIds];
   return executor(db).$queryRaw<SearchHit[]>`
     SELECT "id", "sku", "name", "slug", "description", "brand", "packSize",
            "categoryId", "aisleSortKey", "isActive",
            GREATEST(
              similarity("name", ${query}),
              similarity(COALESCE("brand", ''), ${query}),
-             CASE WHEN "name" ILIKE ${pattern} THEN 1.0 ELSE 0 END,
-             CASE WHEN COALESCE("brand", '') ILIKE ${pattern} THEN 0.9 ELSE 0 END
+             CASE WHEN "name" ILIKE ${pattern} ESCAPE '\\' THEN 1.0 ELSE 0 END,
+             CASE WHEN COALESCE("brand", '') ILIKE ${pattern} ESCAPE '\\' THEN 0.9 ELSE 0 END
            )::float8 AS "score"
     FROM "Product"
     WHERE (${options.includeInactive} OR "isActive" = true)
+      AND (${ids}::text[] IS NULL OR "id" = ANY(${ids}::text[]))
       AND (
-        "name" ILIKE ${pattern}
-        OR COALESCE("brand", '') ILIKE ${pattern}
+        "name" ILIKE ${pattern} ESCAPE '\\'
+        OR COALESCE("brand", '') ILIKE ${pattern} ESCAPE '\\' 
         OR similarity("name", ${query}) >= ${options.minScore}
         OR similarity(COALESCE("brand", ''), ${query}) >= ${options.minScore}
       )

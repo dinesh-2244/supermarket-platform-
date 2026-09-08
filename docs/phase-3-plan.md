@@ -83,7 +83,7 @@ writes an `Order`, an `OrderLine`, `websiteStock` or a `StockLedger` row.**
 
 ### D6 — Optional customer accounts (`customers` module + `(auth)` customer routes)
 
-- Email + **argon2id** password on `Customer` (`email` unique where set, `passwordHash` nullable). Auth.js credentials provider for the **customer** principal, DB sessions via the Phase 2 mechanism — **a customer session is a distinct principal type from a staff `User` session**.
+- Email + **argon2id** password on `Customer` (`email` unique where set, `passwordHash` nullable). Auth.js credentials provider for the **customer** principal, DB sessions via the Phase 2 mechanism — **a customer session is a distinct principal type from a staff `User` session**. *(Superseded by **ADR-0010**: Auth.js v5 has one session cookie per app, so the customer principal gets its own `CustomerSession` table and cookie using the same mechanism; staff Auth.js is untouched.)*
 - Flows: **sign up** (email + password + name + phone), **sign in**, **sign out**, **change password while signed in**. No email enumeration on sign-up or sign-in (uniform responses/timing). Rate-limit-friendly shape but no limiter built.
 - **Forgot-password / reset is deferred** — it needs an email vendor that is not wired (same posture as phone-OTP). Document the gap; the interface seam (`NotificationProvider`) already exists.
 - **Guest cart adoption** — on sign-in/sign-up, the current `cartToken` cart gets `customerId` set (if the customer already had an `ACTIVE` cart for a *different* store, keep the just-authenticated device's cart and mark the other `ABANDONED`; document the rule).

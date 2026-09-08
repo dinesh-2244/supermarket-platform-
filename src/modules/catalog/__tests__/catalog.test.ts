@@ -7,6 +7,8 @@ import {
   assertSlug,
   depthOf,
   descriptor,
+  likePattern,
+  MAX_SEARCH_QUERY_LENGTH,
   MIN_TRIGRAM_QUERY_LENGTH,
   normalizeSearchQuery,
   slugify,
@@ -145,5 +147,25 @@ describe('catalog/domain — search query handling', () => {
 
   it('knows the length below which trigrams are meaningless', () => {
     expect(MIN_TRIGRAM_QUERY_LENGTH).toBe(3);
+  });
+});
+
+describe('catalog/domain — search query hygiene (P3-3)', () => {
+  it('caps a query rather than rejecting it', () => {
+    const long = 'a'.repeat(MAX_SEARCH_QUERY_LENGTH + 50);
+    expect(normalizeSearchQuery(long)).toHaveLength(MAX_SEARCH_QUERY_LENGTH);
+    // Collapsing whitespace happens first, so the cap counts real characters.
+    expect(normalizeSearchQuery('  basmati   rice  ')).toBe('basmati rice');
+  });
+
+  it('escapes LIKE metacharacters so a pattern means what it says', () => {
+    // Plain text is just wrapped.
+    expect(likePattern('rice')).toBe('%rice%');
+    // `%` and `_` become literals…
+    expect(likePattern('100%')).toBe('%100\\%%');
+    expect(likePattern('a_b')).toBe('%a\\_b%');
+    // …and the escape character itself is escaped first, or escaping is
+    // escapable: `\%` must not become an escaped-escape followed by a wildcard.
+    expect(likePattern('\\%')).toBe('%\\\\\\%%');
   });
 });

@@ -126,16 +126,16 @@ model Store {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  settings       StoreSettings?
-  deliveryZones  DeliveryZone[]
-  storeProducts  StoreProduct[]
-  inventoryItems InventoryItem[]
-  stockLedger    StockLedger[]
-  posSkuMaps     PosSkuMap[]
+  settings         StoreSettings?
+  deliveryZones    DeliveryZone[]
+  storeProducts    StoreProduct[]
+  inventoryItems   InventoryItem[]
+  stockLedger      StockLedger[]
+  posSkuMaps       PosSkuMap[]
   inventoryImports InventoryImport[]
-  users          User[]
-  carts          Cart[]
-  orders         Order[]
+  users            User[]
+  carts            Cart[]
+  orders           Order[]
 
   @@index([isActive])
 }
@@ -366,19 +366,19 @@ model StockLedger {
 /// Kept whether the import applied or was rejected — a refused import with its
 /// per-row errors is exactly what the operator needs to fix the file.
 model InventoryImport {
-  id            String   @id @default(uuid())
-  storeId       String
-  filename      String
-  mode          String
+  id           String   @id @default(uuid())
+  storeId      String
+  filename     String
+  mode         String
   /// `dry-run`, `applied` or `rejected`.
-  outcome       String
-  rowCount      Int      @default(0)
-  appliedCount  Int      @default(0)
-  errorCount    Int      @default(0)
+  outcome      String
+  rowCount     Int      @default(0)
+  appliedCount Int      @default(0)
+  errorCount   Int      @default(0)
   /// Per-row errors, as `[{ line, sku, message }]`. Empty on success.
-  errorsJson    Json?
-  actorUserId   String?
-  createdAt     DateTime @default(now())
+  errorsJson   Json?
+  actorUserId  String?
+  createdAt    DateTime @default(now())
 
   store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
@@ -511,6 +511,28 @@ model Customer {
   addresses CustomerAddress[]
   carts     Cart[]
   orders    Order[]
+  sessions  CustomerSession[]
+}
+
+/// A signed-in shopper's session (ADR-0010).
+///
+/// Deliberately **not** the staff `Session` table. `Session.userId` is a non-null
+/// foreign key to `User`, and Auth.js v5 has one session cookie per app — so
+/// sharing either would make the separation between a shopper and a member of
+/// staff a discriminator inside one credential rather than a property of the
+/// system. With two tables and two cookies, a staff cookie names no row here and
+/// a customer cookie names no row there, and no coding error can cross them.
+model CustomerSession {
+  id         String   @id @default(uuid())
+  token      String   @unique
+  customerId String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([expiresAt])
 }
 
 model CustomerAddress {
@@ -561,6 +583,16 @@ model Cart {
   status     CartStatus @default(ACTIVE)
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
+
+  /// What the last basket mutation's revalidation found, kept until the next one.
+  ///
+  /// Revalidation is consuming: it advances every line's price snapshot, so the
+  /// old->new evidence exists only in the transaction that produced it. Carrying
+  /// it in a cookie meant a bounded header had to hold an unbounded number of
+  /// affected lines, and a basket large enough simply lost the overflow. It
+  /// belongs here instead, written in the same transaction as the change it
+  /// describes, so it cannot be partial and cannot be dropped.
+  pendingNoticeJson Json?
 
   customer Customer?  @relation(fields: [customerId], references: [id])
   store    Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)

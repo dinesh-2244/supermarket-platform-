@@ -27,18 +27,33 @@ export function moduleDescriptor(): ModuleDescriptor {
   return descriptor;
 }
 
-export type { PriceChangeRecord, StoreProductRecord } from './repo';
+export type { ListListingsOptions, PriceChangeRecord, StoreProductRecord } from './repo';
 export { discountBp };
 
 export async function listListings(
   principal: Principal,
-  options: { storeId?: string; listedOnly?: boolean; limit?: number } = {},
+  options: repo.ListListingsOptions = {},
 ): Promise<readonly repo.StoreProductRecord[]> {
   assertAuthorized(principal, 'store-product:read', {
     type: 'StoreProduct',
     storeId: options.storeId ?? scopeOf(principal),
   });
   return repo.listListings(principal, options);
+}
+
+/**
+ * Every product id a store lists — the complete set, with no row limit.
+ *
+ * The storefront needs "what does this shop sell?" as a *whole* answer, because
+ * it uses it as a filter on another query. A page of it is not a smaller version
+ * of that answer, it is a wrong one (R6).
+ */
+export async function listListedProductIds(
+  principal: Principal,
+  storeId: string,
+): Promise<readonly string[]> {
+  assertAuthorized(principal, 'store-product:read', { type: 'StoreProduct', storeId });
+  return repo.listListedProductIds(principal, storeId);
 }
 
 export async function getListing(

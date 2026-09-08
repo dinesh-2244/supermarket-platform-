@@ -1,0 +1,28 @@
+-- What the last basket mutation's revalidation found (R1).
+--
+-- Additive only: one nullable column on `Cart`. No existing row changes, no
+-- backfill, no index, and no Phase 1/2 table is touched.
+--
+-- Why the database and not a cookie. Revalidation is consuming — it advances
+-- every line's price snapshot, so the old->new evidence exists only inside the
+-- transaction that produced it, and no later page load can recover it. Carrying
+-- it in a cookie asked a bounded response header to hold an unbounded number of
+-- affected lines, and a basket large enough silently lost the overflow. Raising
+-- the limit only moves the boundary. Written here, in the same transaction as
+-- the change it describes, it can be neither partial nor dropped.
+--
+-- The column holds structured evidence rather than prose: product ids, names and
+-- old/new prices, with the wording built in the app layer where the rest of the
+-- copy lives.
+--
+-- NOTE (p2-followup-gin-index-drift): `prisma migrate diff` also emitted
+--   DROP INDEX "Product_brand_trgm_idx";
+--   DROP INDEX "Product_name_trgm_idx";
+-- because the two `pg_trgm` GIN indexes are created by raw SQL in
+-- 20260907200000_catalog_search_trgm and are therefore invisible to the Prisma
+-- schema. They have been removed by hand, as in every migration since. Applying
+-- them would silently drop catalogue search. The permanent fix is tracked as
+-- `p2-followup-gin-index-drift`.
+
+-- AlterTable
+ALTER TABLE "Cart" ADD COLUMN     "pendingNoticeJson" JSONB;

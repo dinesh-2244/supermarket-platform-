@@ -4,6 +4,7 @@
  */
 import {
   assertAuthorized,
+  AuthzError,
   ConflictError,
   NotFoundError,
   Prisma,
@@ -138,9 +139,66 @@ export async function getSettings(
   storeId: string,
 ): Promise<repo.SettingsRecord> {
   assertAuthorized(principal, 'store-settings:read', { type: 'StoreSettings', storeId });
+  // A shopper reads settings through `getStorefrontSettings`. This shape carries
+  // the POS mode, the substitution policy and the price-variance thresholds —
+  // operational configuration that has no business on a customer-facing page,
+  // and which a narrower return type is the only reliable way to keep off it.
+  refuseCustomer(principal, 'StoreSettings');
   const settings = await repo.findSettings(storeId);
   if (settings === null) throw new NotFoundError('Store settings not found', { storeId });
   return settings;
+}
+
+/** The only store settings a storefront page may see: what it has to display. */
+export interface StorefrontSettings {
+  readonly storeId: string;
+  readonly deliveryFeePaise: number;
+  readonly minOrderPaise: number;
+  readonly isAcceptingOrders: boolean;
+  readonly slotLengthMinutes: number;
+  readonly slotCapacity: number;
+}
+
+/**
+ * Store settings for the storefront — a deliberately narrow projection.
+ *
+ * Everything here is a fact the shopper is entitled to before they order: what
+ * delivery costs, what the minimum is, whether the shop is taking orders, and
+ * (for Phase 4) how slots are shaped. `posMode`, `substitutionPolicy` and the
+ * price-variance thresholds are absent by construction, not by filtering at the
+ * call site.
+ */
+export async function getStorefrontSettings(
+  principal: Principal,
+  storeId: string,
+): Promise<StorefrontSettings> {
+  assertAuthorized(principal, 'store-settings:read', { type: 'StoreSettings', storeId });
+  const settings = await repo.findSettings(storeId);
+  if (settings === null) throw new NotFoundError('Store settings not found', { storeId });
+  return {
+    storeId: settings.storeId,
+    deliveryFeePaise: settings.deliveryFeePaise,
+    minOrderPaise: settings.minOrderPaise,
+    isAcceptingOrders: settings.isAcceptingOrders,
+    slotLengthMinutes: settings.slotLengthMinutes,
+    slotCapacity: settings.slotCapacity,
+  };
+}
+
+/**
+ * Refuse a shopper a shape built for the back office.
+ *
+ * The grant table says a customer may *read* their store's settings; this says
+ * which projection they get. Both are needed: without the grant they could read
+ * nothing, and without this they would read everything.
+ */
+function refuseCustomer(principal: Principal, type: string): void {
+  if (principal.kind === 'customer') {
+    throw new AuthzError('You do not have permission to perform this action', {
+      resourceType: type,
+      reason: 'this shape is for the back office; a storefront has a narrower one',
+    });
+  }
 }
 
 /**
@@ -404,6 +462,62 @@ export async function resolveServiceability(
   input: ServiceabilityInput,
 ): Promise<ServiceabilityResult> {
   return resolveServiceabilityFrom(input, await repo.loadAreaCandidates());
+}
+
+/**
+ * The curated delivery areas a storefront visitor may choose between.
+ *
+ * Principal-less on purpose, and the only stores/areas read that is: the
+ * locality picker is the very first thing an anonymous visitor sees, before any
+ * store context exists, so there is nothing yet to scope a principal to. It
+ * returns exactly the routing data `resolveServiceability` already consumes —
+ * area, zone, store and whether that store is open — and nothing about the
+ * business behind it. Ordering is stable so the picker does not reshuffle.
+ */
+export async function listServiceableAreas(): Promise<readonly StorefrontArea[]> {
+  const candidates = await repo.loadAreaCandidates();
+  return candidates
+    .filter((candidate) => candidate.storeIsActive)
+    .map((candidate) => ({
+      areaId: candidate.areaId,
+      areaName: candidate.areaName,
+      pincode: candidate.pincode,
+      storeId: candidate.storeId,
+      isAcceptingOrders: candidate.isAcceptingOrders,
+    }))
+    .sort((a, b) => a.areaName.localeCompare(b.areaName));
+}
+
+/**
+ * Is this an area we could deliver an order to?
+ *
+ * The question an address book has to ask before it saves an area — an address
+ * pointing somewhere nobody delivers would fail at checkout, far too late for
+ * the shopper to fix it. Answered from the same candidate set the picker and
+ * `resolveServiceability` use, so "we deliver here" means one thing across the
+ * whole application: an active area, in an active zone, of an active store.
+ *
+ * Deliberately **not** `resolveServiceability`, which additionally refuses a
+ * store that has temporarily stopped accepting orders. That is a fact about
+ * tonight, not about the address: a shopper may save their home address while
+ * their shop is closed, and the routing rules apply again when they order.
+ *
+ * Principal-less for the same reason `listServiceableAreas` is: this is asked
+ * before any store context exists, and the answer is one bit about the shop's
+ * own coverage, not about anybody's data.
+ */
+export async function isDeliverableArea(areaId: string): Promise<boolean> {
+  if (areaId === '') return false;
+  return (await listServiceableAreas()).some((area) => area.areaId === areaId);
+}
+
+/** One row of the locality picker. Deliberately narrower than `AreaCandidate`. */
+export interface StorefrontArea {
+  readonly areaId: string;
+  readonly areaName: string;
+  readonly pincode: string | null;
+  readonly storeId: string;
+  readonly isAcceptingOrders: boolean;
 }
 
 /** Record an out-of-zone attempt as a demand signal (§15). */

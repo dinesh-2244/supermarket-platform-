@@ -9,6 +9,7 @@
  */
 import {
   assertAuthorized,
+  AuthzError,
   emit,
   NotFoundError,
   withTransaction,
@@ -17,11 +18,15 @@ import {
   type Tx,
 } from '../platform/index';
 import {
+  availabilityOf,
   crossedLowThresholdDownward,
   descriptor,
+  displayableRemaining,
   isLow,
   nextBalance,
   reconcileDelta,
+  LOW_STOCK_DISPLAY_THRESHOLD,
+  type Availability,
   type ModuleDescriptor,
   type StockReason,
 } from './domain/index';
@@ -276,7 +281,124 @@ export async function listStock(
     type: 'InventoryItem',
     storeId: options.storeId ?? scopeOf(principal),
   });
+  refuseCustomer(principal);
   return repo.listItems(principal, options);
+}
+
+/**
+ * Refuse a shopper a raw balance.
+ *
+ * The grant table says a customer may read their store's inventory; this says
+ * *in what shape*. `listStock` and `getStock` return `websiteStock` itself,
+ * which is a live inventory feed — the storefront gets {@link availabilityFor}
+ * instead, and the difference is enforced here rather than trusted to whoever
+ * writes the next page.
+ */
+function refuseCustomer(principal: Principal): void {
+  if (principal.kind === 'customer') {
+    throw new AuthzError('You do not have permission to perform this action', {
+      resourceType: 'InventoryItem',
+      reason: 'a storefront reads availability bands, never raw stock',
+    });
+  }
+}
+
+/** A specific quantity, checked against the shelf. */
+export interface StockCheck {
+  readonly productId: string;
+  readonly requested: number;
+  readonly available: number;
+  readonly sufficient: boolean;
+}
+
+/**
+ * Can this store supply these quantities right now?
+ *
+ * The exact balance *is* returned here, unlike {@link availabilityFor} — because
+ * the question is "you asked for 12, can I have them?", and the honest answer to
+ * that is "only 8 left". The disclosure is bounded by the shopper having asked
+ * about a specific product and quantity, rather than being published on a page
+ * anyone can scrape.
+ *
+ * This is a **read**. Nothing here reserves, holds or decrements anything: a
+ * cart is not a claim on stock, and the only place a balance may move is
+ * `applyMovement` (§3/§7). Two shoppers may hold the last unit in their carts,
+ * and Phase 4's checkout is where that is resolved under a row lock.
+ */
+export async function checkAvailability(
+  principal: Principal,
+  storeId: string,
+  requests: readonly { productId: string; qty: number }[],
+): Promise<ReadonlyMap<string, StockCheck>> {
+  assertAuthorized(principal, 'inventory:read', { type: 'InventoryItem', storeId });
+  if (requests.length === 0) return new Map();
+
+  const items = await repo.listItems(principal, {
+    storeId,
+    productIds: requests.map((request) => request.productId),
+    limit: requests.length,
+  });
+  const stockByProduct = new Map(items.map((item) => [item.productId, item.websiteStock]));
+
+  return new Map(
+    requests.map((request) => {
+      const available = Math.max(0, stockByProduct.get(request.productId) ?? 0);
+      return [
+        request.productId,
+        {
+          productId: request.productId,
+          requested: request.qty,
+          available,
+          sufficient: available >= request.qty,
+        },
+      ];
+    }),
+  );
+}
+
+/** What one product's stock looks like to a shopper. */
+export interface AvailabilityRecord {
+  readonly productId: string;
+  readonly availability: Availability;
+  /** Populated only in the `LOW` and `OUT_OF_STOCK` bands — see the domain note. */
+  readonly remaining: number | null;
+}
+
+/**
+ * Availability for a storefront page: bands, never counts (D2).
+ *
+ * A product with no inventory row at all is `OUT_OF_STOCK` rather than missing,
+ * so a caller cannot accidentally render "in stock" for something that has
+ * never been stocked.
+ */
+export async function availabilityFor(
+  principal: Principal,
+  storeId: string,
+  productIds: readonly string[],
+): Promise<ReadonlyMap<string, AvailabilityRecord>> {
+  assertAuthorized(principal, 'inventory:read', { type: 'InventoryItem', storeId });
+  if (productIds.length === 0) return new Map();
+
+  const items = await repo.listItems(principal, {
+    storeId,
+    productIds,
+    limit: productIds.length,
+  });
+  const stockByProduct = new Map(items.map((item) => [item.productId, item.websiteStock]));
+
+  return new Map(
+    productIds.map((productId) => {
+      const stock = stockByProduct.get(productId) ?? 0;
+      return [
+        productId,
+        {
+          productId,
+          availability: availabilityOf(stock),
+          remaining: displayableRemaining(stock),
+        },
+      ];
+    }),
+  );
 }
 
 export async function getStock(
@@ -285,6 +407,7 @@ export async function getStock(
   productId: string,
 ): Promise<repo.InventoryRecord | null> {
   assertAuthorized(principal, 'inventory:read', { type: 'InventoryItem', storeId });
+  refuseCustomer(principal);
   return repo.findItem(storeId, productId);
 }
 
@@ -323,7 +446,7 @@ export async function listLedger(
   return repo.listLedger(principal, { ...query, limit: Math.min(query.limit ?? 200, 500) });
 }
 
-export { isLow };
+export { availabilityOf, displayableRemaining, isLow, LOW_STOCK_DISPLAY_THRESHOLD };
 
 /** The store a scoped principal acts in; `null` when it is unscoped. */
 function scopeOf(principal: Principal): string | null {

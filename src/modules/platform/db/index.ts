@@ -68,6 +68,48 @@ export function withTransaction<T>(
   });
 }
 
+/**
+ * The lock namespaces. One `classid` per invariant, so two unrelated rules never
+ * contend and a collision within one is deliberate.
+ *
+ * PostgreSQL advisory locks are a flat 64-bit space with no schema behind them,
+ * which makes an ad-hoc integer at a call site exactly the kind of thing that
+ * silently stops locking when somebody picks the same number elsewhere. Naming
+ * them here is the whole defence.
+ */
+export const LOCK_NAMESPACE = {
+  /** One shopper's address book: which of their addresses is the default. */
+  customerAddresses: 0x0_11_58,
+  /** One shopper's carts: at most one of them is `ACTIVE`. */
+  customerCarts: 0x0_11_59,
+} as const;
+
+export type LockNamespace = (typeof LOCK_NAMESPACE)[keyof typeof LOCK_NAMESPACE];
+
+/**
+ * Serialise a *rule about a set of rows* on the key those rows share.
+ *
+ * A row lock protects a row. It does nothing at all for an invariant spanning
+ * rows that do not exist yet: two transactions each inserting a new default
+ * address, or each adopting a different cart, lock different rows, read the
+ * other's not-yet-committed work as absent, and both commit — leaving two
+ * defaults or two active carts (R2, R3). There is no row whose lock they would
+ * contend for, so the lock has to be on the *key* instead.
+ *
+ * Transaction-scoped, so it is released on commit or rollback and a failure
+ * cannot strand it. `hashtext` collisions make two unrelated shoppers briefly
+ * serial and never incorrect. The cast to `int` is required: Prisma binds a
+ * tagged-template number as `bigint`, and `pg_advisory_xact_lock(bigint, int)`
+ * does not exist.
+ */
+export async function advisoryXactLock(
+  tx: Tx,
+  namespace: LockNamespace,
+  key: string,
+): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(${namespace}::int, hashtext(${key}))`;
+}
+
 function asTx(client: Prisma.TransactionClient): Tx {
   return client as Tx;
 }

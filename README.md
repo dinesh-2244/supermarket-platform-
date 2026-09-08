@@ -12,10 +12,15 @@ PostgreSQL 16 database, one Docker image. Domain logic lives in `src/modules/*`
 behind enforced boundaries; `app/` is thin — it parses input, calls a module
 service, and renders.
 
-> **Status: Phase 2 (back office).** Staff sign-in, RBAC, stores and settings,
-> delivery zones/areas, the shared catalogue, per-store pricing and the inventory
-> ledger — all driveable from `/admin`. There is still **no customer-facing
-> surface**: no storefront, cart, checkout or orders. Those are Phase 3+.
+> **Status: Phase 3 (storefront + cart).** The customer-facing shop is live at
+> `/`: pick a delivery area, browse and search that store's listed products at
+> that store's prices, open product pages, and fill a basket — **with no
+> login**. Optional email/password accounts add a profile and an address book.
+>
+> **There is still no checkout.** Nothing in Phase 3 writes an `Order`, an
+> `OrderLine`, `websiteStock` or a `StockLedger` row; the basket's "Proceed to
+> checkout" control is visibly disabled. Ordering, delivery slots, payment
+> choice and the order lifecycle are Phase 4.
 
 ## Requirements
 
@@ -64,6 +69,50 @@ All seeded with the password `DevPassw0rd!`. Sign in at
 A `STORE_MANAGER` sees only their own store, and is refused another store's
 settings, zones, prices and stock **server-side** — not merely not shown them. A
 `STORE_STAFF` is read-only this phase.
+
+### The storefront
+
+Open <http://localhost:3000/>. A visitor with no delivery area is sent to the
+**locality picker** first — there is no default store, because every price and
+every availability figure on the site belongs to one specific shop.
+
+| Route            | What it is                                                      |
+| ---------------- | --------------------------------------------------------------- |
+| `/locality`      | Choose a delivery area; binds the store that serves it          |
+| `/`              | That store's home — aisles and products                         |
+| `/c/[slug]`      | Category browse, including everything in the subtree            |
+| `/p/[slug]`      | Product detail. The slug is global; the store decides the terms |
+| `/search?q=`     | Trigram search, scoped to the store's listed products           |
+| `/cart`          | The basket, revalidated on every view                           |
+| `/account/*`     | Optional customer account — profile, addresses, order stub      |
+| `/unserviceable` | "We do not deliver here yet", with demand capture               |
+
+**Cookies.** `storeContext` holds only the `areaId` the visitor picked; the
+store, delivery fee and minimum order are re-derived from
+`stores.resolveServiceability` on every request, so an edited cookie can only
+ever name a _different area_. `cartToken` is an opaque basket id, `HttpOnly` and
+`SameSite=Lax`. `customerSession` is the shopper's session — a **different**
+cookie from the staff one, naming a row in a different table (ADR-0010).
+
+**The basket revalidates on every view and every mutation.** A price that moved
+is surfaced and the current price used; a quantity above what is in stock is
+flagged and never silently capped; a product the store has delisted is removed
+with a notice. Changing to an area served by the _other_ store rebuilds the
+basket against it — carried lines are re-priced, the rest are dropped and named.
+
+### Signing in as a customer
+
+The seed creates **one** demo shopper. Development only.
+
+| Email                       | Password       |
+| --------------------------- | -------------- |
+| `shopper@munderfresh.local` | `ShopperPass1` |
+
+An account is never required: browsing, searching and building a basket all work
+signed out, and a guest basket is adopted on sign-in. **Password reset is not
+built** — it needs an email vendor that is not wired, the same posture as
+phone-OTP (`FeatureFlag.customer_otp_login` stays OFF). The sign-in page says so
+rather than offering a link that goes nowhere.
 
 ### Stock import format
 
@@ -140,6 +189,7 @@ src/modules/     the modular-monolith core
                  money, ids, authz, observability
   stores/ catalog/ pricing/ inventory/ identity/ customers/
   cart/ checkout/ orders/ fulfillment/ notifications/ admin/
+src/storefront.ts  storefront cookies + the customer principal (cf. src/auth.ts)
 src/components/  ui/, storefront/, admin/
 src/lib/         framework glue only — never domain logic
 tests/           e2e/, integration/, factories/

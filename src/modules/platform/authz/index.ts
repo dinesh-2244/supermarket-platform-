@@ -2,7 +2,19 @@ import { AuthzError } from '../errors/index';
 
 export type UserRole = 'SUPER_ADMIN' | 'STORE_MANAGER' | 'STORE_STAFF';
 
-/** Who is acting. A guest customer has no principal at all. */
+/**
+ * Who is acting.
+ *
+ * `customer` covers the whole storefront, signed in or not: `customerId` is
+ * `null` for a guest — browsing and carting never require an account (arch §5,
+ * R2) — and `storeId` is the store their delivery area resolved to. A visitor
+ * who has not picked an area yet has neither, and can therefore read nothing
+ * store-scoped, which is exactly right.
+ *
+ * A customer is deliberately **not** a weak `user`: the two draw their grants
+ * from separate tables (see {@link CUSTOMER_GRANTS}) and their sessions from
+ * separate stores, so no rule written for staff can ever apply to a shopper.
+ */
 export type Principal =
   | {
       readonly kind: 'user';
@@ -10,7 +22,13 @@ export type Principal =
       readonly role: UserRole;
       readonly storeId: string | null;
     }
-  | { readonly kind: 'customer'; readonly customerId: string }
+  | {
+      readonly kind: 'customer';
+      /** `null` for a guest — an account is optional, never a prerequisite. */
+      readonly customerId: string | null;
+      /** The store their chosen delivery area resolved to; `null` before they pick. */
+      readonly storeId: string | null;
+    }
   | { readonly kind: 'system' };
 
 /**
@@ -183,6 +201,36 @@ const STORE_STAFF_GRANTS: Partial<Readonly<Record<Action, Grant>>> = {
   'stock-ledger:read': 'store',
 };
 
+/**
+ * What a **storefront visitor** may do — a table entirely separate from the
+ * staff roles above, and read-only.
+ *
+ * The storefront is public: there is no confidentiality boundary between one
+ * store's listed catalogue and the other's, so the *global* grants here leak
+ * nothing. `store`-scoped grants are the ones that matter — they bind price,
+ * listing and stock reads to the store the visitor's delivery area resolved to,
+ * through exactly the same `allowedStoreIds` machinery the back office uses.
+ *
+ * Deliberately absent: every write. A customer principal cannot adjust stock,
+ * change a price, list a product or touch a `User` — not because the storefront
+ * never calls those, but because a bug that did would be denied here. That is
+ * what makes "Phase 3 writes no `websiteStock`" a property of the system rather
+ * than of the code review.
+ *
+ * `product:read` and `category:read` are global because a slug is global (§8):
+ * the store context decides listing, price and stock, and the storefront 404s a
+ * product its store does not list. Reading the shared master row is not a leak.
+ */
+const CUSTOMER_GRANTS: Partial<Readonly<Record<Action, Grant>>> = {
+  'serviceability:resolve': 'global',
+  'category:read': 'global',
+  'product:read': 'global',
+  'store:read': 'store',
+  'store-settings:read': 'store',
+  'store-product:read': 'store',
+  'inventory:read': 'store',
+};
+
 const ROLE_GRANTS: Readonly<Record<UserRole, Partial<Readonly<Record<Action, Grant>>>>> = {
   SUPER_ADMIN: SUPER_ADMIN_GRANTS,
   STORE_MANAGER: STORE_MANAGER_GRANTS,
@@ -219,7 +267,11 @@ const SYSTEM_GRANTS: Partial<Readonly<Record<Action, Grant>>> = {
  */
 export function allowedStoreIds(principal: Principal): readonly string[] | null {
   if (principal.kind === 'system') return null;
-  if (principal.kind !== 'user') return [];
+  // A shopper is scoped to the one store their delivery area resolved to, and
+  // to none at all before they have picked one.
+  if (principal.kind === 'customer') {
+    return principal.storeId == null ? [] : [principal.storeId];
+  }
   if (principal.role === 'SUPER_ADMIN') return null;
   return principal.storeId == null ? [] : [principal.storeId];
 }
@@ -252,8 +304,8 @@ export function canAccessStore(principal: Principal, storeId: string): boolean {
 
 function grantsFor(principal: Principal): Partial<Readonly<Record<Action, Grant>>> | null {
   if (principal.kind === 'system') return SYSTEM_GRANTS;
-  // Customers have no back-office capability at all in Phase 2.
-  if (principal.kind !== 'user') return null;
+  // Shoppers draw from their own read-only table, never from a staff role.
+  if (principal.kind === 'customer') return CUSTOMER_GRANTS;
 
   // A store-bound role with no store is a data defect (the identity service
   // refuses to create one). Until it is fixed the safe reading is *no* access,
