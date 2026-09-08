@@ -127,7 +127,13 @@ export async function addItem(principal: Principal, input: AddItemInput): Promis
       cartId: cart.id,
       productId: input.productId,
       qty,
-      unitPriceSnapshotPaise: listing.sellingPricePaise,
+      // An existing line **keeps its snapshot**. The snapshot is the price the
+      // shopper last saw, and the only thing it is for is being compared against
+      // the current one; overwriting it here with the price we just read means
+      // the revalidation two lines below compares today's price with today's
+      // price and reports no change — so a top-up silently accepted a price move
+      // the shopper was never told about (R1).
+      unitPriceSnapshotPaise: existing?.unitPriceSnapshotPaise ?? listing.sellingPricePaise,
     });
 
     return revalidateInTx(tx, principal, input.cartToken);

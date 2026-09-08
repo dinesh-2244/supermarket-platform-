@@ -1,7 +1,13 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { MAX_LINE_QUANTITY, viewCart, type CartLine, type LineIssue } from '@/modules/cart';
+import {
+  MAX_LINE_QUANTITY,
+  viewCart,
+  type CartLine,
+  type LineIssue,
+  type RemovedLine,
+} from '@/modules/cart';
 import {
   currentCartToken,
   currentStoreContext,
@@ -41,6 +47,14 @@ export default async function CartPage(): Promise<React.ReactElement> {
       <>
         <PageHeading title="Your basket" />
         {moved === null ? null : <MoveNotice notice={moved} />}
+        {/* A basket emptied *by this revalidation* is the case that most needs
+            explaining, and it was the one case with no explanation: the early
+            return said "your basket is empty" and dropped the reasons on the
+            floor, so a shopper whose only line had just been delisted was told
+            nothing at all about where it went (R1). */}
+        {cart === null || cart.removed.length === 0 ? null : (
+          <RemovedNotice removed={cart.removed} />
+        )}
         <Card>
           <Empty>Your basket is empty.</Empty>
           <p className="text-center text-sm">
@@ -64,18 +78,7 @@ export default async function CartPage(): Promise<React.ReactElement> {
 
       {moved === null ? null : <MoveNotice notice={moved} />}
 
-      {cart.removed.length === 0 ? null : (
-        <p className="mb-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          We had to take {cart.removed.length === 1 ? 'an item' : 'some items'} out:{' '}
-          {cart.removed
-            .map(
-              (row) =>
-                `${row.name} (${row.reason === 'unlisted' ? 'no longer sold here' : 'discontinued'})`,
-            )
-            .join(', ')}
-          .
-        </p>
-      )}
+      {cart.removed.length === 0 ? null : <RemovedNotice removed={cart.removed} />}
 
       <Card>
         <ul className="flex flex-col divide-y divide-slate-100">
@@ -126,6 +129,31 @@ export default async function CartPage(): Promise<React.ReactElement> {
         </div>
       </Card>
     </>
+  );
+}
+
+/**
+ * Lines this revalidation took out, and why.
+ *
+ * `role="status"` because it is the answer to a question the shopper has not
+ * asked yet — they are about to notice something missing — and a screen reader
+ * that skipped it would leave them with no explanation at all.
+ */
+function RemovedNotice({ removed }: { removed: readonly RemovedLine[] }): React.ReactElement {
+  return (
+    <p
+      role="status"
+      className="mb-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+    >
+      We had to take {removed.length === 1 ? 'an item' : 'some items'} out:{' '}
+      {removed
+        .map(
+          (row) =>
+            `${row.name} (${row.reason === 'unlisted' ? 'no longer sold here' : 'discontinued'})`,
+        )
+        .join(', ')}
+      .
+    </p>
   );
 }
 

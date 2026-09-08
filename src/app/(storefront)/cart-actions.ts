@@ -10,6 +10,7 @@ import {
   setCartTokenCookie,
   storefrontPrincipal,
 } from '@/storefront';
+import { changeSummary, withSummary } from './cart-notices';
 
 /**
  * Basket server actions (D4).
@@ -75,9 +76,14 @@ export async function addToCartAction(_state: string | undefined, form: FormData
 
     revalidatePath('/cart');
     const line = view.lines.find((row) => row.productId === productId);
-    return line === undefined
-      ? 'Added to your basket.'
-      : `${line.name} — ${String(line.qty)} in your basket.`;
+    const lead =
+      line === undefined
+        ? 'Added to your basket.'
+        : `${line.name} — ${String(line.qty)} in your basket.`;
+    // Whatever this add's revalidation found goes out with it: this is the only
+    // response that has it, because the page will revalidate against an
+    // already-updated snapshot and find nothing left to say (R1).
+    return withSummary(lead, changeSummary(view));
   });
 }
 
@@ -94,9 +100,9 @@ export async function setCartQuantityAction(
     const qty = quantity(form, 'qty');
     if (!Number.isFinite(qty)) return '!Enter a whole number of items.';
 
-    await setQuantity(storefrontPrincipal(context), { cartToken, productId, qty });
+    const view = await setQuantity(storefrontPrincipal(context), { cartToken, productId, qty });
     revalidatePath('/cart');
-    return 'Basket updated.';
+    return withSummary('Basket updated.', changeSummary(view));
   });
 }
 
@@ -109,11 +115,13 @@ export async function removeFromCartAction(
     const cartToken = await currentCartToken();
     if (context === null || cartToken === null) return '!Your basket is empty.';
 
-    await removeItem(storefrontPrincipal(context), {
+    const view = await removeItem(storefrontPrincipal(context), {
       cartToken,
       productId: text(form, 'productId'),
     });
     revalidatePath('/cart');
-    return 'Removed from your basket.';
+    // A removal revalidates the whole basket, so it can be the thing that
+    // discovers a price move or a delisting on a line the shopper is keeping.
+    return withSummary('Removed from your basket.', changeSummary(view));
   });
 }
