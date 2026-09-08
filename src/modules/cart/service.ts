@@ -76,21 +76,56 @@ export async function viewCart(principal: Principal, cartToken: string): Promise
  * The token is minted here rather than by the caller so that the cookie and the
  * row are created together; a caller that invented its own token could write a
  * cookie for a cart that does not exist.
+ *
+ * **`customerId` is applied here, not only at sign-in.** Adoption used to run
+ * exclusively from the sign-in action, so a shopper who signed in *before* they
+ * had a basket — the ordinary order of events for a returning customer — got a
+ * cart with `customerId: null`, outside the one-active-cart rule, until they
+ * happened to sign in again (R4). Binding is the same operation wherever it
+ * happens, so it happens in one place, under the same customer lock.
  */
 export async function ensureCart(
   storeId: string,
   cartToken: string | null,
   customerId: string | null = null,
 ): Promise<{ cart: repo.CartRecord; created: boolean }> {
-  if (cartToken !== null) {
-    const existing = await repo.findCartByToken(cartToken);
-    if (existing?.status === 'ACTIVE') return { cart: existing, created: false };
-  }
+  return withTransaction(async (tx) => {
+    // Customer before cart, the one lock order this module uses.
+    if (customerId !== null) await repo.lockCustomerCarts(tx, customerId);
 
-  const cart = await withTransaction(async (tx) =>
-    repo.insertCart(tx, { cartToken: newCartToken(), storeId, customerId }),
-  );
-  return { cart, created: true };
+    if (cartToken !== null) {
+      const existing = await repo.lockCartByToken(tx, cartToken);
+      if (existing?.status === 'ACTIVE') {
+        if (customerId === null || existing.customerId === customerId) {
+          return { cart: existing, created: false };
+        }
+        await bindToCustomer(tx, existing.id, customerId);
+        return { cart: { ...existing, customerId }, created: false };
+      }
+    }
+
+    const cart = await repo.insertCart(tx, { cartToken: newCartToken(), storeId, customerId });
+    if (customerId !== null) await abandonOtherCarts(tx, customerId, cart.id);
+    return { cart, created: true };
+  });
+}
+
+/**
+ * Make this cart the customer's one active cart.
+ *
+ * The caller must already hold {@link repo.lockCustomerCarts} for that customer:
+ * the rule is about the *set* of their carts, and the other carts it abandons
+ * are rows this transaction has not otherwise touched.
+ */
+async function bindToCustomer(tx: Tx, cartId: string, customerId: string): Promise<void> {
+  await abandonOtherCarts(tx, customerId, cartId);
+  await repo.setCartCustomer(tx, cartId, customerId);
+}
+
+async function abandonOtherCarts(tx: Tx, customerId: string, keepId: string): Promise<void> {
+  for (const other of await repo.listActiveCartsForCustomer(customerId, tx)) {
+    if (other.id !== keepId) await repo.setCartStatus(tx, other.id, 'ABANDONED');
+  }
 }
 
 export interface AddItemInput {
@@ -381,14 +416,18 @@ export async function rebuildForStore(
  */
 export async function adoptCart(cartToken: string, customerId: string): Promise<void> {
   await withTransaction(async (tx) => {
+    // Customer first, then cart — one order everywhere, so two adoptions can
+    // queue but never deadlock against each other.
+    await repo.lockCustomerCarts(tx, customerId);
+
     const cart = await repo.lockCartByToken(tx, cartToken);
     if (cart?.status !== 'ACTIVE') return;
-    if (cart.customerId === customerId) return;
 
-    for (const other of await repo.listActiveCartsForCustomer(customerId, tx)) {
-      if (other.id !== cart.id) await repo.setCartStatus(tx, other.id, 'ABANDONED');
-    }
-    await repo.setCartCustomer(tx, cart.id, customerId);
+    // No early return for a cart this customer already owns. It used to look
+    // like a harmless no-op and was the reason a customer left holding two
+    // active carts could never be repaired: signing in again on the device
+    // whose basket should win did nothing at all (R3).
+    await bindToCustomer(tx, cart.id, customerId);
   });
 }
 

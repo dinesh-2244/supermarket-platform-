@@ -7,7 +7,13 @@
  * {@link CustomerWithSecret}, returned by one function — so that "which query
  * can leak a credential?" has a one-line answer.
  */
-import { getPrisma, type DbExecutor, type Tx } from '../platform/index';
+import {
+  advisoryXactLock,
+  getPrisma,
+  LOCK_NAMESPACE,
+  type DbExecutor,
+  type Tx,
+} from '../platform/index';
 import type { CustomerProfile } from './domain/index';
 
 /** The executor to run a *read* on: the caller's transaction, or the singleton. */
@@ -240,6 +246,19 @@ export async function updateAddressRow(
     data: { ...row },
     select: addressSelect,
   });
+}
+
+/**
+ * Serialise this shopper's "exactly one default address" rule.
+ *
+ * Taken **before** anything reads or decides which address is the default.
+ * `clearDefaults` locks the rows it updates, which protects nothing when the
+ * competing transaction's new default is a row that does not exist yet: both
+ * clear the same old default, neither can see the other's insert, and both
+ * commit a live default (R2).
+ */
+export async function lockAddressBook(tx: Tx, customerId: string): Promise<void> {
+  await advisoryXactLock(tx, LOCK_NAMESPACE.customerAddresses, customerId);
 }
 
 /** Clear every other default, so exactly one survives. */

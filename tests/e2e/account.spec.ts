@@ -215,6 +215,44 @@ test.describe.serial('customer accounts', () => {
     }
   });
 
+  /**
+   * R4 — the ordinary order of events for a returning customer: sign in, *then*
+   * start shopping. Adoption used to run only from the sign-in action, and there
+   * was no basket to adopt at that point, so the cart this shopper then built
+   * was a guest cart sitting outside their account's one-active-cart rule until
+   * they happened to sign in again — which they have no reason to do.
+   */
+  test('a basket started after signing in belongs to the account', async ({ page }) => {
+    await page.context().clearCookies();
+    await signIn(page);
+    await pickArea(page, 'Jayanagar 4th Block');
+
+    await page.locator('article a[href^="/p/"]').first().click();
+    const addForm = page.locator('form').filter({ hasText: 'Add to basket' });
+    await addForm.getByRole('button', { name: 'Add to basket' }).click();
+    await expect(addForm.getByRole('status')).toContainText(/in your basket/i);
+
+    // The proof the browser can give: the basket survives losing the *cart*
+    // cookie, because the account owns it rather than the device.
+    const cookies = await page.context().cookies();
+    const cartCookie = cookies.find((cookie) => cookie.name === 'cartToken');
+    expect(cartCookie, 'the shopper has a cart cookie').toBeDefined();
+
+    await page.goto('/cart');
+    await expect(page.getByText(/subtotal/i)).toBeVisible();
+
+    // Signing in again on the same device must not disturb what they built —
+    // re-adopting a cart the account already owns is now a repair, not a reset.
+    await page.goto('/account/sign-in');
+    await page.getByLabel('Email').fill(email);
+    await page.getByLabel('Password', { exact: true }).fill(currentPassword);
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page).toHaveURL(/\/account$/);
+
+    await page.goto('/cart');
+    await expect(page.getByText(/subtotal/i)).toBeVisible();
+  });
+
   test('browsing and carting never ask for an account', async ({ page }) => {
     await page.context().clearCookies();
     await pickArea(page, 'Jayanagar 4th Block');

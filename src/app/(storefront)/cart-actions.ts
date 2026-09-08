@@ -6,9 +6,8 @@ import { isAppError } from '@/modules/platform';
 import {
   clearCartMoveNotice,
   currentCartToken,
-  currentStoreContext,
+  currentStorefrontPrincipal,
   setCartTokenCookie,
-  storefrontPrincipal,
 } from '@/storefront';
 import { changeSummary, withSummary } from './cart-notices';
 
@@ -20,6 +19,10 @@ import { changeSummary, withSummary } from './cart-notices';
  * basket belongs to is not the client's to decide. The product id *is* taken
  * from the form — it has to be — which is why the service checks that the store
  * lists it before anything is written.
+ *
+ * The signed-in shopper is re-derived the same way, from the session, so a
+ * basket started *after* signing in belongs to that account from its first row
+ * rather than from the next sign-in (R4).
  */
 async function run(body: () => Promise<string>): Promise<string> {
   try {
@@ -54,7 +57,7 @@ function quantity(form: FormData, key: string): number {
 
 export async function addToCartAction(_state: string | undefined, form: FormData): Promise<string> {
   return run(async () => {
-    const context = await currentStoreContext();
+    const { context, customer, principal } = await currentStorefrontPrincipal();
     if (context === null) return '!Choose your delivery area first.';
 
     const productId = text(form, 'productId');
@@ -64,10 +67,10 @@ export async function addToCartAction(_state: string | undefined, form: FormData
 
     const storeId = context.serviceability.storeId;
     const existing = await currentCartToken();
-    const { cart, created } = await ensureCart(storeId, existing);
+    const { cart, created } = await ensureCart(storeId, existing, customer?.id ?? null);
     if (created) await setCartTokenCookie(cart.cartToken);
 
-    const view = await addItem(storefrontPrincipal(context), {
+    const view = await addItem(principal, {
       cartToken: cart.cartToken,
       storeId,
       productId,
@@ -92,7 +95,7 @@ export async function setCartQuantityAction(
   form: FormData,
 ): Promise<string> {
   return run(async () => {
-    const context = await currentStoreContext();
+    const { context, principal } = await currentStorefrontPrincipal();
     const cartToken = await currentCartToken();
     if (context === null || cartToken === null) return '!Your basket is empty.';
 
@@ -100,7 +103,7 @@ export async function setCartQuantityAction(
     const qty = quantity(form, 'qty');
     if (!Number.isFinite(qty)) return '!Enter a whole number of items.';
 
-    const view = await setQuantity(storefrontPrincipal(context), { cartToken, productId, qty });
+    const view = await setQuantity(principal, { cartToken, productId, qty });
     revalidatePath('/cart');
     return withSummary('Basket updated.', changeSummary(view));
   });
@@ -111,11 +114,11 @@ export async function removeFromCartAction(
   form: FormData,
 ): Promise<string> {
   return run(async () => {
-    const context = await currentStoreContext();
+    const { context, principal } = await currentStorefrontPrincipal();
     const cartToken = await currentCartToken();
     if (context === null || cartToken === null) return '!Your basket is empty.';
 
-    const view = await removeItem(storefrontPrincipal(context), {
+    const view = await removeItem(principal, {
       cartToken,
       productId: text(form, 'productId'),
     });

@@ -338,12 +338,18 @@ export async function addAddress(
   const customerId = requireCustomer(principal);
   const fields = await validateAddress(input);
 
-  // The first address a shopper saves is their default whether they said so or
-  // not — an address book with no default is one checkout has to guess from.
-  const existing = await repo.countAddresses(customerId);
-  const isDefault = input.isDefault === true || existing === 0;
-
   return withTransaction(async (tx) => {
+    // Before the count, not after: "is this the first address?" and "who is the
+    // default now?" are both questions about the whole address book, and two
+    // transactions that answer them concurrently each miss the other's
+    // uncommitted row (R2).
+    await repo.lockAddressBook(tx, customerId);
+
+    // The first address a shopper saves is their default whether they said so or
+    // not — an address book with no default is one checkout has to guess from.
+    const existing = await repo.countAddresses(customerId, tx);
+    const isDefault = input.isDefault === true || existing === 0;
+
     const address = await repo.insertAddress(tx, { customerId, ...fields, isDefault });
     if (isDefault) await repo.clearDefaults(tx, customerId, address.id);
     return address;
@@ -361,6 +367,7 @@ export async function updateAddress(
   const fields = await validateAddress(input);
 
   return withTransaction(async (tx) => {
+    await repo.lockAddressBook(tx, customerId);
     const address = await repo.updateAddressRow(tx, addressId, {
       ...fields,
       ...(input.isDefault === true ? { isDefault: true } : {}),
@@ -383,6 +390,10 @@ export async function removeAddress(principal: Principal, addressId: string): Pr
   const address = await getAddress(principal, addressId);
 
   await withTransaction(async (tx) => {
+    // Removing the default hands it to another address, which is a decision
+    // about the whole book and so takes the same lock the other two do — a
+    // removal racing an insert must not end with two defaults or none.
+    await repo.lockAddressBook(tx, customerId);
     await repo.updateAddressRow(tx, addressId, { isDeleted: true, isDefault: false });
     if (!address.isDefault) return;
 

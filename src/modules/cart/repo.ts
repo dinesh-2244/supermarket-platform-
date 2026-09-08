@@ -9,7 +9,13 @@
  * and creates no order, and the cheapest way to hold it is for this file to
  * have no way of doing so.
  */
-import { getPrisma, type DbExecutor, type Tx } from '../platform/index';
+import {
+  advisoryXactLock,
+  getPrisma,
+  LOCK_NAMESPACE,
+  type DbExecutor,
+  type Tx,
+} from '../platform/index';
 
 /** The executor to run a *read* on: the caller's transaction, or the singleton. */
 export function executor(db?: DbExecutor): DbExecutor {
@@ -161,6 +167,20 @@ export async function setCartStatus(
   status: 'ACTIVE' | 'CONVERTED' | 'ABANDONED',
 ): Promise<void> {
   await cartExecutor(tx).cart.update({ where: { id: cartId }, data: { status } });
+}
+
+/**
+ * Serialise this shopper's "at most one active cart" rule.
+ *
+ * Taken **before** the active-cart list is read. Locking each cart row protects
+ * each cart and nothing about the relationship between them: two devices
+ * adopting two different carts lock two different rows, each reads the other's
+ * adoption as not yet done, and both commit an active cart for one customer
+ * (R3). The lock therefore has to be on the customer, who is the thing the rule
+ * is actually about.
+ */
+export async function lockCustomerCarts(tx: Tx, customerId: string): Promise<void> {
+  await advisoryXactLock(tx, LOCK_NAMESPACE.customerCarts, customerId);
 }
 
 /** A customer's other active carts — for the sign-in multi-cart rule (D6). */

@@ -22,6 +22,9 @@ export {
 } from './logger/index';
 
 export {
+  advisoryXactLock,
+  LOCK_NAMESPACE,
+  type LockNamespace,
   assertTransactionHandle,
   checkDbHealth,
   type DbExecutor,
