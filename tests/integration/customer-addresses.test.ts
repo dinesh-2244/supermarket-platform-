@@ -21,6 +21,7 @@ const prisma = getPrisma();
 const suffix = `${Date.now() % 1000000}`;
 
 let storeId: string;
+let zoneId: string;
 let areaId: string;
 let inactiveAreaId: string;
 let mine: Principal;
@@ -45,6 +46,7 @@ beforeAll(async () => {
   const zone = await prisma.deliveryZone.create({
     data: { storeId, name: `Address zone ${suffix}` },
   });
+  zoneId = zone.id;
   areaId = (
     await prisma.deliveryArea.create({
       data: { zoneId: zone.id, name: `Address area ${suffix}`, pincode: '560001' },
@@ -190,6 +192,37 @@ describe('P3-7 — an address has to be somewhere we could deliver', () => {
     await expect(addAddress(mine, { line1: 'Somewhere', areaId: inactiveAreaId })).rejects.toThrow(
       /delivery area/i,
     );
+  });
+
+  /**
+   * R7 — the rule is `stores`', not a copy of part of it.
+   *
+   * The check used to be a local `DeliveryArea.isActive` read, which is only the
+   * bottom third of "we deliver here": an area can be perfectly active inside a
+   * zone nobody serves any more, or a store that has closed. Both were accepted,
+   * and both fail at checkout, which is precisely the moment this validation
+   * exists to come before.
+   */
+  it('refuses an active area whose zone has been retired', async () => {
+    await prisma.deliveryZone.update({ where: { id: zoneId }, data: { isActive: false } });
+    try {
+      await expect(addAddress(mine, { line1: 'Somewhere', areaId })).rejects.toThrow(
+        /delivery area/i,
+      );
+    } finally {
+      await prisma.deliveryZone.update({ where: { id: zoneId }, data: { isActive: true } });
+    }
+  });
+
+  it('refuses an active area whose store has closed', async () => {
+    await prisma.store.update({ where: { id: storeId }, data: { isActive: false } });
+    try {
+      await expect(addAddress(mine, { line1: 'Somewhere', areaId })).rejects.toThrow(
+        /delivery area/i,
+      );
+    } finally {
+      await prisma.store.update({ where: { id: storeId }, data: { isActive: true } });
+    }
   });
 
   it('refuses an empty line and a malformed pincode', async () => {

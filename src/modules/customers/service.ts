@@ -33,6 +33,7 @@ import {
   withTransaction,
   type Principal,
 } from '../platform/index';
+import { isDeliverableArea } from '../stores/index';
 import {
   assertCustomerName,
   assertCustomerPassword,
@@ -418,7 +419,13 @@ async function validateAddress(input: AddressInput): Promise<{
   const areaId = input.areaId ?? null;
   // An address pointing at an area nobody delivers to would silently fail at
   // checkout, so it is refused here where the shopper can still fix it.
-  if (areaId !== null && !(await repo.deliveryAreaExists(areaId))) {
+  //
+  // Asked of `stores` rather than answered here. DeliveryArea is that module's
+  // model (§4), and reading it from this repository was both a boundary
+  // violation the path lint could not see and a *different rule*: it tested the
+  // area's own `isActive` flag and nothing about the zone or the store above it,
+  // so an address in a retired zone or a closed store was accepted (R7).
+  if (areaId !== null && !(await isDeliverableArea(areaId))) {
     throw new ValidationError('Choose a delivery area from the list', {});
   }
 

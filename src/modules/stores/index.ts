@@ -14,6 +14,7 @@ export {
   getSettings,
   getStorefrontSettings,
   getStore,
+  isDeliverableArea,
   listAreas,
   listServiceableAreas,
   listStores,

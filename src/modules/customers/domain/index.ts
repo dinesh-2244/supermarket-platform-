@@ -18,7 +18,7 @@ export interface ModuleDescriptor {
 export const descriptor: ModuleDescriptor = {
   name: 'customers',
   owns: 'Customer, CustomerAddress, CustomerSession, OtpChallenge (disabled), optional accounts',
-  dependsOn: ['platform', 'notifications'],
+  dependsOn: ['platform', 'stores', 'notifications'],
   emits: ['customer.registered'],
 };
 

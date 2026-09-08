@@ -273,12 +273,3 @@ export async function clearDefaults(tx: Tx, customerId: string, exceptId: string
 export async function countAddresses(customerId: string, db?: DbExecutor): Promise<number> {
   return executor(db).customerAddress.count({ where: { customerId, isDeleted: false } });
 }
-
-/** A delivery area must be real before an address may point at it. */
-export async function deliveryAreaExists(areaId: string, db?: DbExecutor): Promise<boolean> {
-  const area = await executor(db).deliveryArea.findFirst({
-    where: { id: areaId, isActive: true },
-    select: { id: true },
-  });
-  return area !== null;
-}

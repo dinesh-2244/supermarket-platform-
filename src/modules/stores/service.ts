@@ -488,6 +488,29 @@ export async function listServiceableAreas(): Promise<readonly StorefrontArea[]>
     .sort((a, b) => a.areaName.localeCompare(b.areaName));
 }
 
+/**
+ * Is this an area we could deliver an order to?
+ *
+ * The question an address book has to ask before it saves an area — an address
+ * pointing somewhere nobody delivers would fail at checkout, far too late for
+ * the shopper to fix it. Answered from the same candidate set the picker and
+ * `resolveServiceability` use, so "we deliver here" means one thing across the
+ * whole application: an active area, in an active zone, of an active store.
+ *
+ * Deliberately **not** `resolveServiceability`, which additionally refuses a
+ * store that has temporarily stopped accepting orders. That is a fact about
+ * tonight, not about the address: a shopper may save their home address while
+ * their shop is closed, and the routing rules apply again when they order.
+ *
+ * Principal-less for the same reason `listServiceableAreas` is: this is asked
+ * before any store context exists, and the answer is one bit about the shop's
+ * own coverage, not about anybody's data.
+ */
+export async function isDeliverableArea(areaId: string): Promise<boolean> {
+  if (areaId === '') return false;
+  return (await listServiceableAreas()).some((area) => area.areaId === areaId);
+}
+
 /** One row of the locality picker. Deliberately narrower than `AreaCandidate`. */
 export interface StorefrontArea {
   readonly areaId: string;
