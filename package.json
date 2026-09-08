@@ -26,9 +26,6 @@
     "db:reset": "prisma migrate reset --force",
     "test:coverage": "vitest run --coverage"
   },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
-  },
   "dependencies": {
     "@auth/prisma-adapter": "2.11.3",
     "@prisma/client": "6.19.3",
