@@ -118,6 +118,27 @@ export async function advisoryXactLock(
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(${namespace}::int, hashtext(${key}))`;
 }
 
+/**
+ * Take the lock **if it is free right now**, rather than queueing for it.
+ *
+ * `pg_advisory_xact_lock` blocks, and a blocked transaction goes on holding its
+ * database connection for as long as it waits. With a small pool — CI runs
+ * `connection_limit=5` — a dozen callers queueing on one key exhaust the pool
+ * before the queue drains, and callers that never even reached the lock fail
+ * with a pool timeout. Trying instead lets the caller roll back, give the
+ * connection up, and come back; see `withSlotLock` in `checkout`.
+ */
+export async function tryAdvisoryXactLock(
+  tx: Tx,
+  namespace: LockNamespace,
+  key: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ locked: boolean }[]>`
+    SELECT pg_try_advisory_xact_lock(${namespace}::int, hashtext(${key})) AS "locked"
+  `;
+  return rows[0]?.locked === true;
+}
+
 function asTx(client: Prisma.TransactionClient): Tx {
   return client as Tx;
 }

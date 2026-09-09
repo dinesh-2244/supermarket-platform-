@@ -10,10 +10,10 @@
  * the others is a defect the rest of the system cannot repair (§3, R5).
  */
 import {
-  advisoryXactLock,
   ConflictError,
   emit,
   LOCK_NAMESPACE,
+  tryAdvisoryXactLock,
   ValidationError,
   withTransaction,
   type Principal,
@@ -82,13 +82,26 @@ export async function availableSlots(
 
 /**
  * Placement does real work — revalidate, lock and decrement every line, write the
- * order — and then queues behind other placements into the same delivery window.
- * Prisma's 5 s default is comfortable for one shopper and not for the twelfth,
- * and a transaction timeout reaches them as an opaque error where "that window
- * is full" is the true answer. This is a ceiling for a pathological case, not a
- * budget: an uncontended placement finishes in tens of milliseconds.
+ * order. Prisma's 5 s default is comfortable for one shopper and not for the
+ * twelfth. A ceiling for a pathological case, not a budget: an uncontended
+ * placement finishes in tens of milliseconds.
  */
 const PLACEMENT_TRANSACTION = { timeoutMs: 20_000, maxWaitMs: 20_000 } as const;
+
+/**
+ * Thrown inside the transaction when another placement holds this window's lock,
+ * and caught by `placeOrder` — never by a caller. It exists so the transaction
+ * can be *abandoned* rather than blocked: see the retry loop below.
+ */
+class SlotBusy extends Error {}
+
+/** How many times to come back for a busy window, and how long to wait. */
+const SLOT_LOCK_ATTEMPTS = 12;
+const SLOT_LOCK_BACKOFF_MS = 25;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export interface PlaceOrderInput {
   readonly cartToken: string;
@@ -181,143 +194,173 @@ export async function placeOrder(
 
   const store = await getStore(shopper, storeId);
 
-  const placed = await withTransaction(async (tx: Tx) => {
-    // Locks the cart row, and refuses one that is already CONVERTED. That is the
-    // double-submit guard: the second of two simultaneous submissions waits on
-    // the row lock, then reads the status the first one committed.
-    //
-    // `revalidateForCheckout` below takes the same lock again — cheap, and it
-    // means the guard does not depend on the order of these two calls. Taking it
-    // here as well buys the store check below, which should reject a
-    // wrong-store basket before any revalidation work is done.
-    const cart = await lockCartForCheckout(tx, input.cartToken);
-
-    // A basket belongs to one shop, and checkout never silently cross-stores it.
-    // The Phase 3 rebuild flow is how a shopper reconciles a changed area.
-    if (cart.storeId !== storeId) {
-      throw new ConflictError(
-        'Your basket is for a different shop — change your delivery area to move it',
-        { reason: 'wrong-store', cartStoreId: cart.storeId, addressStoreId: storeId },
+  const attempt = async (): Promise<PlacedOrder> =>
+    withTransaction(async (tx: Tx) => {
+      // The delivery window comes first, before any other lock and any work.
+      //
+      // Capacity is a rule about a *set* of orders and the one about to join it
+      // does not exist yet, so no row lock can serialise it. The lock is per
+      // (store, window): two different windows never contend.
+      //
+      // **Try**, never block. A transaction blocked on a lock goes on holding
+      // its database connection, so a dozen shoppers queueing on one window
+      // exhaust the pool — CI runs `connection_limit=5` — and even placements
+      // that never reached the lock die with a pool timeout: every one of them
+      // failing, where three should have succeeded. Failing fast and retrying
+      // outside the transaction hands the connection back between attempts, so
+      // concurrency is bounded by the pool for *work* and not for *waiting*.
+      //
+      // Taking it **first** is what makes that retry cheap. A shopper who finds
+      // the window busy has spent one query, not a revalidation and a row lock
+      // on every line of their basket. Retrying the expensive part instead was
+      // measurably worse than blocking: nine shoppers kept re-contending on the
+      // same inventory row and the pool starved anyway.
+      const locked = await tryAdvisoryXactLock(
+        tx,
+        LOCK_NAMESPACE.deliverySlot,
+        `${storeId}:${input.slotStart.toISOString()}`,
       );
-    }
+      if (!locked) throw new SlotBusy();
 
-    // Server-authoritative: whatever the page last showed, this is what the
-    // store says now, and it is what the shopper is charged from.
-    const view = await revalidateForCheckout(tx, shopper, input.cartToken);
-    if (view.lines.length === 0) {
-      throw new ConflictError('Your basket is empty', { reason: 'empty-cart' });
-    }
+      const taken = await liveOrdersInSlot(tx, storeId, input.slotStart);
+      if (taken >= grid.slotCapacity) {
+        throw new ConflictError('That delivery window is full — please choose another', {
+          reason: 'slot-full',
+          slotStart: input.slotStart.toISOString(),
+          capacity: grid.slotCapacity,
+        });
+      }
 
-    const shortfalls = shortfallsIn(view);
-    if (shortfalls.length > 0) throw new ShortfallError(shortfalls);
+      // Locks the cart row, and refuses one that is already CONVERTED. That is the
+      // double-submit guard: the second of two simultaneous submissions waits on
+      // the row lock, then reads the status the first one committed.
+      //
+      // `revalidateForCheckout` below takes the same lock again — cheap, and it
+      // means the guard does not depend on the order of these two calls. Taking it
+      // here as well buys the store check below, which should reject a
+      // wrong-store basket before any revalidation work is done.
+      const cart = await lockCartForCheckout(tx, input.cartToken);
 
-    const subtotalPaise = view.totals.subtotalPaise;
-    if (subtotalPaise < minOrderPaise) {
-      throw new ConflictError('Your basket is below this shop’s minimum order', {
-        reason: 'below-minimum',
-        subtotalPaise,
-        minOrderPaise,
-      });
-    }
+      // A basket belongs to one shop, and checkout never silently cross-stores it.
+      // The Phase 3 rebuild flow is how a shopper reconciles a changed area.
+      if (cart.storeId !== storeId) {
+        throw new ConflictError(
+          'Your basket is for a different shop — change your delivery area to move it',
+          { reason: 'wrong-store', cartStoreId: cart.storeId, addressStoreId: storeId },
+        );
+      }
 
-    // Deterministic order — by productId — so two concurrent placements that
-    // share products acquire their row locks in the same sequence and wait for
-    // each other instead of deadlocking.
-    const ordered = [...view.lines].sort((a, b) => a.productId.localeCompare(b.productId));
+      // Server-authoritative: whatever the page last showed, this is what the
+      // store says now, and it is what the shopper is charged from.
+      const view = await revalidateForCheckout(tx, shopper, input.cartToken);
+      if (view.lines.length === 0) {
+        throw new ConflictError('Your basket is empty', { reason: 'empty-cart' });
+      }
 
-    const lines: NewOrderLine[] = [];
-    for (const line of ordered) {
-      // Locks the row, refuses a negative balance, writes the ledger row with
-      // `balanceAfter` — all in this transaction. The last-unit race is decided
-      // here: the loser waits for the lock, re-reads, and cannot go below zero.
-      await applyMovement(tx, shopper, {
+      const shortfalls = shortfallsIn(view);
+      if (shortfalls.length > 0) throw new ShortfallError(shortfalls);
+
+      const subtotalPaise = view.totals.subtotalPaise;
+      if (subtotalPaise < minOrderPaise) {
+        throw new ConflictError('Your basket is below this shop’s minimum order', {
+          reason: 'below-minimum',
+          subtotalPaise,
+          minOrderPaise,
+        });
+      }
+
+      // Deterministic order — by productId — so two concurrent placements that
+      // share products acquire their row locks in the same sequence and wait for
+      // each other instead of deadlocking.
+      const ordered = [...view.lines].sort((a, b) => a.productId.localeCompare(b.productId));
+
+      const lines: NewOrderLine[] = [];
+      for (const line of ordered) {
+        // Locks the row, refuses a negative balance, writes the ledger row with
+        // `balanceAfter` — all in this transaction. The last-unit race is decided
+        // here: the loser waits for the lock, re-reads, and cannot go below zero.
+        await applyMovement(tx, shopper, {
+          storeId,
+          productId: line.productId,
+          delta: -line.qty,
+          reason: 'ORDER_PLACED',
+          refType: 'Cart',
+          refId: cart.id,
+        });
+
+        lines.push({
+          productId: line.productId,
+          nameSnapshot: line.name,
+          packSizeSnapshot: line.packSize,
+          unitPricePaise: line.unitPricePaise,
+          qtyOrdered: line.qty,
+        });
+      }
+
+      const customer = await upsertCheckoutCustomer(tx, { phone: contactPhone, name: contactName });
+      // A signed-in shopper's order joins their account; it never overwrites a
+      // different customer's row, because the phone number is what identifies it.
+      const customerId = input.customerSession?.customerId ?? customer.id;
+
+      const order = await createOrder(tx, {
+        storeCode: store.code,
+        customerId,
         storeId,
-        productId: line.productId,
-        delta: -line.qty,
-        reason: 'ORDER_PLACED',
-        refType: 'Cart',
-        refId: cart.id,
+        contactName,
+        contactPhone,
+        deliveryAddressSnapshot: {
+          areaId: serviceability.areaId,
+          zoneId: serviceability.zoneId,
+          line1: input.addressLines?.line1 ?? null,
+          line2: input.addressLines?.line2 ?? null,
+          locality: input.addressInput.locality ?? null,
+          pincode: input.addressInput.pincode ?? null,
+        },
+        deliverySlotStart: input.slotStart,
+        deliverySlotEnd: slotFinish,
+        paymentMethod,
+        subtotalPaise,
+        deliveryFeePaise,
+        lines,
       });
 
-      lines.push({
-        productId: line.productId,
-        nameSnapshot: line.name,
-        packSizeSnapshot: line.packSize,
-        unitPricePaise: line.unitPricePaise,
-        qtyOrdered: line.qty,
-      });
+      await markConverted(tx, cart.id);
+
+      return {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        trackingToken: order.trackingToken,
+        storeId,
+        slotStart: input.slotStart,
+        slotEnd: slotFinish,
+        subtotalPaise,
+        deliveryFeePaise,
+        estimatedTotalPaise: order.estimatedTotalPaise,
+        paymentMethod,
+      } satisfies PlacedOrder;
+    }, PLACEMENT_TRANSACTION);
+
+  // Retry only the "somebody else is writing into this window right now" case.
+  // Everything else — full, out of stock, wrong shop — is a decision, and
+  // repeating it would only produce the same answer more slowly.
+  let placed: PlacedOrder | null = null;
+  for (let tries = 0; tries < SLOT_LOCK_ATTEMPTS && placed === null; tries += 1) {
+    try {
+      placed = await attempt();
+    } catch (error) {
+      if (!(error instanceof SlotBusy)) throw error;
+      // Jittered, so twelve shoppers who arrive together do not come back
+      // together and collide again in lockstep.
+      await sleep(SLOT_LOCK_BACKOFF_MS * (tries + 1) * (0.5 + Math.random()));
     }
+  }
 
-    // Capacity is a rule about a *set* of orders, and the one about to join it
-    // does not exist yet — so no row lock can serialise it. Without this, N
-    // simultaneous placements would each count the same N-1 and each commit.
-    // The lock is per (store, window): two different windows never contend.
-    //
-    // Taken here rather than earlier on purpose. An advisory *xact* lock is held
-    // until commit, so everything after this point is serialised against every
-    // other placement into the same window — and the queue that forms is real
-    // time each waiter spends holding an open transaction. Revalidation and the
-    // per-line stock decrements do not need this lock (they have their own row
-    // locks), so they now happen outside it and the serialised section is just
-    // count → write → commit. Under the plan's N ≫ C test that is the difference
-    // between the last waiter seeing "that window is full" and seeing Prisma's
-    // transaction-timeout error.
-    await advisoryXactLock(
-      tx,
-      LOCK_NAMESPACE.deliverySlot,
-      `${storeId}:${input.slotStart.toISOString()}`,
-    );
-    const taken = await liveOrdersInSlot(tx, storeId, input.slotStart);
-    if (taken >= grid.slotCapacity) {
-      throw new ConflictError('That delivery window is full — please choose another', {
-        reason: 'slot-full',
-        slotStart: input.slotStart.toISOString(),
-        capacity: grid.slotCapacity,
-      });
-    }
-
-    const customer = await upsertCheckoutCustomer(tx, { phone: contactPhone, name: contactName });
-    // A signed-in shopper's order joins their account; it never overwrites a
-    // different customer's row, because the phone number is what identifies it.
-    const customerId = input.customerSession?.customerId ?? customer.id;
-
-    const order = await createOrder(tx, {
-      storeCode: store.code,
-      customerId,
-      storeId,
-      contactName,
-      contactPhone,
-      deliveryAddressSnapshot: {
-        areaId: serviceability.areaId,
-        zoneId: serviceability.zoneId,
-        line1: input.addressLines?.line1 ?? null,
-        line2: input.addressLines?.line2 ?? null,
-        locality: input.addressInput.locality ?? null,
-        pincode: input.addressInput.pincode ?? null,
-      },
-      deliverySlotStart: input.slotStart,
-      deliverySlotEnd: slotFinish,
-      paymentMethod,
-      subtotalPaise,
-      deliveryFeePaise,
-      lines,
+  if (placed === null) {
+    throw new ConflictError('That delivery window is busy — please try again', {
+      reason: 'slot-busy',
+      slotStart: input.slotStart.toISOString(),
     });
-
-    await markConverted(tx, cart.id);
-
-    return {
-      orderId: order.id,
-      orderNumber: order.orderNumber,
-      trackingToken: order.trackingToken,
-      storeId,
-      slotStart: input.slotStart,
-      slotEnd: slotFinish,
-      subtotalPaise,
-      deliveryFeePaise,
-      estimatedTotalPaise: order.estimatedTotalPaise,
-      paymentMethod,
-    } satisfies PlacedOrder;
-  }, PLACEMENT_TRANSACTION);
+  }
 
   // After the commit, exactly once. Emitting inside the transaction would
   // announce an order that can still roll back.
