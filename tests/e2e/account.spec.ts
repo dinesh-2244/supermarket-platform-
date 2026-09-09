@@ -22,7 +22,16 @@ const ROTATED_PASSWORD = 'AnotherPassw0rd';
 let currentPassword = PASSWORD;
 
 /** The seeded super-admin, for the one case that needs a staff form on screen. */
-const STAFF_EMAIL = 'admin@munderfresh.local';
+/**
+ * A **store-scoped** staff account, which is what this file's one back-office
+ * test needs and what the name always claimed.
+ *
+ * It used to be `admin@munderfresh.local` — the seeded SUPER_ADMIN, who belongs
+ * to no store. `/admin/inventory` therefore resolved no store for them and
+ * rendered no per-row adjust forms at all, so the test's premise ("a staff form
+ * sitting open") could not hold.
+ */
+const STAFF_EMAIL = 'manager.s1@munderfresh.local';
 const STAFF_PASSWORD = 'DevPassw0rd!';
 
 /**
@@ -172,7 +181,15 @@ test.describe.serial('customer accounts', () => {
     await expect(page).toHaveURL(/\/admin(\?|$)/);
 
     await page.goto('/admin/inventory');
-    const form = page.locator('form').filter({ hasText: 'Adjust' }).first();
+    // Selected by the field this test actually uses, not by the word "Adjust".
+    // `hasText: 'Adjust'` matched the *ledger filter* form, whose reason
+    // dropdown lists MANUAL_ADJUST, ADMIN_CORRECTION and friends — so
+    // `expect(form).toBeVisible()` passed on the wrong form and the "Change by"
+    // field it went looking for was never on it.
+    const form = page
+      .locator('form')
+      .filter({ has: page.getByLabel('Change by') })
+      .first();
     await expect(form).toBeVisible();
 
     // The session goes while the form sits open, and a shopper's cookie takes
