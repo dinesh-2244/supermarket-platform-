@@ -11,6 +11,7 @@
 import {
   assertAuthorized,
   ConflictError,
+  getPrisma,
   emit,
   NotFoundError,
   orderNumber as mintOrderNumber,
@@ -138,6 +139,30 @@ function announce(outcome: TransitionOutcome, reason?: string): void {
       emit(outcome.emits, { orderId: outcome.orderId, reason: reason ?? '' });
       return;
   }
+}
+
+/**
+ * How many live orders each window already holds, for the slot picker.
+ *
+ * Advisory: it is read outside any lock and can be stale by the time a shopper
+ * chooses. The **authoritative** capacity gate is the locked count inside
+ * `checkout.placeOrder`. That split is deliberate — a picker that took the lock
+ * would serialise every page load behind every placement.
+ */
+export async function slotUsage(
+  storeId: string,
+  starts: readonly Date[],
+): Promise<Map<number, number>> {
+  return repo.countBySlot(getPrisma(), storeId, starts);
+}
+
+/**
+ * The locked count `placeOrder` gates on. Must be called with the store's
+ * delivery-slot advisory lock already held, or two placements will each read
+ * the same N and each commit the N+1st.
+ */
+export async function liveOrdersInSlot(tx: Tx, storeId: string, start: Date): Promise<number> {
+  return repo.countInSlot(tx, storeId, start);
 }
 
 export interface NewOrderInput {

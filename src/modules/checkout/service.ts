@@ -10,8 +10,10 @@
  * the others is a defect the rest of the system cannot repair (§3, R5).
  */
 import {
+  advisoryXactLock,
   ConflictError,
   emit,
+  LOCK_NAMESPACE,
   ValidationError,
   withTransaction,
   type Principal,
@@ -20,15 +22,19 @@ import {
 import { lockCartForCheckout, markConverted, revalidateForCheckout } from '../cart/index';
 import { upsertCheckoutCustomer } from '../customers/index';
 import { applyMovement } from '../inventory/index';
-import { createOrder, type NewOrderLine } from '../orders/index';
-import { getStore, getStorefrontSettings, resolveServiceability } from '../stores/index';
-import type { ServiceabilityInput } from '../stores/index';
+import { createOrder, liveOrdersInSlot, slotUsage, type NewOrderLine } from '../orders/index';
+import {
+  getStore,
+  resolveServiceability,
+  slotEndOf,
+  slotGridFor,
+  type ServiceabilityInput,
+  type Slot,
+} from '../stores/index';
 import {
   assertPaymentMethod,
-  assertSlotShape,
   descriptor,
   shortfallsIn,
-  slotEnd,
   type LineShortfall,
   type ModuleDescriptor,
   type PaymentMethod,
@@ -37,6 +43,41 @@ import {
 /** What this module owns and is allowed to depend on (§4). */
 export function moduleDescriptor(): ModuleDescriptor {
   return descriptor;
+}
+
+/**
+ * The delivery windows a shopper may choose, with how much room each has left.
+ *
+ * **Why this lives in `checkout` and not in `stores`.** The plan puts
+ * `availableSlots` on the `stores` read interface, and the *shape* of a window —
+ * length, capacity, timezone, lead time, horizon — does live there
+ * (`stores.slotGridFor`). What could not follow it is the usage count: that is a
+ * fact about `Order` rows, which `orders` owns (§4), and R7's model-ownership
+ * rule exists precisely to stop one module reaching into another's tables. The
+ * alternative was to make `stores` depend on `orders`, which would put the
+ * module that `cart`, `catalog` and `checkout` all sit on top of above the one
+ * that sits on top of it. So the composition happens here, in the module that
+ * already legitimately sees both. The signature and semantics are the plan's.
+ *
+ * `capacityRemaining` is **advisory**: read outside any lock, it can be stale by
+ * the time the shopper picks. The authoritative gate is the locked count in
+ * `placeOrder`. A picker that took the lock would serialise every page load
+ * behind every placement, and would still be stale by the time the form posted.
+ */
+export async function availableSlots(
+  principal: Principal,
+  storeId: string,
+  from: Date,
+  options: { horizonDays?: number; leadMinutes?: number } = {},
+): Promise<Slot[]> {
+  const grid = await slotGridFor(principal, storeId, from, options);
+  const usage = await slotUsage(storeId, grid.starts);
+
+  return grid.starts.map((start) => ({
+    start,
+    end: slotEndOf(start, grid.slotLengthMinutes),
+    capacityRemaining: Math.max(0, grid.slotCapacity - (usage.get(start.getTime()) ?? 0)),
+  }));
 }
 
 export interface PlaceOrderInput {
@@ -116,11 +157,17 @@ export async function placeOrder(
   // from the caller.
   const shopper: Principal = { kind: 'customer', customerId: null, storeId };
 
-  // Read for the slot length only — the shape of this shop's delivery windows.
-  const settings = await getStorefrontSettings(shopper, storeId);
-
-  assertSlotShape({ start: input.slotStart, slotLengthMinutes: settings.slotLengthMinutes, now });
-  const slotFinish = slotEnd(input.slotStart, settings.slotLengthMinutes);
+  // The same grid the picker was built from, so a slot that could be offered is
+  // exactly a slot that can be booked. Lead time and horizon are checked here,
+  // not re-derived: one definition, asked twice.
+  const grid = await slotGridFor(shopper, storeId, now);
+  if (!grid.starts.some((start) => start.getTime() === input.slotStart.getTime())) {
+    throw new ConflictError('That delivery window is not available', {
+      reason: 'slot-unavailable',
+      slotStart: input.slotStart.toISOString(),
+    });
+  }
+  const slotFinish = slotEndOf(input.slotStart, grid.slotLengthMinutes);
 
   const store = await getStore(shopper, storeId);
 
@@ -153,6 +200,24 @@ export async function placeOrder(
 
     const shortfalls = shortfallsIn(view);
     if (shortfalls.length > 0) throw new ShortfallError(shortfalls);
+
+    // Capacity is a rule about a *set* of orders, and the one about to join it
+    // does not exist yet — so no row lock can serialise it. Without this, N
+    // simultaneous placements would each count the same N-1 and each commit.
+    // The lock is per (store, window): two different windows never contend.
+    await advisoryXactLock(
+      tx,
+      LOCK_NAMESPACE.deliverySlot,
+      `${storeId}:${input.slotStart.toISOString()}`,
+    );
+    const taken = await liveOrdersInSlot(tx, storeId, input.slotStart);
+    if (taken >= grid.slotCapacity) {
+      throw new ConflictError('That delivery window is full — please choose another', {
+        reason: 'slot-full',
+        slotStart: input.slotStart.toISOString(),
+        capacity: grid.slotCapacity,
+      });
+    }
 
     const subtotalPaise = view.totals.subtotalPaise;
     if (subtotalPaise < minOrderPaise) {

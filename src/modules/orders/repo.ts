@@ -182,6 +182,40 @@ export async function insertOrder(tx: Tx, order: NewOrder): Promise<OrderIdentit
   return created;
 }
 
+/**
+ * How many live orders each of these windows already holds.
+ *
+ * "Live" excludes `CANCELLED_BY_STORE` only: a cancelled order has given its
+ * stock back and freed its place, and every other state — including a failed
+ * delivery — is still an order the store has to fulfil in that window.
+ */
+export async function countBySlot(
+  db: DbExecutor,
+  storeId: string,
+  starts: readonly Date[],
+): Promise<Map<number, number>> {
+  if (starts.length === 0) return new Map();
+
+  const rows = await executor(db).order.groupBy({
+    by: ['deliverySlotStart'],
+    where: {
+      storeId,
+      deliverySlotStart: { in: [...starts] },
+      status: { not: 'CANCELLED_BY_STORE' },
+    },
+    _count: { _all: true },
+  });
+
+  return new Map(rows.map((row) => [row.deliverySlotStart.getTime(), row._count._all]));
+}
+
+/** How many live orders one window holds. Read inside the advisory lock. */
+export async function countInSlot(tx: Tx, storeId: string, start: Date): Promise<number> {
+  return auditedExecutor(tx).order.count({
+    where: { storeId, deliverySlotStart: start, status: { not: 'CANCELLED_BY_STORE' } },
+  });
+}
+
 /** Is this human-facing order number already committed? */
 export async function orderNumberTaken(tx: Tx, candidate: string): Promise<boolean> {
   const found = await auditedExecutor(tx).order.findUnique({

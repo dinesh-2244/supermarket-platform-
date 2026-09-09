@@ -82,6 +82,14 @@ export const LOCK_NAMESPACE = {
   customerAddresses: 0x0_11_58,
   /** One shopper's carts: at most one of them is `ACTIVE`. */
   customerCarts: 0x0_11_59,
+  /**
+   * One store's delivery slot: how many orders that window already holds.
+   *
+   * The rule is about a *set* of orders, and the order about to join it does not
+   * exist yet, so no row lock can serialise it: two placements would each count
+   * the same N and each commit the N+1st. The key is `(storeId, slotStart)`.
+   */
+  deliverySlot: 0x0_11_5a,
 } as const;
 
 export type LockNamespace = (typeof LOCK_NAMESPACE)[keyof typeof LOCK_NAMESPACE];

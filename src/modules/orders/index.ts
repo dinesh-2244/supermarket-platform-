@@ -9,7 +9,9 @@ export {
   cancelByStore,
   correctOrder,
   createOrder,
+  liveOrdersInSlot,
   moduleDescriptor,
+  slotUsage,
   // `transition` is deliberately NOT exported: it is the in-transaction
   // primitive and authorizes nothing, so the only way to reach it from
   // outside this module is through `applyTransition`, which does (R1).

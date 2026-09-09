@@ -1,13 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  assertPaymentMethod,
-  assertSlotShape,
-  isOnSlotGrid,
-  moduleDescriptor,
-  PAYMENT_METHODS,
-  shortfallsIn,
-  slotEnd,
-} from '../index';
+import { assertPaymentMethod, moduleDescriptor, PAYMENT_METHODS, shortfallsIn } from '../index';
 
 describe('checkout module', () => {
   it('declares the ownership and dependencies from architecture §4', () => {
@@ -37,71 +29,6 @@ describe('payment method', () => {
     for (const value of ['CARD', 'PREPAID', 'RAZORPAY', '', 'cod']) {
       expect(() => assertPaymentMethod(value)).toThrow(/how you will pay/i);
     }
-  });
-});
-
-describe('slot arithmetic', () => {
-  it('ends a slot one slot-length after it starts', () => {
-    expect(slotEnd(new Date('2026-03-01T10:00:00Z'), 60)).toEqual(new Date('2026-03-01T11:00:00Z'));
-    expect(slotEnd(new Date('2026-03-01T10:00:00Z'), 30)).toEqual(new Date('2026-03-01T10:30:00Z'));
-  });
-
-  it('puts hourly slots on the hour, anchored to midnight', () => {
-    expect(isOnSlotGrid(new Date('2026-03-01T00:00:00Z'), 60)).toBe(true);
-    expect(isOnSlotGrid(new Date('2026-03-01T10:00:00Z'), 60)).toBe(true);
-    expect(isOnSlotGrid(new Date('2026-03-01T23:00:00Z'), 60)).toBe(true);
-    expect(isOnSlotGrid(new Date('2026-03-01T10:30:00Z'), 60)).toBe(false);
-    expect(isOnSlotGrid(new Date('2026-03-01T10:00:01Z'), 60)).toBe(false);
-  });
-
-  it('follows a store that uses half-hour windows', () => {
-    expect(isOnSlotGrid(new Date('2026-03-01T10:30:00Z'), 30)).toBe(true);
-    expect(isOnSlotGrid(new Date('2026-03-01T10:45:00Z'), 30)).toBe(false);
-  });
-
-  it('treats a nonsense slot length as no grid at all', () => {
-    expect(isOnSlotGrid(new Date('2026-03-01T10:00:00Z'), 0)).toBe(false);
-    expect(isOnSlotGrid(new Date('2026-03-01T10:00:00Z'), -60)).toBe(false);
-  });
-
-  it('is the same grid regardless of when it is asked', () => {
-    // The reason the grid is anchored to midnight rather than to "now": two
-    // shoppers a minute apart must be offered the same windows, or the capacity
-    // count inside placeOrder would be counting different things for each.
-    const slot = new Date('2026-03-01T14:00:00Z');
-    expect(isOnSlotGrid(slot, 60)).toBe(true);
-    expect(isOnSlotGrid(slot, 60)).toBe(true);
-  });
-});
-
-describe('assertSlotShape', () => {
-  const now = new Date('2026-03-01T09:15:00Z');
-
-  it('accepts a future slot on the grid', () => {
-    expect(() =>
-      assertSlotShape({ start: new Date('2026-03-01T11:00:00Z'), slotLengthMinutes: 60, now }),
-    ).not.toThrow();
-  });
-
-  it('refuses a slot off the grid', () => {
-    expect(() =>
-      assertSlotShape({ start: new Date('2026-03-01T11:20:00Z'), slotLengthMinutes: 60, now }),
-    ).toThrow(/delivery windows/i);
-  });
-
-  it('refuses a slot that has already started, and the current one', () => {
-    expect(() =>
-      assertSlotShape({ start: new Date('2026-03-01T08:00:00Z'), slotLengthMinutes: 60, now }),
-    ).toThrow(/already started/i);
-    expect(() =>
-      assertSlotShape({ start: new Date('2026-03-01T09:00:00Z'), slotLengthMinutes: 60, now }),
-    ).toThrow(/already started/i);
-  });
-
-  it('refuses an unparseable date', () => {
-    expect(() =>
-      assertSlotShape({ start: new Date('not a date'), slotLengthMinutes: 60, now }),
-    ).toThrow(/choose a delivery slot/i);
   });
 });
 

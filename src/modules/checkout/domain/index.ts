@@ -34,55 +34,6 @@ export function assertPaymentMethod(value: string): PaymentMethod {
   return value as PaymentMethod;
 }
 
-const MINUTE_MS = 60_000;
-
-/** The end of the one-hour (or whatever the store says) window a slot opens. */
-export function slotEnd(start: Date, slotLengthMinutes: number): Date {
-  return new Date(start.getTime() + slotLengthMinutes * MINUTE_MS);
-}
-
-/**
- * A slot start must sit **on the grid** the store's slot length defines,
- * measured from midnight UTC.
- *
- * Anchoring to midnight rather than to "now" is what makes the grid the same for
- * every shopper and every request: two people loading the page a minute apart
- * must be offered — and must be able to book — the same windows, or the capacity
- * count in `placeOrder` would be counting different things for each of them.
- */
-export function isOnSlotGrid(start: Date, slotLengthMinutes: number): boolean {
-  if (slotLengthMinutes <= 0) return false;
-  const msIntoDay = start.getTime() % (24 * 60 * MINUTE_MS);
-  return msIntoDay % (slotLengthMinutes * MINUTE_MS) === 0;
-}
-
-export interface SlotShapeInput {
-  readonly start: Date;
-  readonly slotLengthMinutes: number;
-  readonly now: Date;
-}
-
-/**
- * The slot rules `placeOrder` can decide without touching the database.
- *
- * Capacity is deliberately *not* here: it is a fact about other orders, and the
- * only trustworthy place to establish it is under the advisory lock inside the
- * placing transaction (D3).
- */
-export function assertSlotShape(input: SlotShapeInput): void {
-  if (Number.isNaN(input.start.getTime())) {
-    throw new ValidationError('Choose a delivery slot', {});
-  }
-  if (!isOnSlotGrid(input.start, input.slotLengthMinutes)) {
-    throw new ValidationError('That is not one of this shop’s delivery windows', {
-      slotLengthMinutes: input.slotLengthMinutes,
-    });
-  }
-  if (input.start.getTime() <= input.now.getTime()) {
-    throw new ValidationError('That delivery window has already started', {});
-  }
-}
-
 export interface LineShortfall {
   readonly productId: string;
   readonly name: string;

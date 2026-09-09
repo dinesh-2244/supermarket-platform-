@@ -5,6 +5,7 @@
  * `service.ts`, `repo.ts` and `domain/` are module-private.
  */
 export {
+  availableSlots,
   moduleDescriptor,
   placeOrder,
   ShortfallError,
@@ -14,13 +15,9 @@ export {
 
 export {
   assertPaymentMethod,
-  assertSlotShape,
-  isOnSlotGrid,
   PAYMENT_METHODS,
   shortfallsIn,
-  slotEnd,
   type LineShortfall,
   type ModuleDescriptor,
   type PaymentMethod,
-  type SlotShapeInput,
 } from './domain/index';

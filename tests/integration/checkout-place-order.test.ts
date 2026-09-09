@@ -47,8 +47,12 @@ const userIds: string[] = [];
 const productIds: string[] = [];
 const cartTokens: string[] = [];
 
-/** A future slot on the hourly grid. */
-const SLOT = new Date('2026-12-01T10:00:00Z');
+/**
+ * A bookable window. The factory store is `Asia/Kolkata`, and slots sit on the
+ * hour *locally* — so on the hour IST is half past the hour UTC. Two hours after
+ * NOW clears the lead time.
+ */
+const SLOT = new Date('2026-12-01T10:30:00Z');
 const NOW = new Date('2026-12-01T08:00:00Z');
 
 const guest: Principal = { kind: 'customer', customerId: null, storeId: null };
@@ -73,7 +77,14 @@ beforeAll(async () => {
 
   const first = await createStore(prisma);
   storeId = first.id;
-  await createStoreSettings(prisma, storeId, { minOrderPaise: 0, deliveryFeePaise: 3_000 });
+  await createStoreSettings(prisma, storeId, {
+    minOrderPaise: 0,
+    deliveryFeePaise: 3_000,
+    // Every test in this file books the same window; capacity is P4-3's
+    // subject, and a default of 10 would make this file's later tests fail for
+    // a reason that has nothing to do with what they assert.
+    slotCapacity: 500,
+  });
 
   const second = await createStore(prisma);
   otherStoreId = second.id;
@@ -343,16 +354,21 @@ describe('rejections write no order and take no stock', () => {
     await expectNothingWritten(() => placeOrder(guest, order(cart.cartToken)), /basket is empty/i);
   });
 
-  it('refuses a slot off the grid, and one in the past', async () => {
+  it('refuses a slot the grid does not offer', async () => {
+    // Off the grid (10:00 UTC is 15:30 IST, mid-window), in the past, and
+    // inside the lead time — all answered by the same check, because the grid
+    // is generated once and asked, never re-derived.
     const token = await basketWith(storeId, rice, 1);
-    await expectNothingWritten(
-      () => placeOrder(guest, order(token, { slotStart: new Date('2026-12-01T10:30:00Z') })),
-      /delivery windows/i,
-    );
-    await expectNothingWritten(
-      () => placeOrder(guest, order(token, { slotStart: new Date('2026-12-01T07:00:00Z') })),
-      /already started/i,
-    );
+    for (const slotStart of [
+      new Date('2026-12-01T10:00:00Z'),
+      new Date('2026-11-30T10:30:00Z'),
+      new Date('2026-12-01T08:30:00Z'),
+    ]) {
+      await expectNothingWritten(
+        () => placeOrder(guest, order(token, { slotStart })),
+        /not available/i,
+      );
+    }
   });
 
   it('refuses a payment method that is not on offer', async () => {
