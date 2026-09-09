@@ -19,10 +19,16 @@ export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
 
   const { getConfig, getLogger, registerEventHandlers } = await import('@/modules/platform');
+  const { confirmationDetails } = await import('@/modules/orders');
+  const { registerOrderNotifications } = await import('@/modules/notifications');
 
   try {
     const config = getConfig();
     registerEventHandlers();
+    // The one place modules are wired to each other (§4). `notifications` does
+    // not know about `Order` and `orders` does not know about providers; boot
+    // hands the first a way to ask the second for what a message needs.
+    registerOrderNotifications(confirmationDetails);
     getLogger().info({ appEnv: config.APP_ENV }, 'Application configuration loaded');
   } catch (error) {
     // Written to stderr directly: the logger itself depends on config.

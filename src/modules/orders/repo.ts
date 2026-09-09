@@ -354,6 +354,35 @@ export async function findForPrincipal(
   return rows[0] ?? null;
 }
 
+export interface ConfirmationRow {
+  readonly orderNumber: string;
+  readonly trackingToken: string;
+  readonly contactPhoneSnapshot: string;
+  readonly estimatedTotalPaise: number;
+  readonly deliverySlotStart: Date;
+  readonly deliverySlotEnd: Date;
+  readonly store: { readonly timezone: string };
+}
+
+/** The fields a confirmation message needs, and nothing else. */
+export async function findConfirmationDetails(
+  db: DbExecutor,
+  orderId: string,
+): Promise<ConfirmationRow | null> {
+  return executor(db).order.findUnique({
+    where: { id: orderId },
+    select: {
+      orderNumber: true,
+      trackingToken: true,
+      contactPhoneSnapshot: true,
+      estimatedTotalPaise: true,
+      deliverySlotStart: true,
+      deliverySlotEnd: true,
+      store: { select: { timezone: true } },
+    },
+  });
+}
+
 /** Record that a customer has agreed to the revised amount (D6). */
 export async function setRevisedAmountConfirmed(
   tx: Tx,

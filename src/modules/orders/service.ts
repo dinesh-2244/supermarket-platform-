@@ -458,6 +458,35 @@ export async function confirmRevisedAmount(principal: Principal, orderId: string
   });
 }
 
+/**
+ * Just enough of an order for a confirmation message.
+ *
+ * Separate from `orderForTracking` because the two answer different questions
+ * and leak differently: this one deliberately *does* carry the phone number,
+ * because that is the address the message goes to, and it is handed straight to
+ * the provider rather than rendered on a page.
+ */
+export interface ConfirmationDetails {
+  readonly phone: string;
+  readonly orderNumber: string;
+  readonly trackingToken: string;
+  readonly estimatedTotalPaise: number;
+  readonly slotLabel: string;
+}
+
+export async function confirmationDetails(orderId: string): Promise<ConfirmationDetails | null> {
+  const row = await repo.findConfirmationDetails(getPrisma(), orderId);
+  if (row === null) return null;
+
+  return {
+    phone: row.contactPhoneSnapshot,
+    orderNumber: row.orderNumber,
+    trackingToken: row.trackingToken,
+    estimatedTotalPaise: row.estimatedTotalPaise,
+    slotLabel: formatSlot(row.deliverySlotStart, row.deliverySlotEnd, row.store.timezone),
+  };
+}
+
 export interface CancelResult {
   readonly orderId: string;
   readonly orderNumber: string;

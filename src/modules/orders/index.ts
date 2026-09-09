@@ -7,6 +7,7 @@
 export {
   applyTransition,
   cancelByStore,
+  confirmationDetails,
   confirmRevisedAmount,
   correctOrder,
   createOrder,
@@ -20,6 +21,7 @@ export {
   // primitive and authorizes nothing, so the only way to reach it from
   // outside this module is through `applyTransition`, which does (R1).
   type CancelResult,
+  type ConfirmationDetails,
   type CreatedOrder,
   type NewOrderInput,
   type TimelineStep,

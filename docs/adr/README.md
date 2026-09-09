@@ -355,3 +355,94 @@ credentials provider for the customer principal"), which was written before the
 one-cookie constraint was known.
 
 **Status.** Accepted (Phase 3).
+
+---
+
+## ADR-0011 — Slot capacity is an advisory try-lock, and `orderNumber` is a checked random tail
+
+**Context.** Phase 4 places orders. Two mechanisms had to be chosen, both of them
+concurrency questions with more than one defensible answer.
+
+### 1. How a delivery slot's capacity is enforced
+
+Capacity is a rule about a *set* of orders — "no more than `slotCapacity` in this
+window" — and the order about to join that set does not exist yet. No row lock
+can serialise it: two placements each lock their own rows, each count the same
+N, and each commit the N+1st. The options were:
+
+1. **A booking table** — one row per (store, slot), with a unique constraint or a
+   counter column to lock. Correct, and the natural home for per-slot rules later
+   (blackouts, per-slot capacity overrides). Costs a migration and a second
+   source of truth for something currently derivable.
+2. **A blocking advisory lock** on `(storeId, slotStart)`, counting inside it.
+   No migration; the count stays derived.
+3. **A non-blocking (`try`) advisory lock**, retried outside the transaction.
+
+**Decision: 3.** The count is authoritative inside the placing transaction under
+`pg_try_advisory_xact_lock(LOCK_NAMESPACE.deliverySlot, hashtext("<store>:<slot>"))`,
+taken **first**, before any other lock or work. `stores.slotGridFor` supplies the
+window shape; `checkout.availableSlots` composes it with a usage count for the
+picker, and that number is explicitly advisory.
+
+2 was tried first and **failed under CI's connection pool**. A transaction
+blocked on a lock goes on holding its database connection; GitHub runners size
+Prisma's pool at `cpus × 2 + 1` = 5, so twelve shoppers queueing on one window
+occupied the pool and placements that had not even reached the lock died with a
+pool timeout. Every one of the twelve failed where three should have succeeded.
+Trying instead lets a loser roll back, hand the connection back, and return after
+a jittered backoff, so concurrency is bounded by the pool for *work* rather than
+for *waiting*. Taking the lock first is what makes the retry cheap — a shopper
+who finds the window busy has spent one query, not a revalidation and a row lock
+per line. (Locking late and retrying the whole placement was measurably *worse*
+than blocking.)
+
+1 remains the right answer the day slots need attributes of their own. The
+interface — `availableSlots(storeId, from, horizonDays) → Slot[]` — was chosen so
+that becoming a real table changes no caller.
+
+**Deviation from the plan, recorded deliberately.** `docs/phase-4-plan.md` puts
+`availableSlots` on the `stores` read interface. The window *shape* did go there
+(`stores.slotGridFor`); the usage count could not, because it reads `Order`,
+which `orders` owns (§4), and R7's model-ownership rule forbids one module
+querying another's tables. Making `stores` depend on `orders` would put the
+module that `cart`, `catalog` and `checkout` all sit on top of *above* the one
+that sits on top of it. The composition therefore lives in `checkout`, which
+already legitimately depends on both. Signature and semantics are unchanged.
+
+Lead time (120 minutes) and booking horizon (3 days) are platform constants, not
+`StoreSettings` columns, because no store has yet disagreed with another about
+them and adding a column costs a migration. They become settings the day one
+does.
+
+### 2. How `orderNumber` is minted
+
+It is human-facing: read out over the phone, quoted in a complaint, matched
+against a POS bill. It must be unique, unguessable enough not to expose the
+day's volume, and collision-safe under concurrency.
+
+1. **A per-store daily sequence** (`S1-260906-0001`). Reads best. Needs either a
+   counter row locked per placement — serialising every order in the store — or
+   a Postgres sequence per store, which is runtime DDL.
+2. **The existing `ids.orderNumber`** — store code, date, and a 5-character tail
+   from a 32-symbol CSPRNG alphabet (`S1-260906-4KQ7X`), with the unique index as
+   the backstop.
+
+**Decision: 2, with a check-and-retry.** `orders.createOrder` mints a candidate,
+checks it against what is committed, and tries again up to five times before
+giving up. No migration, no serialisation, and the unique index still catches the
+residual case of two concurrent placements minting the same tail with neither
+able to see the other's uncommitted row.
+
+The plan says "per-store zero-padded sequence — mechanism JIM's call". This is
+not a sequence, and the trade is deliberate: a sequence's readability is not
+worth serialising every placement in a store behind one counter row, and the
+random tail additionally stops the order number leaking how many orders the shop
+has taken.
+
+**Consequences.** Neither choice needs a migration, which is what the phase plan
+expected. Both are concurrency-tested rather than argued: twelve simultaneous
+shoppers into a capacity-three window place exactly three orders (and removing
+the lock makes that test fail with twelve), and the whole suite is run under
+`connection_limit=5` — the constraint that caught the first design.
+
+**Status.** Accepted (Phase 4).

@@ -665,6 +665,122 @@ async function seedCustomer(): Promise<void> {
   });
 }
 
+/**
+ * A couple of demo orders per store, so the admin queue and the tracking page
+ * have something to render on a fresh database.
+ *
+ * **Idempotent by order number, not by count.** The number is derived from the
+ * store code and an index rather than minted randomly, so a re-run finds the
+ * same rows and does nothing. Seeding "two orders" by counting would double them
+ * every time, which is exactly the bug an idempotence test is for.
+ *
+ * These do **not** decrement stock, and deliberately so: seeded opening balances
+ * are already written with their own `StockLedger` rows, and a demo order that
+ * moved them would put the seed's ledger and its balances out of step for no
+ * benefit. Real placement goes through `checkout.placeOrder`, which is where the
+ * decrement-and-ledger invariant is enforced and tested.
+ */
+async function seedDemoOrders(storeIds: Map<string, string>): Promise<void> {
+  const customer = await prisma.customer.findUnique({
+    where: { email: DEV_CUSTOMER_EMAIL },
+    select: { id: true, name: true, phone: true },
+  });
+  if (customer === null) return;
+
+  // A fixed instant, so re-running the seed does not walk the slot forward and
+  // produce a different-looking database each time.
+  const slotStart = new Date('2026-12-01T10:30:00.000Z');
+  const slotEnd = new Date('2026-12-01T11:30:00.000Z');
+
+  for (const [code, storeId] of storeIds) {
+    const listed = await prisma.storeProduct.findMany({
+      where: { storeId, isListed: true },
+      select: {
+        productId: true,
+        sellingPricePaise: true,
+        product: { select: { name: true, packSize: true } },
+      },
+      orderBy: { productId: 'asc' },
+      take: 2,
+    });
+    if (listed.length === 0) continue;
+
+    for (const [index, status] of (['PLACED', 'ACCEPTED'] as const).entries()) {
+      const orderNumber = `${code}-DEMO-${String(index + 1).padStart(2, '0')}`;
+      const existing = await prisma.order.findUnique({
+        where: { orderNumber },
+        select: { id: true },
+      });
+      if (existing !== null) continue;
+
+      const lines = listed.slice(0, index + 1);
+      const subtotalPaise = lines.reduce(
+        (sum, line) => sum + line.sellingPricePaise * (index + 1),
+        0,
+      );
+      const settings = await prisma.storeSettings.findUnique({
+        where: { storeId },
+        select: { deliveryFeePaise: true },
+      });
+      const deliveryFeePaise = settings?.deliveryFeePaise ?? 0;
+
+      await prisma.$transaction(async (tx) => {
+        const order = await tx.order.create({
+          data: {
+            orderNumber,
+            trackingToken: `t_DEMO${code}${String(index + 1).padStart(2, '0')}`.padEnd(22, '0'),
+            customerId: customer.id,
+            storeId,
+            contactNameSnapshot: customer.name ?? 'Demo Shopper',
+            contactPhoneSnapshot: customer.phone,
+            deliveryAddressSnapshotJson: {
+              line1: '221, 9th Main',
+              locality: 'Jayanagar 4th Block',
+              pincode: '560041',
+            },
+            deliverySlotStart: slotStart,
+            deliverySlotEnd: slotEnd,
+            paymentMethod: index === 0 ? 'COD' : 'UPI_ON_DELIVERY',
+            status,
+            subtotalPaise,
+            deliveryFeePaise,
+            estimatedTotalPaise: subtotalPaise + deliveryFeePaise,
+            ...(status === 'ACCEPTED' ? { acceptedAt: slotStart } : {}),
+            lines: {
+              create: lines.map((line) => ({
+                productId: line.productId,
+                nameSnapshot: line.product.name,
+                packSizeSnapshot: line.product.packSize,
+                unitPricePaise: line.sellingPricePaise,
+                qtyOrdered: index + 1,
+              })),
+            },
+          },
+          select: { id: true },
+        });
+
+        // Every status an order has ever held gets a history row, including the
+        // one it was created at (§11) — the same shape `orders.createOrder`
+        // writes, so the tracking page's timeline renders for these too.
+        await tx.orderStatusHistory.create({
+          data: { orderId: order.id, fromStatus: null, toStatus: 'PLACED', actorType: 'SYSTEM' },
+        });
+        if (status === 'ACCEPTED') {
+          await tx.orderStatusHistory.create({
+            data: {
+              orderId: order.id,
+              fromStatus: 'PLACED',
+              toStatus: 'ACCEPTED',
+              actorType: 'SYSTEM',
+              note: 'Seeded demo order',
+            },
+          });
+        }
+      });
+    }
+  }
+}
+
 async function seedFeatureFlags(): Promise<void> {
   const flags = [
     {
@@ -704,6 +820,7 @@ async function main(): Promise<void> {
 
   await seedUsers(storeIds);
   await seedCustomer();
+  await seedDemoOrders(storeIds);
   await seedFeatureFlags();
 
   const counts = {
@@ -715,6 +832,7 @@ async function main(): Promise<void> {
     deliveryAreas: await prisma.deliveryArea.count(),
     users: await prisma.user.count(),
     customers: await prisma.customer.count(),
+    orders: await prisma.order.count(),
     featureFlags: await prisma.featureFlag.count(),
   };
   console.log('Seed complete:', counts);
