@@ -157,6 +157,7 @@ test('the whole Phase 4 flow fits a 390px phone', async ({ page }) => {
   await page.goto('/checkout');
   await page.getByLabel('Your name').fill('Small Screen');
   await page.getByLabel('Phone number').fill('9812399002');
+  await page.getByRole('main').getByLabel('Address line 1').fill('2 Narrow Lane');
   await page.getByRole('button', { name: 'Place order' }).click();
   await expect(page).toHaveURL(/\/order-placed\//);
   expect(await overflows(), '/order-placed scrolls sideways at 390px').toBe(false);
