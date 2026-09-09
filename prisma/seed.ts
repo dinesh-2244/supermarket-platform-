@@ -674,11 +674,17 @@ async function seedCustomer(): Promise<void> {
  * same rows and does nothing. Seeding "two orders" by counting would double them
  * every time, which is exactly the bug an idempotence test is for.
  *
- * These do **not** decrement stock, and deliberately so: seeded opening balances
- * are already written with their own `StockLedger` rows, and a demo order that
- * moved them would put the seed's ledger and its balances out of step for no
- * benefit. Real placement goes through `checkout.placeOrder`, which is where the
- * decrement-and-ledger invariant is enforced and tested.
+ * They decrement stock and write their `ORDER_PLACED` ledger rows, in the same
+ * transaction as the order, exactly as `checkout.placeOrder` would.
+ *
+ * The first version deliberately did not, on the reasoning that the opening
+ * balances already had their own ledger rows and a demo order need not disturb
+ * them. That was wrong, and OSCAR found the consequence (R4): cancelling
+ * `S1-DEMO-01` through the ordinary admin correction restored a quantity that
+ * had never been deducted, so a demo database grew stock out of nothing. An
+ * order that is not a faithful example is worse than no example — the whole
+ * point of demo data is that every screen it feeds behaves as it will in
+ * anger, and the correction screen is one of those screens.
  */
 async function seedDemoOrders(storeIds: Map<string, string>): Promise<void> {
   const customer = await prisma.customer.findUnique({
@@ -725,6 +731,24 @@ async function seedDemoOrders(storeIds: Map<string, string>): Promise<void> {
       const deliveryFeePaise = settings?.deliveryFeePaise ?? 0;
 
       await prisma.$transaction(async (tx) => {
+        // Take the stock first, so an order is never written against a shelf
+        // that cannot cover it — the same order of operations `placeOrder` uses.
+        const movements: { productId: string; qty: number; balanceAfter: number }[] = [];
+        for (const line of lines) {
+          const item = await tx.inventoryItem.findFirst({
+            where: { storeId, productId: line.productId },
+            select: { id: true, websiteStock: true },
+          });
+          if (item === null || item.websiteStock < index + 1) return;
+
+          const balanceAfter = item.websiteStock - (index + 1);
+          await tx.inventoryItem.update({
+            where: { id: item.id },
+            data: { websiteStock: balanceAfter },
+          });
+          movements.push({ productId: line.productId, qty: index + 1, balanceAfter });
+        }
+
         const order = await tx.order.create({
           data: {
             orderNumber,
@@ -758,6 +782,25 @@ async function seedDemoOrders(storeIds: Map<string, string>): Promise<void> {
           },
           select: { id: true },
         });
+
+        // One ledger row per line, with the resulting balance, in this same
+        // transaction — the invariant §3 exists for, and the reason a later
+        // cancellation gives back exactly what was taken.
+        for (const movement of movements) {
+          await tx.stockLedger.create({
+            data: {
+              storeId,
+              productId: movement.productId,
+              delta: -movement.qty,
+              reason: 'ORDER_PLACED',
+              refType: 'Order',
+              refId: order.id,
+              balanceAfter: movement.balanceAfter,
+              actorType: 'SYSTEM',
+              note: 'Seeded demo order (development seed)',
+            },
+          });
+        }
 
         // Every status an order has ever held gets a history row, including the
         // one it was created at (§11) — the same shape `orders.createOrder`
