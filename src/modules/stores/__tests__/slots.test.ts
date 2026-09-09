@@ -33,6 +33,54 @@ describe('zoneOffsetMs', () => {
   });
 });
 
+describe('zoneOffsetMs — sub-second inputs', () => {
+  it('is the same whatever milliseconds the caller happens to carry', () => {
+    // Regression: the offset was measured against the untruncated instant while
+    // `formatToParts` produced a whole second, so the caller's milliseconds were
+    // folded into the offset. Every slot derived from it then inherited them,
+    // and the window the picker offered was never *equal* to the window
+    // checkout re-derived a moment later — only within a second of it.
+    const whole = zoneOffsetMs(new Date('2026-03-01T12:00:00.000Z'), IST);
+    for (const ms of [1, 301, 395, 999]) {
+      expect(
+        zoneOffsetMs(new Date(`2026-03-01T12:00:00.${String(ms).padStart(3, '0')}Z`), IST),
+      ).toBe(whole);
+    }
+  });
+
+  it('produces slot starts on a whole second regardless of when it is asked', () => {
+    for (const ms of [0, 1, 301, 999]) {
+      const slots = slotGrid({
+        from: new Date(`2026-03-01T06:00:00.${String(ms).padStart(3, '0')}Z`),
+        slotLengthMinutes: 60,
+        timeZone: IST,
+        horizonDays: 1,
+      });
+      for (const slot of slots.slice(0, 5)) expect(slot.getMilliseconds()).toBe(0);
+    }
+  });
+
+  it('offers the identical grid to two callers a few hundred ms apart', () => {
+    // The property the checkout flow actually depends on: the picker renders,
+    // the shopper submits, and `placeOrder` re-derives the grid. Those two must
+    // agree exactly, not approximately.
+    const a = slotGrid({
+      from: new Date('2026-03-01T06:00:00.100Z'),
+      slotLengthMinutes: 60,
+      timeZone: IST,
+      horizonDays: 1,
+    });
+    const b = slotGrid({
+      from: new Date('2026-03-01T06:00:00.900Z'),
+      slotLengthMinutes: 60,
+      timeZone: IST,
+      horizonDays: 1,
+    });
+
+    expect(b.map((d) => d.toISOString())).toEqual(a.map((d) => d.toISOString()));
+  });
+});
+
 describe('localDayStart', () => {
   it('is 18:30 UTC the previous day for India', () => {
     // 2026-03-02 00:00 IST is 2026-03-01 18:30 UTC.

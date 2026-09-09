@@ -225,6 +225,80 @@ export async function orderNumberTaken(tx: Tx, candidate: string): Promise<boole
   return found !== null;
 }
 
+/** Everything the guest tracking page renders, in one read. */
+export interface TrackedOrderRow {
+  readonly id: string;
+  readonly orderNumber: string;
+  readonly trackingToken: string;
+  readonly status: OrderStatus;
+  readonly paymentMethod: 'COD' | 'UPI_ON_DELIVERY';
+  readonly deliverySlotStart: Date;
+  readonly deliverySlotEnd: Date;
+  readonly subtotalPaise: number;
+  readonly deliveryFeePaise: number;
+  readonly estimatedTotalPaise: number;
+  readonly deliveryAddressSnapshotJson: unknown;
+  readonly contactNameSnapshot: string;
+  readonly placedAt: Date;
+  readonly store: { readonly name: string; readonly timezone: string };
+  readonly lines: readonly {
+    readonly nameSnapshot: string;
+    readonly packSizeSnapshot: string;
+    readonly unitPricePaise: number;
+    readonly qtyOrdered: number;
+  }[];
+  readonly statusHistory: readonly {
+    readonly toStatus: OrderStatus;
+    readonly createdAt: Date;
+  }[];
+}
+
+/**
+ * Look an order up by its opaque tracking token.
+ *
+ * `findUnique` on a unique column: one indexed lookup whether the token exists
+ * or not, so a caller cannot tell a real-but-not-theirs token from a made-up one
+ * by timing it. Deliberately **not** scoped by principal — the token *is* the
+ * credential (§11), and it carries no customer data to leak.
+ */
+export async function findByTrackingToken(
+  db: DbExecutor,
+  trackingToken: string,
+): Promise<TrackedOrderRow | null> {
+  return executor(db).order.findUnique({
+    where: { trackingToken },
+    select: {
+      id: true,
+      orderNumber: true,
+      trackingToken: true,
+      status: true,
+      paymentMethod: true,
+      deliverySlotStart: true,
+      deliverySlotEnd: true,
+      subtotalPaise: true,
+      deliveryFeePaise: true,
+      estimatedTotalPaise: true,
+      deliveryAddressSnapshotJson: true,
+      contactNameSnapshot: true,
+      placedAt: true,
+      store: { select: { name: true, timezone: true } },
+      lines: {
+        select: {
+          nameSnapshot: true,
+          packSizeSnapshot: true,
+          unitPricePaise: true,
+          qtyOrdered: true,
+        },
+        orderBy: { nameSnapshot: 'asc' },
+      },
+      statusHistory: {
+        select: { toStatus: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      },
+    },
+  });
+}
+
 /** What a restore needs to know about a line: how much is still outstanding. */
 export interface RestorableLine {
   readonly id: string;

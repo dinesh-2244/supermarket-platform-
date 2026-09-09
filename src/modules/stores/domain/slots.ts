@@ -53,7 +53,14 @@ export function zoneOffsetMs(instant: Date, timeZone: string): number {
     Number(parts.minute),
     Number(parts.second),
   );
-  return asIfUtc - instant.getTime();
+
+  // Compare against the instant **truncated to the second**. `formatToParts`
+  // has no millisecond field, so `asIfUtc` is always at .000; subtracting the
+  // untruncated instant would fold the caller's milliseconds into the offset,
+  // and every slot derived from it would inherit them. That made a slot start
+  // depend on the sub-second timing of whoever asked, so the window the picker
+  // offered and the window checkout validated were never equal.
+  return asIfUtc - (instant.getTime() - instant.getMilliseconds());
 }
 
 /**

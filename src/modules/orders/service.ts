@@ -165,6 +165,127 @@ export async function liveOrdersInSlot(tx: Tx, storeId: string, start: Date): Pr
   return repo.countInSlot(tx, storeId, start);
 }
 
+/** One step of the human timeline the tracking page shows. */
+export interface TimelineStep {
+  readonly status: OrderStatus;
+  readonly label: string;
+  readonly at: Date;
+}
+
+export interface TrackedOrder {
+  readonly orderNumber: string;
+  readonly trackingToken: string;
+  readonly status: OrderStatus;
+  readonly statusLabel: string;
+  readonly paymentMethod: 'COD' | 'UPI_ON_DELIVERY';
+  readonly slotStart: Date;
+  readonly slotEnd: Date;
+  /** Pre-rendered in the **shop's** timezone, not the reader's. */
+  readonly slotLabel: string;
+  readonly placedAt: Date;
+  readonly storeName: string;
+  readonly deliveryLocality: string | null;
+  readonly subtotalPaise: number;
+  readonly deliveryFeePaise: number;
+  readonly estimatedTotalPaise: number;
+  readonly lines: readonly {
+    readonly name: string;
+    readonly packSize: string;
+    readonly unitPricePaise: number;
+    readonly qty: number;
+    readonly lineTotalPaise: number;
+  }[];
+  readonly timeline: readonly TimelineStep[];
+}
+
+/** What each state means to a shopper, who does not know the enum. */
+const STATUS_LABEL: Readonly<Record<OrderStatus, string>> = {
+  PLACED: 'Order placed',
+  ACCEPTED: 'Accepted by the shop',
+  PICKING: 'Being picked',
+  PICKED: 'Picked',
+  BILLED_IN_POS: 'Billed',
+  PACKED: 'Packed',
+  OUT_FOR_DELIVERY: 'Out for delivery',
+  DELIVERED: 'Delivered',
+  CLOSED: 'Completed',
+  CANCELLED_BY_STORE: 'Cancelled by the shop',
+  DELIVERY_FAILED: 'Delivery attempt failed',
+  CLOSED_UNDELIVERED: 'Closed — not delivered',
+};
+
+function formatSlot(start: Date, end: Date, timeZone: string): string {
+  const day = new Intl.DateTimeFormat('en-IN', {
+    timeZone,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  }).format(start);
+  const time = (at: Date): string =>
+    new Intl.DateTimeFormat('en-IN', {
+      timeZone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(at);
+  return `${day}, ${time(start)} – ${time(end)}`;
+}
+
+/** The locality the shopper typed, if the snapshot recorded one. */
+function localityFrom(snapshot: unknown): string | null {
+  if (typeof snapshot !== 'object' || snapshot === null) return null;
+  const value = (snapshot as Record<string, unknown>).locality;
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/**
+ * Read an order by its opaque tracking token, for the guest tracking page.
+ *
+ * **Read-only and unauthenticated by design** (§11, D5): the token is the
+ * credential. It returns `null` for an unknown token so the caller can answer a
+ * generic 404 — the same answer for a well-formed-but-unknown token, a garbage
+ * one and a token belonging to somebody else, with no timing tell, because the
+ * lookup is one indexed `findUnique` either way.
+ *
+ * It writes nothing. There is deliberately no variant of this that does.
+ */
+export async function orderForTracking(trackingToken: string): Promise<TrackedOrder | null> {
+  const token = trackingToken.trim();
+  if (token.length === 0) return null;
+
+  const row = await repo.findByTrackingToken(getPrisma(), token);
+  if (row === null) return null;
+
+  return {
+    orderNumber: row.orderNumber,
+    trackingToken: row.trackingToken,
+    status: row.status,
+    statusLabel: STATUS_LABEL[row.status],
+    paymentMethod: row.paymentMethod,
+    slotStart: row.deliverySlotStart,
+    slotEnd: row.deliverySlotEnd,
+    slotLabel: formatSlot(row.deliverySlotStart, row.deliverySlotEnd, row.store.timezone),
+    placedAt: row.placedAt,
+    storeName: row.store.name,
+    deliveryLocality: localityFrom(row.deliveryAddressSnapshotJson),
+    subtotalPaise: row.subtotalPaise,
+    deliveryFeePaise: row.deliveryFeePaise,
+    estimatedTotalPaise: row.estimatedTotalPaise,
+    lines: row.lines.map((line) => ({
+      name: line.nameSnapshot,
+      packSize: line.packSizeSnapshot,
+      unitPricePaise: line.unitPricePaise,
+      qty: line.qtyOrdered,
+      lineTotalPaise: line.unitPricePaise * line.qtyOrdered,
+    })),
+    timeline: row.statusHistory.map((entry) => ({
+      status: entry.toStatus,
+      label: STATUS_LABEL[entry.toStatus],
+      at: entry.createdAt,
+    })),
+  };
+}
+
 export interface NewOrderInput {
   readonly storeCode: string;
   readonly customerId: string;

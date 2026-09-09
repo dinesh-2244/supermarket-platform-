@@ -121,15 +121,15 @@ export default async function CartPage(): Promise<React.ReactElement> {
           {/* No checkout in Phase 3: no route, no order, no stock movement.
               The control is here, visibly disabled, so the page is honest about
               where it stops rather than pretending the feature is missing. */}
-          <button
-            type="button"
-            disabled
-            aria-disabled="true"
-            className="w-full rounded bg-emerald-700 px-4 py-2 text-sm text-white disabled:opacity-50 sm:w-auto"
+          <Link
+            href="/checkout"
+            className="inline-block w-full rounded bg-emerald-700 px-4 py-2 text-center text-sm text-white sm:w-auto"
           >
             Proceed to checkout
-          </button>
-          <p className="mt-2 text-xs text-slate-500">Checkout arrives in Phase 4.</p>
+          </Link>
+          <p className="mt-2 text-xs text-slate-500">
+            No account needed. You pay when your order is delivered.
+          </p>
         </div>
       </Card>
     </>

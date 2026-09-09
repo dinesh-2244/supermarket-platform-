@@ -11,6 +11,7 @@ export {
   createOrder,
   liveOrdersInSlot,
   moduleDescriptor,
+  orderForTracking,
   slotUsage,
   // `transition` is deliberately NOT exported: it is the in-transaction
   // primitive and authorizes nothing, so the only way to reach it from
@@ -18,6 +19,8 @@ export {
   type CancelResult,
   type CreatedOrder,
   type NewOrderInput,
+  type TimelineStep,
+  type TrackedOrder,
   type TransitionOutcome,
 } from './service';
 
