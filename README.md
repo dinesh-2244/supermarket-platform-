@@ -24,7 +24,9 @@ service, and renders.
 
 ## Requirements
 
-- Node.js 20.11+ (CI runs 22.20)
+- Node.js `^22.13.0 || ^24.0.0 || >=26.0.0` — the intersection of every
+  installed dependency's own `engines.node`. `.nvmrc`, CI and the Docker image
+  all pin **22.20.0**; that is the version the suite is actually run on.
 - Docker + Docker Compose (for the local database, and for prod-parity runs)
 
 ## Getting started
