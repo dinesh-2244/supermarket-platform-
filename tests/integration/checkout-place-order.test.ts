@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { addItem, ensureCart } from '@/modules/cart';
 import { signUp, verifyCustomerCredentials } from '@/modules/customers';
 import { placeOrder } from '@/modules/checkout';
+import { orderForTracking } from '@/modules/orders';
 import { adjustStock } from '@/modules/inventory';
 import {
   createCategory,
@@ -551,5 +552,107 @@ describe('a guest order does not lock the phone number out of an account (R2)', 
     expect(page).not.toMatch(/\border\b\s*\./i);
     expect(page).not.toContain('@/modules/orders');
     expect(page).toContain('No orders yet');
+  });
+});
+
+describe('the address a rider actually navigates by (R6)', () => {
+  it('refuses a blank street address, and one that is absurdly long', async () => {
+    const token = await basketWith(storeId, rice, 1);
+
+    await expect(
+      placeOrder(guest, order(token, { addressLines: { line1: '   ' } })),
+    ).rejects.toThrow(/street address/i);
+    await expect(placeOrder(guest, order(token, { addressLines: {} }))).rejects.toThrow(
+      /street address/i,
+    );
+    await expect(
+      placeOrder(guest, order(token, { addressLines: { line1: 'x'.repeat(201) } })),
+    ).rejects.toThrow(/longer than 200/i);
+    await expect(
+      placeOrder(guest, order(token, { addressLines: { line1: 'ok', line2: 'y'.repeat(201) } })),
+    ).rejects.toThrow(/longer than 200/i);
+
+    expect((await prisma.cart.findUniqueOrThrow({ where: { cartToken: token } })).status).toBe(
+      'ACTIVE',
+    );
+  });
+
+  it('freezes the locality and pincode from the store’s own area record', async () => {
+    // OSCAR's repro shape: the real form posts an `areaId` and nothing else.
+    // Taking locality/pincode from the *input* meant every UI order snapshotted
+    // both as null, and the tracking page had no locality to show.
+    const token = await basketWith(storeId, rice, 1);
+    const placed = await placeOrder(
+      guest,
+      order(token, {
+        addressInput: { areaId },
+        addressLines: { line1: '9 Real Street', line2: 'Near the park' },
+        contact: { name: 'Address Tester', phone: '9876500041' },
+      }),
+    );
+
+    const saved = await prisma.order.findUniqueOrThrow({ where: { id: placed.orderId } });
+    const snapshot = saved.deliveryAddressSnapshotJson as Record<string, unknown>;
+
+    expect(snapshot.line1).toBe('9 Real Street');
+    expect(snapshot.line2).toBe('Near the park');
+    expect(snapshot.areaId).toBe(areaId);
+    expect(snapshot.locality).toBe('Checkout Area');
+    expect(snapshot.locality).not.toBeNull();
+
+    // …and the guest tracking projection therefore has something to render.
+    const tracked = await orderForTracking(placed.trackingToken);
+    expect(tracked?.deliveryLocality).toBe('Checkout Area');
+  });
+
+  it('ignores a locality the caller invents, preferring the store’s record', async () => {
+    // The area id is a fact we can look up; a locality string a caller typed is
+    // not, and must never end up on the order as though it were.
+    const token = await basketWith(storeId, rice, 1);
+    const placed = await placeOrder(
+      guest,
+      order(token, {
+        addressInput: { areaId, locality: 'Somewhere Else Entirely' },
+        addressLines: { line1: '11 Elsewhere Road' },
+        contact: { name: 'Liar', phone: '9876500042' },
+      }),
+    );
+
+    const saved = await prisma.order.findUniqueOrThrow({ where: { id: placed.orderId } });
+    const snapshot = saved.deliveryAddressSnapshotJson as Record<string, unknown>;
+    expect(snapshot.locality).toBe('Checkout Area');
+  });
+});
+
+describe('checkout says what the revalidation found (R5)', () => {
+  it('carries the offending lines on the rejection, not just a generic message', async () => {
+    // The page and the action both need this: `ShortfallError.details.lines`
+    // names each line so the shopper is told *which* item to fix.
+    const token = await basketWith(storeId, rice, 6);
+    const available = await stockOf(rice);
+    await adjustStock(admin, {
+      storeId,
+      productId: rice,
+      delta: -(available - 2),
+      note: 'squeeze',
+    });
+
+    try {
+      await placeOrder(guest, order(token));
+      expect.unreachable('a short line must be refused');
+    } catch (error) {
+      const details = (error as { details?: { reason?: string; lines?: unknown[] } }).details;
+      expect(details?.reason).toBe('stock-shortfall');
+      expect(details?.lines).toHaveLength(1);
+      expect(details?.lines?.[0]).toMatchObject({
+        productId: rice,
+        reason: 'insufficient-stock',
+        available: 2,
+      });
+      // The name is what the shopper is shown, so it has to be there.
+      expect((details?.lines?.[0] as { name?: string }).name).toBeTruthy();
+    } finally {
+      await adjustStock(admin, { storeId, productId: rice, delta: available - 2, note: 'restore' });
+    }
   });
 });

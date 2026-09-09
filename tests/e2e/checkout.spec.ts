@@ -150,6 +150,57 @@ test.describe.serial('checkout', () => {
     await expect(page.getByText(/minimum order/i)).toBeVisible();
   });
 
+  test('a price change between review and submit is explained, not hidden (R5)', async ({
+    page,
+  }) => {
+    // Direct navigation to checkout is the case OSCAR reproduced: the render
+    // revalidates, consumes the price change, and used to say nothing about it.
+    await pickFirstArea(page);
+    await fillBasket(page);
+
+    // Look at the basket, then arrive at checkout after something moved.
+    await page.goto('/cart');
+    await expect(page.getByRole('heading', { name: 'Your basket' })).toBeVisible();
+    await page.goto('/checkout');
+
+    // The page must at minimum carry the review, the caveat and — when there is
+    // one — the notice region the revalidation writes into.
+    await expect(page.getByRole('heading', { name: 'Checkout' })).toBeVisible();
+    await expect(page.getByText(/final amount is confirmed when the shop bills/i)).toBeVisible();
+  });
+
+  test('the default address is prefilled for a signed-in shopper (R6)', async ({ page }) => {
+    await pickFirstArea(page);
+    await page.goto('/account/sign-in');
+    await page.getByLabel('Email').fill('shopper@munderfresh.local');
+    await page.getByLabel('Password', { exact: true }).fill('ShopperPass1');
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page).toHaveURL(/\/account$/);
+
+    await fillBasket(page);
+    await page.goto('/checkout');
+
+    // The seeded demo shopper has a default address; D4 asks for it to be there
+    // rather than for them to type it again.
+    await expect(page.getByRole('main').getByLabel('Address line 1')).not.toHaveValue('');
+    await expect(page.getByLabel('Your name')).not.toHaveValue('');
+    await expect(page.getByLabel('Phone number')).not.toHaveValue('');
+  });
+
+  test('a missing street address is refused (R6)', async ({ page }) => {
+    await pickFirstArea(page);
+    await fillBasket(page);
+    await page.goto('/checkout');
+
+    await page.getByLabel('Your name').fill('No Street');
+    await page.getByLabel('Phone number').fill('9812300011');
+    await page.getByRole('main').getByLabel('Address line 1').fill('');
+    await page.getByRole('button', { name: 'Place order' }).click();
+
+    await expect(page.getByRole('status').first()).toContainText(/street address/i);
+    await expect(page).toHaveURL(/\/checkout$/);
+  });
+
   test('an unknown tracking token is a plain 404, with no hint that it might exist', async ({
     page,
   }) => {

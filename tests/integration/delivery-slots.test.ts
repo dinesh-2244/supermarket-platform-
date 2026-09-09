@@ -99,6 +99,7 @@ function order(cartToken: string, slotStart: Date, phone: string) {
     cartToken,
     contact: { name: 'Slot Tester', phone },
     addressInput: { areaId },
+    addressLines: { line1: '3 Slot Street' },
     slotStart,
     paymentMethod: 'COD',
     now: NOW,

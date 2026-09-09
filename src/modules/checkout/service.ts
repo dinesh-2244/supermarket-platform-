@@ -25,6 +25,7 @@ import { applyMovement } from '../inventory/index';
 import { createOrder, liveOrdersInSlot, slotUsage, type NewOrderLine } from '../orders/index';
 import {
   getStore,
+  listServiceableAreas,
   resolveServiceability,
   slotEndOf,
   slotGridFor,
@@ -99,6 +100,9 @@ class SlotBusy extends Error {}
 const SLOT_LOCK_ATTEMPTS = 12;
 const SLOT_LOCK_BACKOFF_MS = 25;
 
+/** Long enough for a real address, short enough not to be a payload. */
+const MAX_ADDRESS_LINE = 200;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -159,6 +163,21 @@ export async function placeOrder(
   if (contactName.length === 0) throw new ValidationError('Tell us who to deliver to', {});
   if (contactPhone.length === 0) throw new ValidationError('We need a phone number', {});
 
+  // R6: the street address is what a rider actually navigates by, and the form
+  // was not requiring it. Checked in the service rather than the form, so a
+  // crafted POST is held to the same rule as a click.
+  const line1 = (input.addressLines?.line1 ?? '').trim();
+  const line2 = (input.addressLines?.line2 ?? '').trim();
+  if (line1.length === 0) {
+    throw new ValidationError('We need a street address to deliver to', { field: 'line1' });
+  }
+  if (line1.length > MAX_ADDRESS_LINE || line2.length > MAX_ADDRESS_LINE) {
+    throw new ValidationError(
+      `An address line cannot be longer than ${MAX_ADDRESS_LINE} characters`,
+      { field: line1.length > MAX_ADDRESS_LINE ? 'line1' : 'line2' },
+    );
+  }
+
   // `resolveServiceability` is the single routing authority, and that includes
   // whether the shop is open: it returns `store-closed` for a store with
   // `isAcceptingOrders: false`. Checkout deliberately does **not** re-check that
@@ -193,6 +212,16 @@ export async function placeOrder(
   const slotFinish = slotEndOf(input.slotStart, grid.slotLengthMinutes);
 
   const store = await getStore(shopper, storeId);
+
+  // The locality and pincode are snapshotted from the **store's own** record of
+  // the area, not from whatever the caller sent. The real form posts an
+  // `areaId` and nothing else, so taking them from the input meant every order
+  // placed through the UI froze `locality: null` and the tracking page had
+  // nothing to show (R6). An area id the shopper picked is a fact we can look
+  // up; a locality string they typed is not.
+  const area = (await listServiceableAreas()).find(
+    (candidate) => candidate.areaId === serviceability.areaId,
+  );
 
   const attempt = async (): Promise<PlacedOrder> =>
     withTransaction(async (tx: Tx) => {
@@ -311,10 +340,10 @@ export async function placeOrder(
         deliveryAddressSnapshot: {
           areaId: serviceability.areaId,
           zoneId: serviceability.zoneId,
-          line1: input.addressLines?.line1 ?? null,
-          line2: input.addressLines?.line2 ?? null,
-          locality: input.addressInput.locality ?? null,
-          pincode: input.addressInput.pincode ?? null,
+          line1,
+          line2: line2.length === 0 ? null : line2,
+          locality: area?.areaName ?? null,
+          pincode: area?.pincode ?? null,
         },
         deliverySlotStart: input.slotStart,
         deliverySlotEnd: slotFinish,

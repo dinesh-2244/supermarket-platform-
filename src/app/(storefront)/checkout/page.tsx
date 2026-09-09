@@ -5,9 +5,11 @@ import { viewCart } from '@/modules/cart';
 import { availableSlots } from '@/modules/checkout';
 import { getStore, listServiceableAreas } from '@/modules/stores';
 import { currentCartToken, currentStorefrontPrincipal, storefrontPrincipal } from '@/storefront';
+import { listAddresses } from '@/modules/customers';
 import { ActionForm, Field } from '../form';
 import { rupees, Card, Empty, PageHeading } from '../ui';
 import { placeOrderAction } from './actions';
+import { blockingIssues, LineIssues, RevalidationNotices } from './notices';
 
 export const metadata: Metadata = {
   title: 'Checkout',
@@ -34,6 +36,10 @@ export default async function CheckoutPage(): Promise<React.ReactElement> {
     return (
       <>
         <PageHeading title="Checkout" />
+        {/* A basket emptied *by this revalidation* is the case that most needs
+            explaining, and it was the one case with no explanation: the early
+            return said "empty" and dropped the reasons (R5). */}
+        {cart === null ? null : <RevalidationNotices notice={cart.notice} removed={cart.removed} />}
         <Card>
           <Empty>Your basket is empty, so there is nothing to check out.</Empty>
           <p className="text-center text-sm">
@@ -58,6 +64,13 @@ export default async function CheckoutPage(): Promise<React.ReactElement> {
 
   const belowMinimum = !totals.meetsMinimum;
   const estimatedTotal = totals.subtotalPaise + totals.deliveryFeePaise;
+  const blocked = blockingIssues(cart.lines);
+
+  // D4's default-address prefill (R6). Scoped to the signed-in customer by
+  // `listAddresses`, which takes the principal — there is no address id in the
+  // request to tamper with, so there is nothing here to IDOR.
+  const addresses = customer === null ? [] : await listAddresses(principal);
+  const preferred = addresses.find((address) => address.isDefault) ?? addresses[0] ?? null;
 
   return (
     <>
@@ -65,6 +78,8 @@ export default async function CheckoutPage(): Promise<React.ReactElement> {
         title="Checkout"
         subtitle="No account needed. You pay when your order is delivered."
       />
+
+      <RevalidationNotices notice={cart.notice} removed={cart.removed} />
 
       <Card title="Your order">
         <ul className="divide-y divide-slate-100">
@@ -76,6 +91,7 @@ export default async function CheckoutPage(): Promise<React.ReactElement> {
                   {' '}
                   · {line.packSize} × {line.qty}
                 </span>
+                <LineIssues line={line} />
               </span>
               <span className="shrink-0 font-medium">{rupees(line.lineTotalPaise)}</span>
             </li>
@@ -105,7 +121,20 @@ export default async function CheckoutPage(): Promise<React.ReactElement> {
         ) : null}
       </Card>
 
-      {bookable.length === 0 ? (
+      {blocked.length > 0 ? (
+        <Card title="Where and when">
+          <p
+            role="status"
+            className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+          >
+            Some items are no longer available in the quantity you asked for. Adjust them in{' '}
+            <Link href="/cart" className="underline">
+              your basket
+            </Link>{' '}
+            and come back.
+          </p>
+        </Card>
+      ) : bookable.length === 0 ? (
         <Card title="Delivery">
           <Empty>
             There are no delivery windows available at the moment. Please try again later.
@@ -136,15 +165,25 @@ export default async function CheckoutPage(): Promise<React.ReactElement> {
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <Field label="Address line 1" name="line1" maxLength={200} />
-              <Field label="Address line 2 (optional)" name="line2" maxLength={200} />
+              <Field
+                label="Address line 1"
+                name="line1"
+                defaultValue={preferred?.line1 ?? ''}
+                maxLength={200}
+              />
+              <Field
+                label="Address line 2 (optional)"
+                name="line2"
+                defaultValue={preferred?.line2 ?? ''}
+                maxLength={200}
+              />
             </div>
 
             <label className="block text-xs text-slate-600">
               <span className="mb-1 block">Delivery area</span>
               <select
                 name="areaId"
-                defaultValue={context.areaId}
+                defaultValue={preferred?.areaId ?? context.areaId}
                 className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm text-slate-900 sm:w-72"
               >
                 {areasHere.map((area) => (

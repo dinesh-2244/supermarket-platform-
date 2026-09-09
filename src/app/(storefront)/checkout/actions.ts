@@ -1,8 +1,8 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { placeOrder } from '@/modules/checkout';
-import { isAppError } from '@/modules/platform';
+import { placeOrder, type LineShortfall } from '@/modules/checkout';
+import { isAppError, type AppError } from '@/modules/platform';
 import { currentCartToken, currentStorefrontPrincipal, currentCustomer } from '@/storefront';
 
 /**
@@ -22,6 +22,32 @@ import { currentCartToken, currentStorefrontPrincipal, currentCustomer } from '@
 function text(form: FormData, key: string): string {
   const value = form.get(key);
   return typeof value === 'string' ? value.trim() : '';
+}
+
+/**
+ * A rejection, said usefully (R5).
+ *
+ * `ShortfallError` carries the offending lines in `details.lines`; the action was
+ * returning only the generic sentence, so a shopper was told "some items are no
+ * longer available" and left to work out which. Every other `AppError` already
+ * says exactly what is wrong, so it passes straight through.
+ */
+function shortfallDetail(error: AppError): string {
+  const details = error.details as { reason?: string; lines?: LineShortfall[] } | undefined;
+  const lines = details?.lines;
+  if (details?.reason !== 'stock-shortfall' || lines === undefined || lines.length === 0) {
+    return error.message;
+  }
+
+  const named = lines.map((line) => {
+    if (line.reason === 'unlisted') return `${line.name} is no longer sold here`;
+    if (line.reason === 'out-of-stock') return `${line.name} is out of stock`;
+    return line.available === undefined
+      ? `${line.name} does not have enough left`
+      : `${line.name}: only ${String(line.available)} left`;
+  });
+
+  return `${error.message}: ${named.join('; ')}. Adjust your basket and come back.`;
 }
 
 export async function placeOrderAction(
@@ -51,7 +77,7 @@ export async function placeOrderAction(
 
     trackingToken = placed.trackingToken;
   } catch (error) {
-    if (isAppError(error)) return `!${error.message}`;
+    if (isAppError(error)) return `!${shortfallDetail(error)}`;
     return '!Something went wrong. Your basket has not been changed.';
   }
 
