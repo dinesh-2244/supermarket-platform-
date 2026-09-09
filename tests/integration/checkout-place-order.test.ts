@@ -6,7 +6,10 @@ import {
   type DomainEvents,
   type Principal,
 } from '@/modules/platform';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { addItem, ensureCart } from '@/modules/cart';
+import { signUp, verifyCustomerCredentials } from '@/modules/customers';
 import { placeOrder } from '@/modules/checkout';
 import { adjustStock } from '@/modules/inventory';
 import {
@@ -464,5 +467,73 @@ describe('concurrency', () => {
     expect(results.every((result) => result.status === 'fulfilled')).toBe(true);
     expect(await stockOf(rice)).toBe(before.rice - 2);
     expect(await stockOf(dal)).toBe(before.dal - 2);
+  });
+});
+
+describe('a guest order does not lock the phone number out of an account (R2)', () => {
+  it('lets that phone sign up afterwards, and sign in', async () => {
+    // The defect: checkout upserts a lightweight Customer keyed on phone with no
+    // email and no password. `signUp` then found an existing phone and returned
+    // its neutral response without creating credentials, so the number could
+    // never become an account — ordering once as a guest locked you out for good.
+    const phone = '9876500031';
+    const email = `guest.${Date.now() % 1_000_000}@example.test`;
+    const password = 'GuestToAccount1';
+
+    const token = await basketWith(storeId, rice, 1);
+    await placeOrder(guest, order(token, { contact: { name: 'Guest First', phone } }));
+
+    const contact = await prisma.customer.findUniqueOrThrow({ where: { phone } });
+    expect(contact.passwordHash).toBeNull();
+    expect(contact.email).toBeNull();
+
+    await signUp({ name: 'Guest Later', email, phone, password });
+
+    const account = await prisma.customer.findUniqueOrThrow({ where: { phone } });
+    expect(account.id).toBe(contact.id);
+    expect(account.email).toBe(email);
+    expect(account.passwordHash).not.toBeNull();
+
+    // …and the credentials actually work, which is the part the defect broke.
+    const verified = await verifyCustomerCredentials(email, password);
+    expect(verified).not.toBeNull();
+    expect(verified?.id).toBe(contact.id);
+  });
+
+  it('still says nothing when the phone belongs to a real account', async () => {
+    // The enumeration guard this function exists for is untouched: a *credentialled*
+    // row is silently left alone, so a caller cannot tell a taken number from a
+    // free one by the response.
+    const phone = '9876500032';
+    const first = `taken.${Date.now() % 1_000_000}@example.test`;
+    await signUp({ name: 'Real Account', email: first, phone, password: 'RealAccount1' });
+    const before = await prisma.customer.findUniqueOrThrow({ where: { phone } });
+
+    const second = `attacker.${Date.now() % 1_000_000}@example.test`;
+    await expect(
+      signUp({ name: 'Not Me', email: second, phone, password: 'Attacker123' }),
+    ).resolves.toBeUndefined();
+
+    const after = await prisma.customer.findUniqueOrThrow({ where: { phone } });
+    expect(after.email).toBe(before.email);
+    expect(after.passwordHash).toBe(before.passwordHash);
+    expect(after.name).toBe('Real Account');
+    // The attacker's address never becomes a way in.
+    expect(await verifyCustomerCredentials(second, 'Attacker123')).toBeNull();
+  });
+
+  it('claiming a contact row exposes no order history', () => {
+    // The claim is deliberate, but it must not hand anything over. The account
+    // area lists no orders at all in Phase 4; when it does, it must be gated on a
+    // verified phone rather than on having typed one. This pins the current
+    // surface so that change cannot happen by accident.
+    const page = readFileSync(
+      join(process.cwd(), 'src', 'app', '(storefront)', 'account', 'orders', 'page.tsx'),
+      'utf8',
+    );
+
+    expect(page).not.toMatch(/\border\b\s*\./i);
+    expect(page).not.toContain('@/modules/orders');
+    expect(page).toContain('No orders yet');
   });
 });

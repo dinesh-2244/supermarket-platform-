@@ -120,8 +120,37 @@ export async function signUp(input: SignUpInput): Promise<void> {
   const passwordHash = await hash(input.password);
 
   const existingEmail = await repo.findByEmailWithSecret(email);
-  const existingPhone = await repo.findByPhone(phone);
-  if (existingEmail !== null || existingPhone !== null) return;
+  if (existingEmail !== null) return;
+
+  const existingPhone = await repo.findCredentialStateByPhone(phone);
+  if (existingPhone !== null) {
+    // The phone is taken. There are two very different reasons for that, and
+    // Phase 4 created the second one (OSCAR R2).
+    //
+    // If the row has credentials it is somebody's account, and we say nothing —
+    // that is the enumeration case this function exists to be quiet about.
+    //
+    // If it has neither an email nor a password it is not an account at all: it
+    // is the lightweight contact record `checkout.placeOrder` upserts so a guest
+    // order has something to hang on. Before this, that record silently made the
+    // phone number unregisterable for ever — order once as a guest and you could
+    // never create an account. So sign-up **claims** it.
+    //
+    // What the claim does not do is hand over anything. The account area lists
+    // no orders (`/account/orders` is a stub), so claiming a contact row grants
+    // no history; when order history arrives it must be gated on a verified
+    // phone, not on having typed one. That constraint is asserted in the
+    // regression test rather than left as a comment.
+    if (existingPhone.email !== null || existingPhone.hasPassword) return;
+
+    const claimed = await withTransaction((tx) =>
+      repo.claimContactRow(tx, { phone, name, email, passwordHash }),
+    );
+    // `null` means somebody else claimed it between the read and the write. Same
+    // neutral silence: the caller cannot tell that from an address already taken.
+    if (claimed !== null) emit('customer.registered', { customerId: claimed.id });
+    return;
+  }
 
   const customer = await withTransaction(async (tx) =>
     repo.insertCustomer(tx, { name, email, phone, passwordHash }),

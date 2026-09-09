@@ -97,6 +97,46 @@ export async function upsertByPhone(
   });
 }
 
+/**
+ * Does this phone belong to an *account*, or only to an order-contact row?
+ *
+ * Returns whether a password exists rather than the hash itself: the caller only
+ * needs to know which of the two cases it is in, and a secret that is not read
+ * cannot be leaked by a later refactor.
+ */
+export async function findCredentialStateByPhone(
+  phone: string,
+  db?: DbExecutor,
+): Promise<{ id: string; email: string | null; hasPassword: boolean } | null> {
+  const row = await executor(db).customer.findUnique({
+    where: { phone },
+    select: { id: true, email: true, passwordHash: true },
+  });
+  if (row === null) return null;
+  return { id: row.id, email: row.email, hasPassword: row.passwordHash !== null };
+}
+
+/**
+ * Turn a credential-less order-contact row into a real account.
+ *
+ * Only ever called for a row that has neither an email nor a password hash —
+ * `service.signUp` checks that first. The `where` repeats the condition so the
+ * claim is decided by the database rather than by the gap between the read and
+ * the write: two simultaneous sign-ups on one phone cannot both succeed.
+ */
+export async function claimContactRow(
+  tx: Tx,
+  row: { phone: string; name: string; email: string; passwordHash: string },
+): Promise<CustomerProfile | null> {
+  const claimed = await executor(tx).customer.updateMany({
+    where: { phone: row.phone, passwordHash: null, email: null },
+    data: { name: row.name, email: row.email, passwordHash: row.passwordHash },
+  });
+  if (claimed.count === 0) return null;
+
+  return executor(tx).customer.findUnique({ where: { phone: row.phone }, select: profileSelect });
+}
+
 export async function insertCustomer(
   tx: Tx,
   row: { name: string; email: string; phone: string; passwordHash: string },
