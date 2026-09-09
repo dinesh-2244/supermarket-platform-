@@ -54,6 +54,8 @@ const cartTokens: string[] = [];
  * NOW clears the lead time.
  */
 const SLOT = new Date('2026-12-01T10:30:00Z');
+/** A second bookable window, one hour on. Used to separate two guards below. */
+const OTHER_SLOT = new Date('2026-12-01T11:30:00Z');
 const NOW = new Date('2026-12-01T08:00:00Z');
 
 const guest: Principal = { kind: 'customer', customerId: null, storeId: null };
@@ -457,6 +459,49 @@ describe('concurrency', () => {
     expect(
       await prisma.order.count({ where: { storeId, contactPhoneSnapshot: '9876500001' } }),
     ).toBeGreaterThan(0);
+  });
+
+  it('places exactly one order when one basket is submitted into two different windows', async () => {
+    // The decisive test for the **cart row lock**, and the reason the test above
+    // is not enough on its own.
+    //
+    // `placeOrder` takes the delivery-window mutex before the cart lock. When
+    // two submissions name the *same* window, that mutex serialises them by
+    // itself — so the test above would still pass with the cart lock removed,
+    // and it proves the outcome without isolating which guard produced it.
+    // (Confirmed by mutation: making `lockActiveCart` a non-locking read leaves
+    // the same-slot test green.)
+    //
+    // Two *different* windows take two different lock keys, so the mutex cannot
+    // serialise anything. Only the cart row lock stands between one basket and
+    // two orders.
+    const before = await stockOf(rice);
+    const token = await basketWith(storeId, rice, 2);
+
+    const results = await Promise.allSettled([
+      placeOrder(guest, order(token, { contact: { name: 'Split A', phone: '9876500021' } })),
+      placeOrder(
+        guest,
+        order(token, {
+          slotStart: OTHER_SLOT,
+          contact: { name: 'Split B', phone: '9876500022' },
+        }),
+      ),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+
+    // One basket, one decrement, one order — whichever window won.
+    expect(await stockOf(rice)).toBe(before - 2);
+    expect((await prisma.cart.findUniqueOrThrow({ where: { cartToken: token } })).status).toBe(
+      'CONVERTED',
+    );
+    expect(
+      await prisma.order.count({
+        where: { storeId, contactPhoneSnapshot: { in: ['9876500021', '9876500022'] } },
+      }),
+    ).toBe(1);
   });
 
   it('refuses a second, sequential submission of a converted basket', async () => {
