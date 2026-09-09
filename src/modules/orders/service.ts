@@ -2,11 +2,355 @@
  * Use-cases for `orders`. Services open transactions, enforce authorization and
  * emit domain events; they are the only thing `index.ts` exposes.
  *
- * Phase 1 is a skeleton — this module emits order.<transition> once its use-cases exist.
+ * The rule this module exists to hold: **`transition()` is the only code path
+ * that mutates `Order.status`.** Nothing else in `src/` calls `order.update`
+ * with a `status`, which `orders.test.ts` asserts by grepping the tree. A status
+ * that could move without `transition()` is a status that can move without its
+ * `OrderStatusHistory` row, and the history is the audit trail (§11).
  */
+import {
+  assertAuthorized,
+  ConflictError,
+  emit,
+  NotFoundError,
+  orderNumber as mintOrderNumber,
+  trackingToken as mintTrackingToken,
+  ValidationError,
+  withTransaction,
+  writeAuditLog,
+  type Principal,
+  type Tx,
+} from '../platform/index';
+import { applyMovement } from '../inventory/index';
 import { descriptor, type ModuleDescriptor } from './domain/index';
+import * as repo from './repo';
+import {
+  assertTransition,
+  canCancelByStore,
+  requiresDiscrepancyNote,
+  type OrderStatus,
+  type OrderTransitionEvent,
+} from './state-machine';
 
 /** What this module owns and is allowed to depend on (§4). */
 export function moduleDescriptor(): ModuleDescriptor {
   return descriptor;
+}
+
+function actorOf(principal: Principal): {
+  actorType: 'USER' | 'CUSTOMER' | 'SYSTEM';
+  actorId: string | null;
+} {
+  switch (principal.kind) {
+    case 'user':
+      return { actorType: 'USER', actorId: principal.userId };
+    case 'customer':
+      return { actorType: 'CUSTOMER', actorId: principal.customerId };
+    case 'system':
+      return { actorType: 'SYSTEM', actorId: null };
+  }
+}
+
+/**
+ * What a transition did, and what its caller still owes the event bus.
+ *
+ * The event is *returned* rather than emitted here on purpose. `transition()`
+ * runs inside the caller's transaction, and a handler that fires before that
+ * transaction commits has announced something that may still roll back. The
+ * transaction-opening wrappers below emit after the commit; an in-transaction
+ * caller (checkout, and Phase 5's fulfillment use-cases) does the same with the
+ * outcome it gets back.
+ */
+export interface TransitionOutcome {
+  readonly orderId: string;
+  readonly from: OrderStatus;
+  readonly to: OrderStatus;
+  readonly emits: OrderTransitionEvent | null;
+  readonly storeId: string;
+}
+
+/**
+ * Move one order to `to`, inside the caller's transaction.
+ *
+ * The order row is locked first, so the state the edge is validated against is
+ * the state that is about to be written — two staff members acting at once
+ * cannot both read `PLACED` and both apply a first transition. An illegal edge,
+ * or a guard that refuses, throws before anything is written.
+ */
+export async function transition(
+  tx: Tx,
+  orderId: string,
+  to: OrderStatus,
+  actor: Principal,
+  note?: string | null,
+): Promise<TransitionOutcome> {
+  const order = await repo.lockOrder(tx, orderId);
+  if (order === null) {
+    throw new NotFoundError('No such order', { orderId });
+  }
+
+  const rule = assertTransition(order.status, to, {
+    priceVarianceFlagged: order.priceVarianceFlagged,
+    customerConfirmedRevisedAmount: order.customerConfirmedRevisedAmount,
+  });
+
+  const { actorType, actorId } = actorOf(actor);
+  await repo.setStatus(tx, orderId, to, rule.stamps, new Date());
+  await repo.insertStatusHistory(tx, {
+    orderId,
+    fromStatus: order.status,
+    toStatus: to,
+    actorType,
+    actorId,
+    note: note ?? null,
+  });
+
+  return {
+    orderId,
+    from: order.status,
+    to,
+    emits: rule.emits,
+    storeId: order.storeId,
+  };
+}
+
+/** Emit what a committed transition owes the bus. Never called before commit. */
+function announce(outcome: TransitionOutcome, reason?: string): void {
+  switch (outcome.emits) {
+    case 'order.picked':
+    case 'order.delivered':
+      emit(outcome.emits, { orderId: outcome.orderId });
+      return;
+    case 'order.billed':
+      emit(outcome.emits, { orderId: outcome.orderId, priceVarianceFlagged: false });
+      return;
+    case 'order.cancelled_by_store':
+      emit(outcome.emits, { orderId: outcome.orderId, reason: reason ?? '' });
+      return;
+    case null:
+      return;
+  }
+}
+
+export interface NewOrderInput {
+  readonly storeCode: string;
+  readonly customerId: string;
+  readonly storeId: string;
+  readonly contactName: string;
+  readonly contactPhone: string;
+  readonly deliveryAddressSnapshot: unknown;
+  readonly deliverySlotStart: Date;
+  readonly deliverySlotEnd: Date;
+  readonly paymentMethod: 'COD' | 'UPI_ON_DELIVERY';
+  readonly subtotalPaise: number;
+  readonly deliveryFeePaise: number;
+  readonly lines: readonly repo.NewOrderLine[];
+}
+
+export interface CreatedOrder {
+  readonly id: string;
+  readonly orderNumber: string;
+  readonly trackingToken: string;
+  readonly estimatedTotalPaise: number;
+}
+
+/** How many order numbers to try before giving up and letting the index decide. */
+const ORDER_NUMBER_ATTEMPTS = 5;
+
+/**
+ * Write a new order at `PLACED`.
+ *
+ * Internal to Phase 4: only `checkout.placeOrder` calls it, and only inside the
+ * transaction that decremented the stock. `PLACED` is the **initial state**, not
+ * a transition — there is no `null → PLACED` edge in the table — so this writes
+ * the opening `OrderStatusHistory` row itself (`fromStatus: null`) rather than
+ * going through `transition()`.
+ *
+ * `estimatedTotalPaise` is computed here from subtotal + delivery fee rather
+ * than accepted from the caller: it is the number the shopper is quoted, and a
+ * caller that could pass its own could quote a total the lines do not add up to.
+ */
+export async function createOrder(tx: Tx, input: NewOrderInput): Promise<CreatedOrder> {
+  if (input.lines.length === 0) {
+    throw new ValidationError('An order needs at least one line', {});
+  }
+
+  const estimatedTotalPaise = input.subtotalPaise + input.deliveryFeePaise;
+  const trackingToken = mintTrackingToken();
+
+  // The number carries a CSPRNG tail, so a collision is already unlikely; this
+  // checks the candidate against what is committed and tries again rather than
+  // letting the unique index abort the whole placement. The index remains the
+  // backstop for the residual case of two concurrent placements minting the
+  // same tail, neither able to see the other's uncommitted row.
+  let created: repo.OrderIdentity | null = null;
+  for (let attempt = 0; attempt < ORDER_NUMBER_ATTEMPTS && created === null; attempt += 1) {
+    const candidate = mintOrderNumber(input.storeCode);
+    if (await repo.orderNumberTaken(tx, candidate)) continue;
+
+    created = await repo.insertOrder(tx, {
+      orderNumber: candidate,
+      trackingToken,
+      customerId: input.customerId,
+      storeId: input.storeId,
+      contactNameSnapshot: input.contactName,
+      contactPhoneSnapshot: input.contactPhone,
+      deliveryAddressSnapshotJson: input.deliveryAddressSnapshot,
+      deliverySlotStart: input.deliverySlotStart,
+      deliverySlotEnd: input.deliverySlotEnd,
+      paymentMethod: input.paymentMethod,
+      subtotalPaise: input.subtotalPaise,
+      deliveryFeePaise: input.deliveryFeePaise,
+      estimatedTotalPaise,
+      lines: input.lines,
+    });
+  }
+
+  if (created === null) {
+    throw new ConflictError('Could not mint a unique order number', {
+      attempts: ORDER_NUMBER_ATTEMPTS,
+    });
+  }
+
+  await repo.insertStatusHistory(tx, {
+    orderId: created.id,
+    fromStatus: null,
+    toStatus: 'PLACED',
+    actorType: 'CUSTOMER',
+    actorId: null,
+    note: null,
+  });
+
+  return { ...created, estimatedTotalPaise };
+}
+
+export interface CancelResult {
+  readonly orderId: string;
+  readonly orderNumber: string;
+  readonly restored: readonly { productId: string; qty: number; balanceAfter: number }[];
+}
+
+/**
+ * The audited store correction — the **only** way an order ends early (R4).
+ *
+ * Restores each line's not-yet-restored quantity (`qtyOrdered − stockRestoredQty`)
+ * with an `ADMIN_CORRECTION` ledger row and bumps `stockRestoredQty` by the same
+ * amount, so a Phase 5 short-pick restore and this correction can never give the
+ * same unit back twice. A line already fully restored contributes nothing and
+ * writes no ledger row — a zero-delta movement is not a movement.
+ */
+export async function cancelByStore(
+  tx: Tx,
+  orderId: string,
+  actor: Principal,
+  reason: string,
+  discrepancyNote?: string | null,
+): Promise<CancelResult> {
+  const trimmed = reason.trim();
+  if (trimmed.length === 0) {
+    throw new ValidationError('A correction needs a reason', { orderId });
+  }
+
+  const order = await repo.lockOrder(tx, orderId);
+  if (order === null) {
+    throw new NotFoundError('No such order', { orderId });
+  }
+
+  // Store-scoped, and manager-or-above. Checked against the order's own store,
+  // so a manager cannot correct the other store's order.
+  assertAuthorized(actor, 'order:cancel', {
+    type: 'Order',
+    id: orderId,
+    storeId: order.storeId,
+  });
+
+  if (!canCancelByStore(order.status)) {
+    throw new ConflictError('That order can no longer be cancelled by the store', {
+      orderId,
+      status: order.status,
+    });
+  }
+
+  if (requiresDiscrepancyNote(order.status) && (discrepancyNote ?? '').trim().length === 0) {
+    throw new ValidationError(
+      'This order has a POS bill — record how the bill was voided before cancelling',
+      { orderId, status: order.status },
+    );
+  }
+
+  const note = discrepancyNote == null ? trimmed : `${trimmed} — ${discrepancyNote.trim()}`;
+
+  // Through the state machine like any other edge, so the correction gets its
+  // `OrderStatusHistory` row and its `correctedAt` stamp from the same table
+  // that governs the rest of the lifecycle.
+  await transition(tx, orderId, 'CANCELLED_BY_STORE', actor, note);
+
+  const lines = await repo.listLines(tx, orderId);
+  const restored: { productId: string; qty: number; balanceAfter: number }[] = [];
+  for (const line of lines) {
+    const outstanding = line.qtyOrdered - line.stockRestoredQty;
+    if (outstanding <= 0) continue;
+
+    const movement = await applyMovement(tx, actor, {
+      storeId: order.storeId,
+      productId: line.productId,
+      delta: outstanding,
+      reason: 'ADMIN_CORRECTION',
+      refType: 'Order',
+      refId: orderId,
+      note,
+    });
+    await repo.addStockRestored(tx, line.id, outstanding);
+    restored.push({
+      productId: line.productId,
+      qty: outstanding,
+      balanceAfter: movement.balanceAfter,
+    });
+  }
+
+  await repo.setCorrectionReason(tx, orderId, note);
+  await writeAuditLog(tx, {
+    principal: actor,
+    action: 'update',
+    entityType: 'Order',
+    entityId: orderId,
+    storeId: order.storeId,
+    before: { status: order.status },
+    after: { status: 'CANCELLED_BY_STORE', correctionReason: note, restored },
+  });
+
+  return { orderId, orderNumber: order.orderNumber, restored };
+}
+
+/**
+ * `cancelByStore` with its own transaction, for callers that are not already in
+ * one (the admin server action). Emits after the commit, never before.
+ */
+export async function correctOrder(
+  actor: Principal,
+  orderId: string,
+  reason: string,
+  discrepancyNote?: string | null,
+): Promise<CancelResult> {
+  const result = await withTransaction((tx) =>
+    cancelByStore(tx, orderId, actor, reason, discrepancyNote),
+  );
+  emit('order.cancelled_by_store', { orderId, reason: reason.trim() });
+  return result;
+}
+
+/**
+ * `transition` with its own transaction. This is the form the plan means by
+ * "`order.<transition>` is emitted by `transition()`": the edge is applied and
+ * committed, and only then announced.
+ */
+export async function applyTransition(
+  actor: Principal,
+  orderId: string,
+  to: OrderStatus,
+  note?: string | null,
+): Promise<TransitionOutcome> {
+  const outcome = await withTransaction((tx) => transition(tx, orderId, to, actor, note));
+  announce(outcome, note ?? undefined);
+  return outcome;
 }
