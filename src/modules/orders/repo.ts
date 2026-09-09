@@ -15,7 +15,7 @@ import {
   type Principal,
   type Tx,
 } from '../platform/index';
-import type { OrderStatus, OrderTimestampField } from './state-machine';
+import type { OrderStatus, ValidatedTransition } from './state-machine';
 
 /** The executor to run a *read* on: the caller's transaction, or the singleton. */
 export function executor(db?: DbExecutor): DbExecutor {
@@ -68,21 +68,25 @@ export async function lockOrder(tx: Tx, orderId: string): Promise<LockedOrderRow
 /**
  * Move the status and stamp the arrival column in one statement.
  *
- * The column name comes from the transition table, never from a caller, so the
- * interpolation below can only ever be one of the nine `OrderTimestampField`
- * literals. It is still written through Prisma's typed `update` rather than raw
- * SQL, so it is not string-built at all.
+ * **Takes a `ValidatedTransition`, not a status.** The target state and the
+ * timestamp column are read off the rule, so a caller cannot name a status at
+ * all — and a rule can only be obtained from `assertTransition`, which mints it
+ * after checking the edge and its guard. That is what makes "`transition()` is
+ * the only path that moves `Order.status`" hold by construction rather than by
+ * a source scan's good intentions (OSCAR R8).
+ *
+ * The column name therefore comes from the table, never from a caller, and it
+ * goes through Prisma's typed `update` rather than raw SQL.
  */
 export async function setStatus(
   tx: Tx,
   orderId: string,
-  to: OrderStatus,
-  stamps: OrderTimestampField | null,
+  rule: ValidatedTransition,
   at: Date,
 ): Promise<void> {
   await auditedExecutor(tx).order.update({
     where: { id: orderId },
-    data: { status: to, ...(stamps === null ? {} : { [stamps]: at }) },
+    data: { status: rule.to, ...(rule.stamps === null ? {} : { [rule.stamps]: at }) },
   });
 }
 

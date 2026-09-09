@@ -14,9 +14,21 @@ export interface DomainEvents {
   'user.disabled': { userId: string };
   'customer.registered': { customerId: string };
   'order.placed': { orderId: string; storeId: string };
+  // One event per legal edge of the order state machine (§11, phase-4-plan
+  // D1/D7). The four that predate Phase 4 keep their names and payloads; the
+  // rest are id-only, because the bus carries identifiers and a subscriber that
+  // needs more looks it up — a customer's details on the bus are a customer's
+  // details in every subscriber's reach.
+  'order.accepted': { orderId: string };
+  'order.picking': { orderId: string };
   'order.picked': { orderId: string };
   'order.billed': { orderId: string; priceVarianceFlagged: boolean };
+  'order.packed': { orderId: string };
+  'order.dispatched': { orderId: string };
   'order.delivered': { orderId: string };
+  'order.closed': { orderId: string };
+  'order.delivery_failed': { orderId: string };
+  'order.closed_undelivered': { orderId: string };
   'order.cancelled_by_store': { orderId: string; reason: string };
 }
 

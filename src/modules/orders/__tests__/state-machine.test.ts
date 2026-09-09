@@ -65,6 +65,38 @@ describe('order state machine — the table', () => {
     },
   );
 
+  it('gives every legal edge an event (R7)', () => {
+    // D1/D7: a transition event for *every* edge. The first version emitted only
+    // the four names the bus already declared and left the rest silent, which is
+    // the omission this asserts against — a table entry with no event is now a
+    // type error as well as a test failure.
+    const silent = ORDER_STATUSES.flatMap((from) =>
+      TRANSITIONS[from]
+        .filter((rule) => (rule.emits as string | null) === null)
+        .map((rule) => `${from}->${rule.to}`),
+    );
+
+    expect(silent).toEqual([]);
+  });
+
+  it('names every event distinctly per arrival state', () => {
+    // Two edges may legitimately share an event — DELIVERY_FAILED and PACKED
+    // both dispatch — but an arrival state must always announce the same thing,
+    // or a subscriber cannot tell what happened from the name.
+    const byArrival = new Map<OrderStatus, Set<string>>();
+    for (const from of ORDER_STATUSES) {
+      for (const rule of TRANSITIONS[from]) {
+        const seen = byArrival.get(rule.to) ?? new Set<string>();
+        seen.add(rule.emits);
+        byArrival.set(rule.to, seen);
+      }
+    }
+
+    for (const [arrival, events] of byArrival) {
+      expect(events.size, `${arrival} announces more than one event`).toBe(1);
+    }
+  });
+
   it('lets nothing re-enter PLACED — an order is placed exactly once', () => {
     expect([...LEGAL].filter((edge) => edge.endsWith('->PLACED'))).toEqual([]);
   });

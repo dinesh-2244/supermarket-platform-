@@ -1,10 +1,18 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { getPrisma, withTransaction, type Principal, type Tx } from '@/modules/platform';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+  clearEventHandlersForTests,
+  getPrisma,
+  on,
+  withTransaction,
+  type DomainEventName,
+  type Principal,
+  type Tx,
+} from '@/modules/platform';
 import {
   applyTransition,
   cancelByStore,
+  correctOrder,
   createOrder,
-  transition,
   type NewOrderLine,
 } from '@/modules/orders';
 import { createCustomer, createStoreWithProduct, createUser } from '../factories/index';
@@ -83,6 +91,11 @@ afterAll(async () => {
 });
 
 const shopper: Principal = { kind: 'customer', customerId: null, storeId: null };
+
+async function stockOfProduct(storeId: string, productId: string): Promise<number> {
+  const item = await prisma.inventoryItem.findFirstOrThrow({ where: { storeId, productId } });
+  return item.websiteStock;
+}
 
 function lines(productId: string, qty = 2): NewOrderLine[] {
   return [
@@ -258,11 +271,15 @@ describe('transition', () => {
   });
 
   it('rolls the status change back with the rest of a failing transaction', async () => {
-    const { id } = await placeOrder(storeA, productA);
+    const { id } = await placeOrder(storeA, productA, 3);
+    const before = await stockOfProduct(storeA, productA);
 
     await expect(
       withTransaction(async (tx) => {
-        await transition(tx, id, 'ACCEPTED', managerA);
+        // `cancelByStore` moves the status, restores stock and writes the audit
+        // row; the whole point of it taking a `Tx` is that none of the three can
+        // survive a failure later in the same transaction.
+        await cancelByStore(tx, id, managerA, 'about to blow up');
         throw new Error('something after the transition blew up');
       }),
     ).rejects.toThrow(/blew up/);
@@ -271,10 +288,224 @@ describe('transition', () => {
       where: { id },
       include: { statusHistory: true },
     });
-    // The whole point of taking a `Tx`: neither the status nor its history row
-    // survives a failure later in the same transaction.
     expect(order.status).toBe('PLACED');
     expect(order.statusHistory).toHaveLength(1);
+    expect(await stockOfProduct(storeA, productA)).toBe(before);
+    expect(await prisma.auditLog.count({ where: { entityType: 'Order', entityId: id } })).toBe(0);
+  });
+});
+
+describe('every legal edge announces itself (R7)', () => {
+  /** Record every order event the bus sees, whatever its name. */
+  function listen(): string[] {
+    const seen: string[] = [];
+    const names: DomainEventName[] = [
+      'order.accepted',
+      'order.picking',
+      'order.picked',
+      'order.billed',
+      'order.packed',
+      'order.dispatched',
+      'order.delivered',
+      'order.closed',
+      'order.delivery_failed',
+      'order.closed_undelivered',
+      'order.cancelled_by_store',
+    ];
+    for (const name of names) on(name, () => seen.push(name));
+    return seen;
+  }
+
+  beforeEach(() => {
+    clearEventHandlersForTests();
+  });
+
+  afterEach(() => {
+    clearEventHandlersForTests();
+  });
+
+  it('emits one event per edge, all the way down the happy path', async () => {
+    const seen = listen();
+    const { id } = await placeOrder(storeA, productA, 1);
+
+    for (const to of [
+      'ACCEPTED',
+      'PICKING',
+      'PICKED',
+      'BILLED_IN_POS',
+      'PACKED',
+      'OUT_FOR_DELIVERY',
+      'DELIVERED',
+      'CLOSED',
+    ] as const) {
+      await applyTransition(managerA, id, to);
+    }
+
+    expect(seen).toEqual([
+      'order.accepted',
+      'order.picking',
+      'order.picked',
+      'order.billed',
+      'order.packed',
+      'order.dispatched',
+      'order.delivered',
+      'order.closed',
+    ]);
+  });
+
+  it('emits the failed-delivery edges, including a re-dispatch', async () => {
+    const seen = listen();
+    const { id } = await placeOrder(storeA, productA, 1);
+    for (const to of ['ACCEPTED', 'PICKING', 'PICKED', 'BILLED_IN_POS', 'PACKED'] as const) {
+      await applyTransition(managerA, id, to);
+    }
+    seen.length = 0;
+
+    await applyTransition(managerA, id, 'OUT_FOR_DELIVERY');
+    await applyTransition(managerA, id, 'DELIVERY_FAILED');
+    await applyTransition(managerA, id, 'OUT_FOR_DELIVERY');
+    await applyTransition(managerA, id, 'DELIVERY_FAILED');
+    await applyTransition(managerA, id, 'CLOSED_UNDELIVERED');
+
+    expect(seen).toEqual([
+      'order.dispatched',
+      'order.delivery_failed',
+      'order.dispatched',
+      'order.delivery_failed',
+      'order.closed_undelivered',
+    ]);
+  });
+
+  it('emits nothing for a refused edge', async () => {
+    const seen = listen();
+    const { id } = await placeOrder(storeA, productA, 1);
+
+    await expect(applyTransition(managerA, id, 'DELIVERED')).rejects.toThrow(/cannot go from/i);
+    await expect(applyTransition(managerB, id, 'ACCEPTED')).rejects.toThrow(/permission/i);
+    await expect(applyTransition(managerA, id, 'CANCELLED_BY_STORE', 'no')).rejects.toThrow(
+      /store correction/i,
+    );
+
+    expect(seen).toEqual([]);
+  });
+
+  it('emits nothing for an edge whose guard refuses', async () => {
+    const { id } = await placeOrder(storeA, productA, 1);
+    for (const to of ['ACCEPTED', 'PICKING', 'PICKED', 'BILLED_IN_POS', 'PACKED'] as const) {
+      await applyTransition(managerA, id, to);
+    }
+    await prisma.order.update({ where: { id }, data: { priceVarianceFlagged: true } });
+
+    const seen = listen();
+    await expect(applyTransition(managerA, id, 'OUT_FOR_DELIVERY')).rejects.toThrow(
+      /confirm the revised amount/i,
+    );
+    expect(seen).toEqual([]);
+  });
+
+  it('emits nothing when the transaction rolls back after the edge', async () => {
+    const { id } = await placeOrder(storeA, productA, 2);
+    const seen = listen();
+
+    await expect(
+      withTransaction(async (tx) => {
+        await cancelByStore(tx, id, managerA, 'rolled back');
+        throw new Error('after the edge');
+      }),
+    ).rejects.toThrow(/after the edge/);
+
+    // The event is returned by `transition` and announced only by the wrapper
+    // that committed, which is exactly why a rollback is silent.
+    expect(seen).toEqual([]);
+  });
+
+  it('emits order.cancelled_by_store once a correction commits', async () => {
+    const seen = listen();
+    const { id } = await placeOrder(storeA, productA, 2);
+    await correctOrder(managerA, id, 'customer unreachable');
+
+    expect(seen).toEqual(['order.cancelled_by_store']);
+  });
+});
+
+describe('applyTransition is a guarded boundary, not a back door (R1)', () => {
+  it('refuses a shopper and the other store’s manager', async () => {
+    // Staff are *not* in this list on purpose — picking and packing are the work
+    // STORE_STAFF exists for, so `order:transition` is granted to them,
+    // store-scoped. What must be refused is a shopper and another store.
+    const { id } = await placeOrder(storeA, productA, 2);
+
+    for (const actor of [shopper, managerB]) {
+      await expect(applyTransition(actor, id, 'ACCEPTED')).rejects.toThrow(/permission/i);
+    }
+
+    const order = await prisma.order.findUniqueOrThrow({
+      where: { id },
+      include: { statusHistory: true },
+    });
+    expect(order.status).toBe('PLACED');
+    expect(order.statusHistory).toHaveLength(1);
+  });
+
+  it('refuses a customer principal that carries the right store id', async () => {
+    // Store scoping alone is not enough: a shopper is scoped to the store their
+    // delivery area resolved to, so the grant table has to deny the *kind* of
+    // principal, not merely the store.
+    const { id } = await placeOrder(storeA, productA, 1);
+    const shopperAtA: Principal = { kind: 'customer', customerId, storeId: storeA };
+
+    await expect(applyTransition(shopperAtA, id, 'ACCEPTED')).rejects.toThrow(/permission/i);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id } })).status).toBe('PLACED');
+  });
+
+  it('lets staff drive the fulfilment lifecycle in their own store', async () => {
+    // The other half of the rule: picking and packing are what STORE_STAFF is
+    // for, so the fix must not lock them out of the work.
+    const { id } = await placeOrder(storeA, productA, 1);
+    await applyTransition(staffA, id, 'ACCEPTED');
+    expect((await prisma.order.findUniqueOrThrow({ where: { id } })).status).toBe('ACCEPTED');
+  });
+
+  it('will not cancel an order, whoever asks — not even a super-admin', async () => {
+    const { id } = await placeOrder(storeA, productA, 4);
+    const before = await stockOfProduct(storeA, productA);
+    const superAdmin: Principal = {
+      kind: 'user',
+      userId: managerA.kind === 'user' ? managerA.userId : '',
+      role: 'SUPER_ADMIN',
+      storeId: null,
+    };
+
+    for (const actor of [managerA, superAdmin, staffA, shopper]) {
+      await expect(applyTransition(actor, id, 'CANCELLED_BY_STORE', 'let me out')).rejects.toThrow(
+        /goes through the store correction/i,
+      );
+    }
+
+    // Nothing moved: not the status, not the stock, not the audit trail. This is
+    // the defect R1 describes — a generic transition that reached
+    // CANCELLED_BY_STORE left the order terminal with its stock never returned.
+    const order = await prisma.order.findUniqueOrThrow({
+      where: { id },
+      include: { statusHistory: true },
+    });
+    expect(order.status).toBe('PLACED');
+    expect(order.statusHistory).toHaveLength(1);
+    expect(order.correctionReason).toBeNull();
+    expect(await stockOfProduct(storeA, productA)).toBe(before);
+    expect(await prisma.auditLog.count({ where: { entityType: 'Order', entityId: id } })).toBe(0);
+    expect(await prisma.stockLedger.count({ where: { refType: 'Order', refId: id } })).toBe(0);
+
+    // …and the proper correction still works afterwards, restoring the stock the
+    // bypass would have lost forever.
+    const result = await withTransaction((tx) => cancelByStore(tx, id, managerA, 'properly'));
+    expect(result.restored).toEqual([{ productId: productA, qty: 4, balanceAfter: before + 4 }]);
+  });
+
+  it('is refused for an order that does not exist, before any authz leak', async () => {
+    await expect(
+      applyTransition(managerB, '00000000-0000-4000-8000-000000000000', 'ACCEPTED'),
+    ).rejects.toThrow(/no such order/i);
   });
 });
 

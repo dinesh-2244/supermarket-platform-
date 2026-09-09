@@ -110,6 +110,21 @@ export default defineConfig({
         statements: 84,
         functions: 85,
         branches: 73,
+
+        // The order state machine carries the whole lifecycle, and
+        // phase-4-plan D1 asks for 100 % of its branches. That was true when it
+        // shipped, but only *observed* — the global floors above are far below
+        // it, so a later change could drop it to 86 % and CI would stay green.
+        // Deleting two guard tests did exactly that and still exited 0
+        // (OSCAR R8). A per-file threshold is what makes the requirement a gate
+        // rather than a note: this is a `100`, and it is meant to hurt if the
+        // table grows an untested arm.
+        'src/modules/orders/state-machine.ts': {
+          branches: 100,
+          functions: 100,
+          lines: 100,
+          statements: 100,
+        },
       },
     },
   },

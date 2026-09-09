@@ -95,7 +95,7 @@ export async function transition(
   });
 
   const { actorType, actorId } = actorOf(actor);
-  await repo.setStatus(tx, orderId, to, rule.stamps, new Date());
+  await repo.setStatus(tx, orderId, rule, new Date());
   await repo.insertStatusHistory(tx, {
     orderId,
     fromStatus: order.status,
@@ -117,8 +117,18 @@ export async function transition(
 /** Emit what a committed transition owes the bus. Never called before commit. */
 function announce(outcome: TransitionOutcome, reason?: string): void {
   switch (outcome.emits) {
+    // Id-only, which is every edge except the two that predate Phase 4 and
+    // carry a field. The bus names identifiers; a subscriber that needs the
+    // order looks it up, so no customer detail travels on it.
+    case 'order.accepted':
+    case 'order.picking':
     case 'order.picked':
+    case 'order.packed':
+    case 'order.dispatched':
     case 'order.delivered':
+    case 'order.closed':
+    case 'order.delivery_failed':
+    case 'order.closed_undelivered':
       emit(outcome.emits, { orderId: outcome.orderId });
       return;
     case 'order.billed':
@@ -126,8 +136,6 @@ function announce(outcome: TransitionOutcome, reason?: string): void {
       return;
     case 'order.cancelled_by_store':
       emit(outcome.emits, { orderId: outcome.orderId, reason: reason ?? '' });
-      return;
-    case null:
       return;
   }
 }
@@ -340,9 +348,24 @@ export async function correctOrder(
 }
 
 /**
- * `transition` with its own transaction. This is the form the plan means by
- * "`order.<transition>` is emitted by `transition()`": the edge is applied and
- * committed, and only then announced.
+ * `transition` with its own transaction — **the public mutation boundary**, and
+ * therefore where authorization lives.
+ *
+ * Two rules, both learned the hard way (OSCAR R1). The first version of this
+ * function checked the state edge and nothing else, which meant a shopper, a
+ * staff member or the *other store's* manager could drive any order to
+ * `CANCELLED_BY_STORE`: it wrote the status and a null-reason history row, took
+ * no stock back, wrote no `AuditLog`, and left the order terminal so the real
+ * correction could never recover the restoration it had skipped.
+ *
+ * 1. **Authorization is checked here**, against the order's own store, before
+ *    anything is written. `transition` itself stays an in-transaction primitive
+ *    with no opinion about who is calling — it is not exported, so there is no
+ *    unauthorized way to reach it.
+ * 2. **`CANCELLED_BY_STORE` is refused outright.** Ending an order is not a
+ *    generic edge: it must restore stock, write an audit row and carry a reason.
+ *    That is `cancelByStore` / `correctOrder`, and a second path to the same
+ *    state is exactly how the two drift apart.
  */
 export async function applyTransition(
   actor: Principal,
@@ -350,7 +373,26 @@ export async function applyTransition(
   to: OrderStatus,
   note?: string | null,
 ): Promise<TransitionOutcome> {
-  const outcome = await withTransaction((tx) => transition(tx, orderId, to, actor, note));
+  if (to === 'CANCELLED_BY_STORE') {
+    throw new ConflictError(
+      'Cancelling an order goes through the store correction, which restores stock and records a reason',
+      { orderId, use: 'correctOrder' },
+    );
+  }
+
+  const outcome = await withTransaction(async (tx) => {
+    const order = await repo.lockOrder(tx, orderId);
+    if (order === null) throw new NotFoundError('No such order', { orderId });
+
+    assertAuthorized(actor, 'order:transition', {
+      type: 'Order',
+      id: orderId,
+      storeId: order.storeId,
+    });
+
+    return transition(tx, orderId, to, actor, note);
+  });
+
   announce(outcome, note ?? undefined);
   return outcome;
 }

@@ -60,15 +60,27 @@ export type OrderTimestampField =
   | 'correctedAt';
 
 /**
- * The domain event each arrival emits.
+ * The domain event each arrival emits — **one per legal edge**, never `null`.
  *
- * Only the four the event bus already declares are real names; the rest of the
- * lifecycle is observable through `OrderStatusHistory` and gets no event until
- * something needs one. Inventing `order.picking`/`order.packed` now would put
- * names in the bus that no handler wants and that Phase 5 might contradict.
+ * The first version emitted only the four names the bus already declared and
+ * left the rest of the lifecycle observable through `OrderStatusHistory` alone.
+ * That was an omission, not a design (OSCAR R7): D1/D7 ask for a transition
+ * event on every edge, and "the bus does not name it yet" is an argument for
+ * naming it rather than for staying quiet. A subscriber that does not care about
+ * `order.picking` simply does not subscribe; one that does had no way to hear it.
  */
 export type OrderTransitionEvent =
-  'order.picked' | 'order.billed' | 'order.delivered' | 'order.cancelled_by_store';
+  | 'order.accepted'
+  | 'order.picking'
+  | 'order.picked'
+  | 'order.billed'
+  | 'order.packed'
+  | 'order.dispatched'
+  | 'order.delivered'
+  | 'order.closed'
+  | 'order.delivery_failed'
+  | 'order.closed_undelivered'
+  | 'order.cancelled_by_store';
 
 /** What the guard is allowed to look at. Read-only, and never the whole row. */
 export interface TransitionContext {
@@ -80,7 +92,8 @@ export interface TransitionRule {
   readonly to: OrderStatus;
   /** Stamped on arrival, in the same update as the status change. */
   readonly stamps: OrderTimestampField | null;
-  readonly emits: OrderTransitionEvent | null;
+  /** Every edge announces itself. Never `null` — see {@link OrderTransitionEvent}. */
+  readonly emits: OrderTransitionEvent;
   /**
    * Extra condition beyond "this edge exists". Returns the refusal message, or
    * `null` to allow — a message rather than a boolean so the rejection can say
@@ -125,33 +138,50 @@ const CANCEL_RULE: TransitionRule = {
  * and a terminal state has an empty list.
  */
 export const TRANSITIONS: Readonly<Record<OrderStatus, readonly TransitionRule[]>> = {
-  PLACED: [{ to: 'ACCEPTED', stamps: 'acceptedAt', emits: null }, CANCEL_RULE],
-  ACCEPTED: [{ to: 'PICKING', stamps: 'pickingStartedAt', emits: null }, CANCEL_RULE],
+  PLACED: [{ to: 'ACCEPTED', stamps: 'acceptedAt', emits: 'order.accepted' }, CANCEL_RULE],
+  ACCEPTED: [{ to: 'PICKING', stamps: 'pickingStartedAt', emits: 'order.picking' }, CANCEL_RULE],
   PICKING: [{ to: 'PICKED', stamps: 'pickedAt', emits: 'order.picked' }, CANCEL_RULE],
   PICKED: [{ to: 'BILLED_IN_POS', stamps: 'billedAt', emits: 'order.billed' }, CANCEL_RULE],
-  BILLED_IN_POS: [{ to: 'PACKED', stamps: 'packedAt', emits: null }, CANCEL_RULE],
+  BILLED_IN_POS: [{ to: 'PACKED', stamps: 'packedAt', emits: 'order.packed' }, CANCEL_RULE],
   PACKED: [
     {
       to: 'OUT_FOR_DELIVERY',
       stamps: 'dispatchedAt',
-      emits: null,
+      emits: 'order.dispatched',
       guard: varianceGuard,
     },
     CANCEL_RULE,
   ],
   OUT_FOR_DELIVERY: [
     { to: 'DELIVERED', stamps: 'deliveredAt', emits: 'order.delivered' },
-    { to: 'DELIVERY_FAILED', stamps: null, emits: null },
+    { to: 'DELIVERY_FAILED', stamps: null, emits: 'order.delivery_failed' },
   ],
-  DELIVERED: [{ to: 'CLOSED', stamps: 'closedAt', emits: null }],
+  DELIVERED: [{ to: 'CLOSED', stamps: 'closedAt', emits: 'order.closed' }],
   DELIVERY_FAILED: [
-    { to: 'OUT_FOR_DELIVERY', stamps: 'dispatchedAt', emits: null },
-    { to: 'CLOSED_UNDELIVERED', stamps: 'closedAt', emits: null },
+    { to: 'OUT_FOR_DELIVERY', stamps: 'dispatchedAt', emits: 'order.dispatched' },
+    { to: 'CLOSED_UNDELIVERED', stamps: 'closedAt', emits: 'order.closed_undelivered' },
   ],
   CLOSED: [],
   CANCELLED_BY_STORE: [],
   CLOSED_UNDELIVERED: [],
 };
+
+/**
+ * A rule that has been through {@link assertTransition}.
+ *
+ * The brand is a module-private symbol, so no code outside this file can
+ * construct one — not even by writing an object literal with the right shape.
+ * `repo.setStatus` demands one, which is what makes "the state machine is the
+ * only way an `Order.status` moves" a *compile-time* property rather than a
+ * convention a source scan hopes to notice (OSCAR R8).
+ *
+ * The previous guard checked that the caller lived in `service.ts`. A second
+ * function in that same file calling `repo.setStatus(tx, id, 'CANCELLED_BY_STORE',
+ * null, new Date())` passed every one of those checks while skipping the edge
+ * validation and the history row. It no longer compiles.
+ */
+declare const validatedEdge: unique symbol;
+export type ValidatedTransition = TransitionRule & { readonly [validatedEdge]: true };
 
 export type TransitionCheck =
   | { readonly ok: true; readonly rule: TransitionRule }
@@ -186,12 +216,14 @@ export function assertTransition(
   from: OrderStatus,
   to: OrderStatus,
   context: TransitionContext,
-): TransitionRule {
+): ValidatedTransition {
   const check = checkTransition(from, to, context);
   if (!check.ok) {
     throw new ConflictError(check.reason, { from, to });
   }
-  return check.rule;
+  // The only place a `ValidatedTransition` is ever minted, and it is minted
+  // *after* the edge and its guard have both been checked.
+  return check.rule as ValidatedTransition;
 }
 
 /** Which states `cancelByStore` may be invoked from. */

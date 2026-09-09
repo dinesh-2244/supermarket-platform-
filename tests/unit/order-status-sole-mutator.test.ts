@@ -24,6 +24,33 @@ import { describe, expect, it } from 'vitest';
  */
 const SRC = join(process.cwd(), 'src');
 const ORDERS_REPO = join('src', 'modules', 'orders', 'repo.ts');
+const ORDERS_SERVICE = join('src', 'modules', 'orders', 'service.ts');
+
+/** The text of a top-level `function`/`async function` body, brace-balanced. */
+function bodyOf(source: string, name: string): string {
+  const start = source.search(new RegExp(`(export\\s+)?(async\\s+)?function\\s+${name}\\b`));
+  if (start < 0) return '';
+  let depth = 0;
+  let seen = false;
+  for (let i = start; i < source.length; i += 1) {
+    if (source[i] === '{') {
+      depth += 1;
+      seen = true;
+    } else if (source[i] === '}') {
+      depth -= 1;
+      if (seen && depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  return source.slice(start);
+}
+
+/** Which top-level functions in `source` contain a call to `needle`. */
+function functionsCalling(source: string, needle: string): string[] {
+  const names = [...source.matchAll(/(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(/g)].map(
+    (match) => match[1] ?? '',
+  );
+  return names.filter((name) => bodyOf(source, name).includes(needle));
+}
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
@@ -89,19 +116,42 @@ describe('Order.status has exactly one mutator', () => {
     // `setStatus` (the transition) and `insertOrder` (the initial PLACED).
     expect(statusWrites).toHaveLength(2);
     expect(source).toContain('export async function setStatus');
-    expect(statusWrites.some((write) => write.includes('status: to'))).toBe(true);
+    expect(statusWrites.some((write) => write.includes('status: rule.to'))).toBe(true);
     expect(statusWrites.some((write) => write.includes("status: 'PLACED'"))).toBe(true);
   });
 
-  it('only orders/service.ts calls setStatus', () => {
-    const callers = sourceFiles(SRC)
-      .filter((file) =>
-        /\brepo\.setStatus\s*\(|[^.]\bsetStatus\s*\(/.test(readFileSync(file, 'utf8')),
-      )
-      .map((file) => relative(process.cwd(), file))
-      .filter((rel) => rel !== ORDERS_REPO);
+  it('setStatus cannot be called without a validated edge (structural, not a scan)', () => {
+    // OSCAR R8.2: the previous version of this file only checked that the
+    // *caller lived in service.ts*, so a second function there reusing the write
+    // helper passed every test while skipping the edge check and the history
+    // row. `setStatus` now takes a `ValidatedTransition` — a type branded with a
+    // module-private symbol in state-machine.ts — and reads the target status
+    // and timestamp column off it. Naming a status is no longer expressible.
+    const repo = readFileSync(join(process.cwd(), ORDERS_REPO), 'utf8');
+    expect(repo).toMatch(/export async function setStatus\([^)]*rule: ValidatedTransition/s);
+    expect(repo).not.toMatch(/setStatus\([^)]*to: OrderStatus/s);
 
-    expect(callers).toEqual([join('src', 'modules', 'orders', 'service.ts')]);
+    const machine = readFileSync(
+      join(process.cwd(), 'src', 'modules', 'orders', 'state-machine.ts'),
+      'utf8',
+    );
+    // The brand is declared but never exported, so no other module can mint one.
+    expect(machine).toContain('declare const validatedEdge: unique symbol');
+    expect(machine).not.toMatch(/export\s+(const|let|function)\s+validatedEdge/);
+    // …and it is minted in exactly one place: after the edge has been checked.
+    expect(machine.match(/as ValidatedTransition/g)).toHaveLength(1);
+  });
+
+  it('exactly one function calls setStatus, and it writes the history row too', () => {
+    // The invariant is not "only this file writes a status" — that is what let
+    // R8.2 through — it is "only the validated transition does, and it records
+    // what it did". Both halves are checked on the same function body.
+    const source = readFileSync(join(process.cwd(), ORDERS_SERVICE), 'utf8');
+    const owners = functionsCalling(source, 'repo.setStatus');
+
+    expect(owners).toEqual(['transition']);
+    const body = bodyOf(source, 'transition');
+    expect(body).toContain('repo.insertStatusHistory');
   });
 
   it('no raw SQL anywhere updates the Order table', () => {

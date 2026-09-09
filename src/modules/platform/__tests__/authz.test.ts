@@ -306,30 +306,49 @@ describe('order actions (Phase 4) — additive, and no existing grant moved', ()
   const orderInA: Resource = { type: 'Order', storeId: STORE_A };
   const orderInB: Resource = { type: 'Order', storeId: STORE_B };
 
-  it('lets a super-admin do all three, unscoped', () => {
-    for (const action of ['order:read', 'order:cancel', 'order:confirm-variance'] as const) {
+  it('lets a super-admin do all four, unscoped', () => {
+    for (const action of [
+      'order:read',
+      'order:transition',
+      'order:cancel',
+      'order:confirm-variance',
+    ] as const) {
       expect(allows(superAdmin, action, orderInA)).toBe(true);
       expect(allows(superAdmin, action, orderInB)).toBe(true);
     }
   });
 
-  it('lets a manager do all three, but only in their own store', () => {
-    for (const action of ['order:read', 'order:cancel', 'order:confirm-variance'] as const) {
+  it('lets a manager do all four, but only in their own store', () => {
+    for (const action of [
+      'order:read',
+      'order:transition',
+      'order:cancel',
+      'order:confirm-variance',
+    ] as const) {
       expect(allows(managerA, action, orderInA)).toBe(true);
       expect(allows(managerA, action, orderInB)).toBe(false);
     }
   });
 
-  it('lets staff read the queue but never cancel or confirm a revised amount', () => {
+  it('lets staff read the queue and drive the lifecycle, but never cancel or confirm', () => {
     // D6: the correction and the variance confirmation are a manager's call.
+    // Picking, packing and dispatch are exactly the work STORE_STAFF exists for,
+    // so `order:transition` is theirs — store-scoped.
     expect(allows(staffA, 'order:read', orderInA)).toBe(true);
+    expect(allows(staffA, 'order:transition', orderInA)).toBe(true);
+    expect(allows(staffA, 'order:transition', orderInB)).toBe(false);
     expect(allows(staffA, 'order:cancel', orderInA)).toBe(false);
     expect(allows(staffA, 'order:confirm-variance', orderInA)).toBe(false);
   });
 
   it('gives a shopper none of them — there is no customer cancellation (R4)', () => {
     for (const principal of [visitor, shopperA, accountA]) {
-      for (const action of ['order:read', 'order:cancel', 'order:confirm-variance'] as const) {
+      for (const action of [
+        'order:read',
+        'order:transition',
+        'order:cancel',
+        'order:confirm-variance',
+      ] as const) {
         expect(allows(principal, action, orderInA)).toBe(false);
       }
     }
@@ -339,7 +358,12 @@ describe('order actions (Phase 4) — additive, and no existing grant moved', ()
     // Placing an order is a customer use-case running as a customer; the stock
     // decrement inside it goes through `applyMovement`, which takes a `Tx` and
     // authorizes nothing. Nothing internal needs to cancel an order.
-    for (const action of ['order:read', 'order:cancel', 'order:confirm-variance'] as const) {
+    for (const action of [
+      'order:read',
+      'order:transition',
+      'order:cancel',
+      'order:confirm-variance',
+    ] as const) {
       expect(allows(system, action, orderInA)).toBe(false);
     }
   });
@@ -390,7 +414,7 @@ describe('order actions (Phase 4) — additive, and no existing grant moved', ()
     expect(ALL_ACTIONS.filter((action) => !action.startsWith('order:')).sort()).toEqual(
       [...before].sort(),
     );
-    expect(ALL_ACTIONS.filter((action) => action.startsWith('order:'))).toHaveLength(3);
+    expect(ALL_ACTIONS.filter((action) => action.startsWith('order:'))).toHaveLength(4);
 
     // A staff member still cannot write inventory; a shopper still cannot write
     // anything at all. Spot-checks of the decisions most likely to be loosened

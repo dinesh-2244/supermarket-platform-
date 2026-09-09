@@ -77,6 +77,7 @@ export type Action =
   | 'stock-ledger:read'
   // orders (per store) — added in Phase 4; no existing grant is touched
   | 'order:read'
+  | 'order:transition'
   | 'order:cancel'
   | 'order:confirm-variance'
   // audit
@@ -145,6 +146,7 @@ const SUPER_ADMIN_GRANTS: Readonly<Record<Action, Grant>> = {
   'inventory:import': 'global',
   'stock-ledger:read': 'global',
   'order:read': 'global',
+  'order:transition': 'global',
   'order:cancel': 'global',
   'order:confirm-variance': 'global',
   'audit-log:read': 'global',
@@ -189,6 +191,7 @@ const STORE_MANAGER_GRANTS: Partial<Readonly<Record<Action, Grant>>> = {
   // The audited correction and the variance confirmation are a manager's call,
   // not a staff member's: both change what a customer is asked to pay.
   'order:read': 'store',
+  'order:transition': 'store',
   'order:cancel': 'store',
   'order:confirm-variance': 'store',
   'audit-log:read': 'store',
@@ -211,11 +214,13 @@ const STORE_STAFF_GRANTS: Partial<Readonly<Record<Action, Grant>>> = {
   'price-change:read': 'store',
   'inventory:read': 'store',
   'stock-ledger:read': 'store',
-  // Staff see their store's queue. They cannot cancel an order or confirm a
-  // revised amount — those stay with the manager (`order:cancel`,
-  // `order:confirm-variance`), which is the D6 rule expressed here rather than
-  // in the screen.
+  // Staff see their store's queue and drive the fulfilment lifecycle — picking,
+  // packing and dispatch are the work this role exists for (Phase 5). They
+  // cannot cancel an order or confirm a revised amount: those stay with the
+  // manager (`order:cancel`, `order:confirm-variance`), which is the D6 rule
+  // expressed here rather than in the screen.
   'order:read': 'store',
+  'order:transition': 'store',
 };
 
 /**
