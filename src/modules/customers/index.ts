@@ -20,6 +20,7 @@ export {
   signUp,
   updateAddress,
   updateProfile,
+  upsertCheckoutCustomer,
   verifyCustomerCredentials,
   type ActiveCustomerSession,
   type AddressInput,

@@ -236,6 +236,23 @@ export async function purgeExpiredCustomerSessions(now: Date = new Date()): Prom
 // ---------------------------------------------------------------------------
 
 /** A shopper's own profile. `customerId` comes from the session, never a form. */
+/**
+ * Find-or-create the lightweight `Customer` a placed order hangs on.
+ *
+ * Called by `checkout.placeOrder` inside the placing transaction, so a customer
+ * row is never created for an order that rolls back. No password, no email, no
+ * session — signing up stays a separate, optional decision (ADR-0010).
+ */
+export async function upsertCheckoutCustomer(
+  tx: Tx,
+  input: { phone: string; name: string },
+): Promise<CustomerProfile> {
+  return repo.upsertByPhone(tx, {
+    phone: normalizePhone(input.phone),
+    name: assertCustomerName(input.name),
+  });
+}
+
 export async function getProfile(principal: Principal): Promise<CustomerProfile> {
   const customerId = requireCustomer(principal);
   const customer = await repo.findCustomer(customerId);

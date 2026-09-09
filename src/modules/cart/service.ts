@@ -461,6 +461,41 @@ export async function rebuildForStore(
  * device days ago produces a basket they did not assemble. The abandoned cart is
  * not deleted, so nothing is lost that a support conversation could recover.
  */
+/**
+ * What checkout needs from a basket, inside checkout's own transaction.
+ *
+ * `viewCart` cannot serve this: it opens a transaction of its own, and the whole
+ * point of `placeOrder` is that the revalidation, the stock decrement and the
+ * order write commit together or not at all. This is the same `revalidateInTx`
+ * the rest of the module uses, exposed narrowly rather than copied — a second
+ * implementation of "what does the store say right now" is exactly the drift
+ * this module exists to prevent.
+ *
+ * Locking the cart row is also the **double-submit guard**: `lockActiveCart`
+ * refuses a cart that is already `CONVERTED`, so the second of two rapid
+ * submissions waits for the first, then finds a converted cart and is rejected.
+ */
+export async function revalidateForCheckout(
+  tx: Tx,
+  principal: Principal,
+  cartToken: string,
+): Promise<CartView> {
+  return revalidateInTx(tx, principal, cartToken);
+}
+
+/** The cart row id behind a token, once locked. Checkout needs it to convert. */
+export async function lockCartForCheckout(tx: Tx, cartToken: string): Promise<repo.CartRecord> {
+  return lockActiveCart(tx, cartToken);
+}
+
+/**
+ * Mark a basket converted. Called by `checkout.placeOrder` inside the placing
+ * transaction, so a basket is never converted without its order.
+ */
+export async function markConverted(tx: Tx, cartId: string): Promise<void> {
+  await repo.setCartStatus(tx, cartId, 'CONVERTED');
+}
+
 export async function adoptCart(cartToken: string, customerId: string): Promise<void> {
   await withTransaction(async (tx) => {
     // Customer first, then cart — one order everywhere, so two adoptions can

@@ -72,6 +72,31 @@ export async function findByPhone(phone: string, db?: DbExecutor): Promise<Custo
   return executor(db).customer.findUnique({ where: { phone }, select: profileSelect });
 }
 
+/**
+ * Find-or-create a **lightweight** customer by phone, inside a transaction.
+ *
+ * Checkout needs a `Customer` row to hang the order on, and a shopper who has
+ * never signed up has none. This creates the minimum — phone and name, no
+ * `passwordHash`, no email — which is exactly what the schema allows (both are
+ * nullable) and what "an account is optional, never a prerequisite" means.
+ *
+ * The name is refreshed on an existing row so a returning shopper who spells
+ * their name differently sees the new one; nothing else about an existing
+ * customer is touched, and in particular an account holder's credentials are
+ * never disturbed by a guest checkout on the same phone number.
+ */
+export async function upsertByPhone(
+  tx: Tx,
+  row: { phone: string; name: string },
+): Promise<CustomerProfile> {
+  return executor(tx).customer.upsert({
+    where: { phone: row.phone },
+    create: { phone: row.phone, name: row.name },
+    update: { name: row.name },
+    select: profileSelect,
+  });
+}
+
 export async function insertCustomer(
   tx: Tx,
   row: { name: string; email: string; phone: string; passwordHash: string },
