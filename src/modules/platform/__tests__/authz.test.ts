@@ -301,3 +301,103 @@ describe('platform/authz — assertAuthorized', () => {
     }).not.toThrow();
   });
 });
+
+describe('order actions (Phase 4) — additive, and no existing grant moved', () => {
+  const orderInA: Resource = { type: 'Order', storeId: STORE_A };
+  const orderInB: Resource = { type: 'Order', storeId: STORE_B };
+
+  it('lets a super-admin do all three, unscoped', () => {
+    for (const action of ['order:read', 'order:cancel', 'order:confirm-variance'] as const) {
+      expect(allows(superAdmin, action, orderInA)).toBe(true);
+      expect(allows(superAdmin, action, orderInB)).toBe(true);
+    }
+  });
+
+  it('lets a manager do all three, but only in their own store', () => {
+    for (const action of ['order:read', 'order:cancel', 'order:confirm-variance'] as const) {
+      expect(allows(managerA, action, orderInA)).toBe(true);
+      expect(allows(managerA, action, orderInB)).toBe(false);
+    }
+  });
+
+  it('lets staff read the queue but never cancel or confirm a revised amount', () => {
+    // D6: the correction and the variance confirmation are a manager's call.
+    expect(allows(staffA, 'order:read', orderInA)).toBe(true);
+    expect(allows(staffA, 'order:cancel', orderInA)).toBe(false);
+    expect(allows(staffA, 'order:confirm-variance', orderInA)).toBe(false);
+  });
+
+  it('gives a shopper none of them — there is no customer cancellation (R4)', () => {
+    for (const principal of [visitor, shopperA, accountA]) {
+      for (const action of ['order:read', 'order:cancel', 'order:confirm-variance'] as const) {
+        expect(allows(principal, action, orderInA)).toBe(false);
+      }
+    }
+  });
+
+  it('gives the system principal none of them', () => {
+    // Placing an order is a customer use-case running as a customer; the stock
+    // decrement inside it goes through `applyMovement`, which takes a `Tx` and
+    // authorizes nothing. Nothing internal needs to cancel an order.
+    for (const action of ['order:read', 'order:cancel', 'order:confirm-variance'] as const) {
+      expect(allows(system, action, orderInA)).toBe(false);
+    }
+  });
+
+  it('refuses a store-scoped order action with no store on the resource', () => {
+    expect(allows(managerA, 'order:cancel', { type: 'Order' })).toBe(false);
+  });
+
+  it('leaves the Phase 1-3 grant table exactly as it was', () => {
+    // The boundary in the Phase 4 plan is "no changes to the RBAC rule table".
+    // New actions for a new domain are additive; what must not move is any
+    // decision that already existed. This pins the pre-Phase-4 action set and
+    // asserts every one of those still resolves the same way for every role.
+    const before: readonly Action[] = [
+      'user:read',
+      'user:create',
+      'user:update',
+      'user:disable',
+      'user:reset-password',
+      'store:read',
+      'store:create',
+      'store:update',
+      'store-settings:read',
+      'store-settings:update',
+      'store-settings:update-pos-mode',
+      'delivery-zone:read',
+      'delivery-zone:write',
+      'delivery-area:read',
+      'delivery-area:write',
+      'serviceability:resolve',
+      'category:read',
+      'category:write',
+      'product:read',
+      'product:write',
+      'product-image:write',
+      'store-product:read',
+      'store-product:list',
+      'store-product:set-price',
+      'price-change:read',
+      'inventory:read',
+      'inventory:adjust',
+      'inventory:reconcile',
+      'inventory:import',
+      'stock-ledger:read',
+      'audit-log:read',
+    ];
+
+    expect(ALL_ACTIONS.filter((action) => !action.startsWith('order:')).sort()).toEqual(
+      [...before].sort(),
+    );
+    expect(ALL_ACTIONS.filter((action) => action.startsWith('order:'))).toHaveLength(3);
+
+    // A staff member still cannot write inventory; a shopper still cannot write
+    // anything at all. Spot-checks of the decisions most likely to be loosened
+    // by accident when a table grows.
+    expect(allows(staffA, 'inventory:adjust')).toBe(false);
+    expect(allows(shopperA, 'inventory:adjust')).toBe(false);
+    expect(allows(managerA, 'product:write')).toBe(false);
+    expect(allows(managerA, 'store-settings:update-pos-mode')).toBe(false);
+  });
+});
