@@ -80,6 +80,16 @@ export async function availableSlots(
   }));
 }
 
+/**
+ * Placement does real work — revalidate, lock and decrement every line, write the
+ * order — and then queues behind other placements into the same delivery window.
+ * Prisma's 5 s default is comfortable for one shopper and not for the twelfth,
+ * and a transaction timeout reaches them as an opaque error where "that window
+ * is full" is the true answer. This is a ceiling for a pathological case, not a
+ * budget: an uncontended placement finishes in tens of milliseconds.
+ */
+const PLACEMENT_TRANSACTION = { timeoutMs: 20_000, maxWaitMs: 20_000 } as const;
+
 export interface PlaceOrderInput {
   readonly cartToken: string;
   readonly contact: { readonly name: string; readonly phone: string };
@@ -201,24 +211,6 @@ export async function placeOrder(
     const shortfalls = shortfallsIn(view);
     if (shortfalls.length > 0) throw new ShortfallError(shortfalls);
 
-    // Capacity is a rule about a *set* of orders, and the one about to join it
-    // does not exist yet — so no row lock can serialise it. Without this, N
-    // simultaneous placements would each count the same N-1 and each commit.
-    // The lock is per (store, window): two different windows never contend.
-    await advisoryXactLock(
-      tx,
-      LOCK_NAMESPACE.deliverySlot,
-      `${storeId}:${input.slotStart.toISOString()}`,
-    );
-    const taken = await liveOrdersInSlot(tx, storeId, input.slotStart);
-    if (taken >= grid.slotCapacity) {
-      throw new ConflictError('That delivery window is full — please choose another', {
-        reason: 'slot-full',
-        slotStart: input.slotStart.toISOString(),
-        capacity: grid.slotCapacity,
-      });
-    }
-
     const subtotalPaise = view.totals.subtotalPaise;
     if (subtotalPaise < minOrderPaise) {
       throw new ConflictError('Your basket is below this shop’s minimum order', {
@@ -253,6 +245,34 @@ export async function placeOrder(
         packSizeSnapshot: line.packSize,
         unitPricePaise: line.unitPricePaise,
         qtyOrdered: line.qty,
+      });
+    }
+
+    // Capacity is a rule about a *set* of orders, and the one about to join it
+    // does not exist yet — so no row lock can serialise it. Without this, N
+    // simultaneous placements would each count the same N-1 and each commit.
+    // The lock is per (store, window): two different windows never contend.
+    //
+    // Taken here rather than earlier on purpose. An advisory *xact* lock is held
+    // until commit, so everything after this point is serialised against every
+    // other placement into the same window — and the queue that forms is real
+    // time each waiter spends holding an open transaction. Revalidation and the
+    // per-line stock decrements do not need this lock (they have their own row
+    // locks), so they now happen outside it and the serialised section is just
+    // count → write → commit. Under the plan's N ≫ C test that is the difference
+    // between the last waiter seeing "that window is full" and seeing Prisma's
+    // transaction-timeout error.
+    await advisoryXactLock(
+      tx,
+      LOCK_NAMESPACE.deliverySlot,
+      `${storeId}:${input.slotStart.toISOString()}`,
+    );
+    const taken = await liveOrdersInSlot(tx, storeId, input.slotStart);
+    if (taken >= grid.slotCapacity) {
+      throw new ConflictError('That delivery window is full — please choose another', {
+        reason: 'slot-full',
+        slotStart: input.slotStart.toISOString(),
+        capacity: grid.slotCapacity,
       });
     }
 
@@ -297,7 +317,7 @@ export async function placeOrder(
       estimatedTotalPaise: order.estimatedTotalPaise,
       paymentMethod,
     } satisfies PlacedOrder;
-  });
+  }, PLACEMENT_TRANSACTION);
 
   // After the commit, exactly once. Emitting inside the transaction would
   // announce an order that can still roll back.
