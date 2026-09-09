@@ -12,6 +12,13 @@ import { listCategories, listProducts, type ProductRecord } from '../catalog/ind
 import { listStores, type StoreRecord } from '../stores/index';
 import { discountBp, listListings, type StoreProductRecord } from '../pricing/index';
 import { listLowStock, listStock, type InventoryRecord } from '../inventory/index';
+import {
+  queueForStore,
+  staffOrder,
+  type OrderStatus,
+  type QueueRow,
+  type StaffOrderRow,
+} from '../orders/index';
 import { descriptor, type ModuleDescriptor } from './domain/index';
 import * as repo from './repo';
 
@@ -70,6 +77,52 @@ export async function stockRows(
     product: byId.get(item.productId),
     sellingPricePaise: priceByProduct.get(item.productId),
   }));
+}
+
+/**
+ * The statuses the queue shows by default: everything a store still has to act
+ * on. Delivered, closed and cancelled orders are history and would bury the
+ * work — they are still reachable by asking for them.
+ */
+export const ACTIONABLE_ORDER_STATUSES: readonly OrderStatus[] = [
+  'PLACED',
+  'ACCEPTED',
+  'PICKING',
+  'PICKED',
+  'BILLED_IN_POS',
+  'PACKED',
+  'OUT_FOR_DELIVERY',
+  'DELIVERY_FAILED',
+];
+
+export interface OrderQueue {
+  readonly storeId: string;
+  readonly rows: readonly QueueRow[];
+  readonly showingAll: boolean;
+}
+
+/**
+ * The back-office order queue — a thin read model over `orders`, which is all
+ * `admin` is allowed to be (§4: no domain rules here).
+ */
+export async function orderQueue(
+  principal: Principal,
+  storeId: string,
+  options: { all?: boolean } = {},
+): Promise<OrderQueue> {
+  const showingAll = options.all === true;
+  const rows = await queueForStore(principal, storeId, {
+    ...(showingAll ? {} : { statuses: ACTIONABLE_ORDER_STATUSES }),
+  });
+  return { storeId, rows, showingAll };
+}
+
+/** One order for the detail screen, or `null` if it is not this staff's to see. */
+export async function orderDetail(
+  principal: Principal,
+  orderId: string,
+): Promise<StaffOrderRow | null> {
+  return staffOrder(principal, orderId);
 }
 
 export interface Overview {

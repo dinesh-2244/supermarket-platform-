@@ -216,6 +216,156 @@ export async function countInSlot(tx: Tx, storeId: string, start: Date): Promise
   });
 }
 
+/** A row in the back-office queue. Snapshots only — no joins a shopper owns. */
+export interface QueueRow {
+  readonly id: string;
+  readonly orderNumber: string;
+  readonly storeId: string;
+  readonly status: OrderStatus;
+  readonly placedAt: Date;
+  readonly deliverySlotStart: Date;
+  readonly deliverySlotEnd: Date;
+  readonly estimatedTotalPaise: number;
+  readonly priceVarianceFlagged: boolean;
+  readonly contactNameSnapshot: string;
+}
+
+const queueSelect = {
+  id: true,
+  orderNumber: true,
+  storeId: true,
+  status: true,
+  placedAt: true,
+  deliverySlotStart: true,
+  deliverySlotEnd: true,
+  estimatedTotalPaise: true,
+  priceVarianceFlagged: true,
+  contactNameSnapshot: true,
+} as const;
+
+/**
+ * Orders this principal may see.
+ *
+ * The store scope is applied **here**, not by the caller: a queue that forgets
+ * it is store-bound is an IDOR, and the one place it cannot be forgotten is the
+ * query itself.
+ */
+export async function listForPrincipal(
+  db: DbExecutor,
+  principal: Principal,
+  filter: { storeId?: string; statuses?: readonly OrderStatus[]; limit?: number },
+): Promise<QueueRow[]> {
+  return executor(db).order.findMany({
+    where: {
+      ...storeScopeFilter(principal),
+      ...(filter.storeId === undefined ? {} : { storeId: filter.storeId }),
+      ...(filter.statuses === undefined || filter.statuses.length === 0
+        ? {}
+        : { status: { in: [...filter.statuses] } }),
+    },
+    select: queueSelect,
+    orderBy: [{ deliverySlotStart: 'asc' }, { placedAt: 'asc' }],
+    take: filter.limit ?? 200,
+  });
+}
+
+export interface StaffOrderRow extends QueueRow {
+  readonly paymentMethod: 'COD' | 'UPI_ON_DELIVERY';
+  readonly subtotalPaise: number;
+  readonly deliveryFeePaise: number;
+  readonly contactPhoneSnapshot: string;
+  readonly deliveryAddressSnapshotJson: unknown;
+  readonly posBillNumber: string | null;
+  readonly posFinalTotalPaise: number | null;
+  readonly customerConfirmedRevisedAmount: boolean;
+  readonly revisedAmountConfirmedBy: string | null;
+  readonly correctionReason: string | null;
+  readonly store: { readonly name: string; readonly timezone: string };
+  readonly lines: readonly {
+    readonly id: string;
+    readonly productId: string;
+    readonly nameSnapshot: string;
+    readonly packSizeSnapshot: string;
+    readonly unitPricePaise: number;
+    readonly qtyOrdered: number;
+    readonly qtyPicked: number | null;
+    readonly lineStatus: string;
+    readonly stockRestoredQty: number;
+  }[];
+  readonly statusHistory: readonly {
+    readonly fromStatus: OrderStatus | null;
+    readonly toStatus: OrderStatus;
+    readonly actorType: string;
+    readonly actorId: string | null;
+    readonly note: string | null;
+    readonly createdAt: Date;
+  }[];
+}
+
+/** One order in full, still store-scoped: a wrong-store id reads as not found. */
+export async function findForPrincipal(
+  db: DbExecutor,
+  principal: Principal,
+  orderId: string,
+): Promise<StaffOrderRow | null> {
+  const rows = await executor(db).order.findMany({
+    where: { id: orderId, ...storeScopeFilter(principal) },
+    select: {
+      ...queueSelect,
+      paymentMethod: true,
+      subtotalPaise: true,
+      deliveryFeePaise: true,
+      contactPhoneSnapshot: true,
+      deliveryAddressSnapshotJson: true,
+      posBillNumber: true,
+      posFinalTotalPaise: true,
+      customerConfirmedRevisedAmount: true,
+      revisedAmountConfirmedBy: true,
+      correctionReason: true,
+      store: { select: { name: true, timezone: true } },
+      lines: {
+        select: {
+          id: true,
+          productId: true,
+          nameSnapshot: true,
+          packSizeSnapshot: true,
+          unitPricePaise: true,
+          qtyOrdered: true,
+          qtyPicked: true,
+          lineStatus: true,
+          stockRestoredQty: true,
+        },
+        orderBy: { nameSnapshot: 'asc' },
+      },
+      statusHistory: {
+        select: {
+          fromStatus: true,
+          toStatus: true,
+          actorType: true,
+          actorId: true,
+          note: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      },
+    },
+    take: 1,
+  });
+  return rows[0] ?? null;
+}
+
+/** Record that a customer has agreed to the revised amount (D6). */
+export async function setRevisedAmountConfirmed(
+  tx: Tx,
+  orderId: string,
+  byUserId: string,
+): Promise<void> {
+  await auditedExecutor(tx).order.update({
+    where: { id: orderId },
+    data: { customerConfirmedRevisedAmount: true, revisedAmountConfirmedBy: byUserId },
+  });
+}
+
 /** Is this human-facing order number already committed? */
 export async function orderNumberTaken(tx: Tx, candidate: string): Promise<boolean> {
   const found = await auditedExecutor(tx).order.findUnique({

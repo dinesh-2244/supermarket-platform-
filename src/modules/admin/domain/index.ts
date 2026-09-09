@@ -68,6 +68,10 @@ export function navigationFor(
 ): readonly NavItem[] {
   const everyone: NavItem[] = [
     { href: '/admin', label: 'Overview' },
+    // Staff see their store's queue; only a manager can correct an order or
+    // confirm a revised amount, and that is enforced by the grant table rather
+    // than by hiding the link.
+    { href: '/admin/orders', label: 'Orders' },
     { href: '/admin/inventory', label: 'Inventory' },
     { href: '/admin/listings', label: 'Listings & prices' },
     { href: '/admin/products', label: 'Products' },

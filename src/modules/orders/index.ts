@@ -7,12 +7,15 @@
 export {
   applyTransition,
   cancelByStore,
+  confirmRevisedAmount,
   correctOrder,
   createOrder,
   liveOrdersInSlot,
   moduleDescriptor,
   orderForTracking,
+  queueForStore,
   slotUsage,
+  staffOrder,
   // `transition` is deliberately NOT exported: it is the in-transaction
   // primitive and authorizes nothing, so the only way to reach it from
   // outside this module is through `applyTransition`, which does (R1).
@@ -24,7 +27,7 @@ export {
   type TransitionOutcome,
 } from './service';
 
-export type { NewOrderLine } from './repo';
+export type { NewOrderLine, QueueRow, StaffOrderRow } from './repo';
 
 export {
   assertTransition,

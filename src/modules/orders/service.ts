@@ -10,6 +10,7 @@
  */
 import {
   assertAuthorized,
+  AuthzError,
   ConflictError,
   getPrisma,
   emit,
@@ -379,6 +380,82 @@ export async function createOrder(tx: Tx, input: NewOrderInput): Promise<Created
   });
 
   return { ...created, estimatedTotalPaise };
+}
+
+/**
+ * The store's queue, for the back office.
+ *
+ * `order:read` is checked against the store being asked for, and the repository
+ * applies the `allowedStoreIds` scope on top — belt and braces, because these
+ * two protect different mistakes. The authorization stops a staff member asking
+ * for another store; the scope filter stops an unscoped query returning it
+ * anyway if someone later forgets the first check.
+ */
+export async function queueForStore(
+  principal: Principal,
+  storeId: string,
+  filter: { statuses?: readonly OrderStatus[]; limit?: number } = {},
+): Promise<repo.QueueRow[]> {
+  assertAuthorized(principal, 'order:read', { type: 'Order', storeId });
+  return repo.listForPrincipal(getPrisma(), principal, { storeId, ...filter });
+}
+
+/**
+ * One order in full for staff. A wrong-store id reads as **not found** rather
+ * than forbidden: telling somebody an order exists but is not theirs is itself
+ * a disclosure, and there is nothing they can do with the distinction.
+ */
+export async function staffOrder(
+  principal: Principal,
+  orderId: string,
+): Promise<repo.StaffOrderRow | null> {
+  const order = await repo.findForPrincipal(getPrisma(), principal, orderId);
+  if (order === null) return null;
+  assertAuthorized(principal, 'order:read', { type: 'Order', id: orderId, storeId: order.storeId });
+  return order;
+}
+
+/**
+ * Record that the customer has agreed to a revised amount (D6, R6).
+ *
+ * This is the *input* to the `PACKED → OUT_FOR_DELIVERY` guard, not the guard
+ * itself — the state machine owns that. Manager-or-above, because it changes
+ * what a customer is asked to pay.
+ *
+ * Setting `posBillNumber` / `posFinalTotalPaise` — the entry that raises the
+ * flag in the first place — is Phase 5.
+ */
+export async function confirmRevisedAmount(principal: Principal, orderId: string): Promise<void> {
+  if (principal.kind !== 'user') {
+    throw new AuthzError('Only staff can confirm a revised amount', {});
+  }
+  const actorId = principal.userId;
+
+  await withTransaction(async (tx) => {
+    const order = await repo.lockOrder(tx, orderId);
+    if (order === null) throw new NotFoundError('No such order', { orderId });
+
+    assertAuthorized(principal, 'order:confirm-variance', {
+      type: 'Order',
+      id: orderId,
+      storeId: order.storeId,
+    });
+
+    if (!order.priceVarianceFlagged) {
+      throw new ConflictError('That order has no price variance to confirm', { orderId });
+    }
+
+    await repo.setRevisedAmountConfirmed(tx, orderId, actorId);
+    await writeAuditLog(tx, {
+      principal,
+      action: 'update',
+      entityType: 'Order',
+      entityId: orderId,
+      storeId: order.storeId,
+      before: { customerConfirmedRevisedAmount: false },
+      after: { customerConfirmedRevisedAmount: true, revisedAmountConfirmedBy: actorId },
+    });
+  });
 }
 
 export interface CancelResult {

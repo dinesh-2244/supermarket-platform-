@@ -33,6 +33,7 @@ import {
 } from '@/modules/catalog';
 import { setListed, setPrice } from '@/modules/pricing';
 import { adjustStock, reconcileStock, runStockImport } from '@/modules/inventory';
+import { confirmRevisedAmount, correctOrder } from '@/modules/orders';
 
 /**
  * Server actions for the back office.
@@ -521,5 +522,56 @@ export async function importStockAction(_state: ActionState, form: FormData): Pr
       );
     }
     return `Imported ${String(result.applied)} row(s).`;
+  });
+}
+
+/**
+ * The audited store correction (D6, R4).
+ *
+ * The only way an order ends early, and the reason is mandatory — the service
+ * refuses a blank one rather than this form doing it, so a POST straight at the
+ * action is held to the same rule as a click. `order:cancel` is manager-only, so
+ * a staff member reaching this gets a denial from the grant table.
+ */
+export async function cancelOrderAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const orderId = text(form, 'orderId');
+    const result = await correctOrder(
+      principal,
+      orderId,
+      text(form, 'reason'),
+      optionalText(form, 'discrepancyNote') ?? null,
+    );
+
+    revalidatePath('/admin/orders');
+    revalidatePath(`/admin/orders/${orderId}`);
+
+    if (result.restored.length === 0) {
+      return `Order ${result.orderNumber} cancelled. No stock needed restoring.`;
+    }
+    const units = result.restored.reduce((sum, line) => sum + line.qty, 0);
+    return `Order ${result.orderNumber} cancelled. Restored ${String(units)} unit(s) across ${String(result.restored.length)} line(s).`;
+  });
+}
+
+/**
+ * Record that the customer has agreed to a revised amount (D6, R6).
+ *
+ * This is the input to the `PACKED → OUT_FOR_DELIVERY` guard, not the guard —
+ * the state machine owns that, and it stays shut until this is set.
+ */
+export async function confirmRevisedAmountAction(
+  _state: ActionState,
+  form: FormData,
+): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const orderId = text(form, 'orderId');
+    await confirmRevisedAmount(principal, orderId);
+
+    revalidatePath('/admin/orders');
+    revalidatePath(`/admin/orders/${orderId}`);
+    return 'Recorded — the order can now leave PACKED.';
   });
 }
