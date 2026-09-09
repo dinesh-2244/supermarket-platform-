@@ -255,7 +255,7 @@ describe('the capacity gate in placeOrder', () => {
     expect(placed).toHaveLength(CAPACITY);
     expect(refused).toHaveLength(SHOPPERS - CAPACITY);
     for (const rejection of refused) {
-      expect((rejection).reason).toMatchObject({
+      expect(rejection.reason).toMatchObject({
         details: { reason: 'slot-full' },
       });
     }
