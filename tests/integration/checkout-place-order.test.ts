@@ -440,6 +440,96 @@ describe('concurrency', () => {
     expect(ledger[0]).toMatchObject({ delta: -1, balanceAfter: 0 });
   });
 
+  it('gives the last unit to one shopper even when they book different windows', async () => {
+    // The decisive test for the **inventory row lock** (OSCAR R9).
+    //
+    // `placeOrder` takes the delivery-window mutex before it touches inventory,
+    // so two shoppers competing for the last unit *in the same window* are
+    // serialised by that mutex whatever the row lock does. Give them different
+    // windows and the mutex takes different keys: the only thing left standing
+    // between them and a negative shelf is `SELECT … FOR UPDATE` on the
+    // `InventoryItem`, plus the refusal to go below zero.
+    const solo = await stockedProduct(storeId, { stock: 1, pricePaise: 5_000 });
+    const first = await basketWith(storeId, solo, 1);
+    const second = await basketWith(storeId, solo, 1);
+
+    const results = await Promise.allSettled([
+      placeOrder(guest, order(first, { contact: { name: 'W1', phone: '9876500051' } })),
+      placeOrder(
+        guest,
+        order(second, {
+          slotStart: OTHER_SLOT,
+          contact: { name: 'W2', phone: '9876500052' },
+        }),
+      ),
+    ]);
+
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+
+    // Exact counts, not "greater than zero": one order, one ledger row, an empty
+    // shelf that never went negative.
+    expect(await stockOf(solo)).toBe(0);
+    expect(
+      await prisma.order.count({
+        where: { storeId, contactPhoneSnapshot: { in: ['9876500051', '9876500052'] } },
+      }),
+    ).toBe(1);
+    expect(await prisma.orderLine.count({ where: { productId: solo } })).toBe(1);
+
+    const ledger = await prisma.stockLedger.findMany({
+      where: { storeId, productId: solo, reason: 'ORDER_PLACED' },
+    });
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]).toMatchObject({ delta: -1, balanceAfter: 0 });
+  });
+
+  it('gives the last unit to exactly one of four shoppers, each in a different window', async () => {
+    // The two-shopper version of this race is not a reliable probe of the
+    // inventory row lock: `placeOrder` does several awaits before it touches
+    // stock, so two placements often do not overlap at that step at all, and the
+    // test passes with the lock removed. Four contenders, each in a **different**
+    // delivery window so the window mutex serialises none of them, make the
+    // overlap real — which is what turns this into a negative check that bites.
+    //
+    // Four and not more, deliberately: `SELECT … FOR UPDATE` *blocks*, and a
+    // blocked transaction holds its connection, so six racers against CI's
+    // five-connection pool starve it and every one of them fails. That is the
+    // same pile-up the delivery-window lock was changed to avoid, and it is
+    // worth knowing about — but a test that trips it is measuring the pool, not
+    // the row lock.
+    const solo = await stockedProduct(storeId, { stock: 1, pricePaise: 5_000 });
+    const windows = [0, 1, 2, 3].map((hour) => new Date(SLOT.getTime() + hour * 60 * 60 * 1000));
+
+    const tokens: string[] = [];
+    for (const _window of windows) tokens.push(await basketWith(storeId, solo, 1));
+
+    const results = await Promise.allSettled(
+      tokens.map((token, index) =>
+        placeOrder(
+          guest,
+          order(token, {
+            slotStart: windows[index],
+            contact: { name: `Racer ${String(index)}`, phone: `98765006${String(index)}0` },
+          }),
+        ),
+      ),
+    );
+
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(windows.length - 1);
+
+    // Exact counts. A shelf that went negative, or two orders for one unit,
+    // fails here — and both are what the row lock is for.
+    expect(await stockOf(solo)).toBe(0);
+    expect(await prisma.orderLine.count({ where: { productId: solo } })).toBe(1);
+    const ledger = await prisma.stockLedger.findMany({
+      where: { storeId, productId: solo, reason: 'ORDER_PLACED' },
+    });
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]).toMatchObject({ delta: -1, balanceAfter: 0 });
+  });
+
   it('places exactly one order when the same basket is submitted twice at once', async () => {
     const before = await stockOf(rice);
     const token = await basketWith(storeId, rice, 2);
@@ -452,13 +542,21 @@ describe('concurrency', () => {
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
 
-    // The decisive assertion: one submission, one decrement.
+    // The decisive assertion: one submission, one decrement. Counted against
+    // this basket's own lines rather than a shared phone number — `> 0` said
+    // almost nothing, since every other test in this file uses that phone
+    // (OSCAR R9).
     expect(await stockOf(rice)).toBe(before - 2);
     const cart = await prisma.cart.findUniqueOrThrow({ where: { cartToken: token } });
     expect(cart.status).toBe('CONVERTED');
+
+    const placed = results.find((r) => r.status === 'fulfilled') as PromiseFulfilledResult<{
+      orderId: string;
+    }>;
     expect(
-      await prisma.order.count({ where: { storeId, contactPhoneSnapshot: '9876500001' } }),
-    ).toBeGreaterThan(0);
+      await prisma.orderLine.count({ where: { orderId: placed.value.orderId, productId: rice } }),
+    ).toBe(1);
+    expect(await prisma.stockLedger.count({ where: { refType: 'Cart', refId: cart.id } })).toBe(1);
   });
 
   it('places exactly one order when one basket is submitted into two different windows', async () => {
@@ -502,6 +600,8 @@ describe('concurrency', () => {
         where: { storeId, contactPhoneSnapshot: { in: ['9876500021', '9876500022'] } },
       }),
     ).toBe(1);
+    const cart = await prisma.cart.findUniqueOrThrow({ where: { cartToken: token } });
+    expect(await prisma.stockLedger.count({ where: { refType: 'Cart', refId: cart.id } })).toBe(1);
   });
 
   it('refuses a second, sequential submission of a converted basket', async () => {
