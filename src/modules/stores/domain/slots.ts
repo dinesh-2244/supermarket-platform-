@@ -87,6 +87,41 @@ export const SLOT_LEAD_MINUTES = 120;
 /** How far ahead a shopper may book. */
 export const SLOT_HORIZON_DAYS = 3;
 
+const MINUTES_PER_DAY = 24 * 60;
+
+/**
+ * A slot length must divide the day.
+ *
+ * Not a stylistic rule. A length that does not divide 1,440 cannot produce a
+ * coherent daily grid at all, and both ways of building one are wrong in a
+ * different direction (OSCAR R3):
+ *
+ * - walk a single cursor from the first day's midnight and the grid **drifts** —
+ *   50-minute windows shift 20 minutes every day, so a window offered on Monday
+ *   evening has vanished by Tuesday morning and a shopper's booked slot is no
+ *   longer one the picker believes in;
+ * - anchor each day to its own midnight and the last window of a day
+ *   **overlaps** the first of the next — 23:20-00:10 against 00:00-00:50 — so
+ *   the same ten minutes are counted for capacity under two different
+ *   `<storeId>:<slotStart>` keys.
+ *
+ * The settings validator accepted 50 because it only asked for a positive
+ * integer. Rejecting it here *and* there is what "consistently at the
+ * configuration boundary" means: a store cannot be saved into the broken state,
+ * and a store already in it fails loudly rather than quietly mis-serving.
+ */
+export function assertSlotLength(slotLengthMinutes: number): void {
+  if (!Number.isInteger(slotLengthMinutes) || slotLengthMinutes <= 0) {
+    throw new ValidationError('A store must have a positive slot length', { slotLengthMinutes });
+  }
+  if (slotLengthMinutes > MINUTES_PER_DAY || MINUTES_PER_DAY % slotLengthMinutes !== 0) {
+    throw new ValidationError(
+      'A delivery slot must divide the day evenly, so every day offers the same windows',
+      { slotLengthMinutes, allowedExamples: [15, 20, 30, 45, 60, 90, 120] },
+    );
+  }
+}
+
 export interface SlotGridInput {
   readonly from: Date;
   readonly slotLengthMinutes: number;
@@ -104,9 +139,7 @@ export interface SlotGridInput {
  */
 export function slotGrid(input: SlotGridInput): Date[] {
   const { from, slotLengthMinutes, timeZone } = input;
-  if (!Number.isInteger(slotLengthMinutes) || slotLengthMinutes <= 0) {
-    throw new ValidationError('A store must have a positive slot length', { slotLengthMinutes });
-  }
+  assertSlotLength(slotLengthMinutes);
   if (Number.isNaN(from.getTime())) {
     throw new ValidationError('Slots need a valid instant to start from', {});
   }
@@ -119,11 +152,34 @@ export function slotGrid(input: SlotGridInput): Date[] {
   const step = slotLengthMinutes * MINUTE_MS;
 
   const slots: Date[] = [];
-  // Start from the store's local midnight so the grid is the same for everyone,
-  // then walk forward. A day is never more than 24 h + one hour of DST slack.
-  for (let cursor = localDayStart(from, timeZone).getTime(); cursor <= latest; cursor += step) {
-    if (cursor >= earliest) slots.push(new Date(cursor));
+
+  // **Each day is generated from its own local midnight**, not by walking a
+  // single cursor across the whole horizon from today's.
+  //
+  // The difference only shows when the slot length does not divide a day. With
+  // 50-minute windows, a cursor started at Monday midnight lands on Tuesday at
+  // 00:10, 01:00, 01:50 … — a grid that shifts by 20 minutes every day. Ask on
+  // Monday evening and Tuesday's 10:10 window is offered; ask again after
+  // midnight, when Tuesday is now the anchor day, and 10:10 is gone while 10:00
+  // has appeared. A window a shopper was shown, or had already booked, could
+  // vanish from the picker, and two overlapping windows could count capacity
+  // under different keys (OSCAR R3).
+  //
+  // Anchoring per day makes a window's identity a function of its own date and
+  // the store's settings, and of nothing else — which is what the capacity key
+  // `<storeId>:<slotStart>` has to be able to assume.
+  const firstDay = localDayStart(from, timeZone).getTime();
+  for (let day = firstDay; day <= latest;) {
+    const nextDay = localDayStart(new Date(day + DAY_MS + 2 * 60 * MINUTE_MS), timeZone).getTime();
+
+    for (let cursor = day; cursor < nextDay && cursor <= latest; cursor += step) {
+      if (cursor >= earliest) slots.push(new Date(cursor));
+    }
+
+    // A DST-shortened day could otherwise fail to advance.
+    day = nextDay > day ? nextDay : day + DAY_MS;
   }
+
   return slots;
 }
 

@@ -2,6 +2,7 @@
  * Pure domain logic for `stores` — no I/O, no Prisma, no framework types.
  */
 import { ValidationError } from '../../platform/index';
+import { assertSlotLength } from './slots';
 
 /** Static description of what this module owns and may depend on (§4). */
 export interface ModuleDescriptor {
@@ -285,8 +286,13 @@ export function assertEditableSettings(input: EditableSettings): void {
     assertNonNegativeInt(input.priceVarianceAbsCapPaise, 'priceVarianceAbsCapPaise');
   if (input.lowStockThreshold !== undefined)
     assertNonNegativeInt(input.lowStockThreshold, 'lowStockThreshold');
-  if (input.slotLengthMinutes !== undefined)
+  // Positive is not enough: a length that does not divide the day makes every
+  // day's windows different from the last (OSCAR R3). `assertSlotLength` is the
+  // single rule, shared with the grid that has to honour it.
+  if (input.slotLengthMinutes !== undefined) {
     assertPositiveInt(input.slotLengthMinutes, 'slotLengthMinutes');
+    assertSlotLength(input.slotLengthMinutes);
+  }
   if (input.slotCapacity !== undefined) assertPositiveInt(input.slotCapacity, 'slotCapacity');
 
   if (input.priceVariancePercentBp !== undefined) {

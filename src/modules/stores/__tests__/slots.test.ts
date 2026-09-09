@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertSlotLength,
   isBookableSlot,
   localDayStart,
   slotEndOf,
@@ -141,6 +142,103 @@ describe('slotGrid', () => {
       timeZone: IST,
     });
     expect(slots.length).toBeGreaterThan(60);
+  });
+});
+
+describe('a window keeps its identity across midnight (R3)', () => {
+  // OSCAR's repro used 50 minutes, which the settings validator accepted and
+  // which does not divide 1,440. Two things are asserted here: that length is
+  // now refused outright, and a *supported* non-hourly length crosses midnight
+  // without losing a window.
+  const fortyFive = { slotLengthMinutes: 45, timeZone: IST, horizonDays: 3, leadMinutes: 120 };
+
+  it('refuses a length that does not divide the day', () => {
+    for (const bad of [50, 7, 13, 100, 1_441]) {
+      expect(() => assertSlotLength(bad)).toThrow(/divide the day/i);
+      expect(() => slotGrid({ ...fortyFive, slotLengthMinutes: bad, from: new Date() })).toThrow(
+        /divide the day/i,
+      );
+    }
+  });
+
+  it('accepts the lengths a shop would actually use', () => {
+    for (const good of [15, 20, 30, 45, 60, 90, 120, 240, 720, 1_440]) {
+      expect(() => assertSlotLength(good)).not.toThrow();
+    }
+  });
+
+  it('offers every still-future window from the earlier grid in the later one', () => {
+    // The property that matters: crossing local midnight may *add* windows, but
+    // must never silently retire one a shopper was already shown — or had
+    // already booked.
+    const before = slotGrid({ ...fortyFive, from: new Date('2026-12-01T17:30:00Z') });
+    const after = slotGrid({ ...fortyFive, from: new Date('2026-12-01T18:31:00Z') });
+    const laterEarliest = new Date('2026-12-01T18:31:00Z').getTime() + 120 * 60_000;
+    const afterSet = new Set(after.map((slot) => slot.getTime()));
+
+    const vanished = before
+      .filter((slot) => slot.getTime() >= laterEarliest)
+      .filter((slot) => !afterSet.has(slot.getTime()));
+
+    expect(vanished.map((slot) => slot.toISOString())).toEqual([]);
+  });
+
+  it('starts each day on that day’s own local midnight', () => {
+    const slots = slotGrid({ ...fortyFive, from: new Date('2026-12-01T00:00:00Z') });
+    const firstOfEachLocalDay = new Map<string, Date>();
+    for (const slot of slots) {
+      const day = new Intl.DateTimeFormat('en-CA', { timeZone: IST }).format(slot);
+      if (!firstOfEachLocalDay.has(day)) firstOfEachLocalDay.set(day, slot);
+    }
+
+    // Every day begins at 00:00 local, so no day inherits the previous day's
+    // offset. The first day is the exception: it starts wherever the lead time
+    // lands within the day already in progress.
+    const days = [...firstOfEachLocalDay.entries()].slice(1);
+    expect(days.length).toBeGreaterThan(0);
+    for (const [, first] of days) {
+      expect(
+        new Intl.DateTimeFormat('en-GB', {
+          timeZone: IST,
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }).format(first),
+      ).toBe('00:00');
+    }
+  });
+
+  it('never offers two windows that overlap, across the day boundary included', () => {
+    // The capacity key is `<storeId>:<slotStart>`, so two overlapping windows
+    // would count the same minutes under two different keys. This is what a
+    // non-divisor length breaks even with per-day anchoring — 23:20-00:10
+    // against 00:00-00:50 — and why the length is now refused rather than
+    // accommodated.
+    for (const length of [30, 45, 60, 90]) {
+      const slots = slotGrid({
+        ...fortyFive,
+        slotLengthMinutes: length,
+        from: new Date('2026-12-01T00:00:00Z'),
+      });
+      for (let i = 1; i < slots.length; i += 1) {
+        expect(slots[i]!.getTime() - slots[i - 1]!.getTime()).toBeGreaterThanOrEqual(
+          length * 60_000,
+        );
+      }
+    }
+  });
+
+  it('is unchanged for the hourly grid the shops actually run', () => {
+    const hourly = { ...fortyFive, slotLengthMinutes: 60, horizonDays: 2 };
+    const before = slotGrid({ ...hourly, from: new Date('2026-12-01T17:30:00Z') });
+    const after = slotGrid({ ...hourly, from: new Date('2026-12-01T18:31:00Z') });
+    const laterEarliest = new Date('2026-12-01T18:31:00Z').getTime() + 120 * 60_000;
+    const afterSet = new Set(after.map((slot) => slot.getTime()));
+
+    expect(
+      before.filter((s) => s.getTime() >= laterEarliest).every((s) => afterSet.has(s.getTime())),
+    ).toBe(true);
+    for (const slot of after) expect((slot.getTime() + 5.5 * 3_600_000) % 3_600_000).toBe(0);
   });
 });
 

@@ -54,6 +54,7 @@ export {
 } from './domain/index';
 
 export {
+  assertSlotLength,
   isBookableSlot,
   localDayStart,
   SLOT_HORIZON_DAYS,
