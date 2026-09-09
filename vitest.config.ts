@@ -77,7 +77,7 @@ export default defineConfig({
       //                     --coverage.experimentalAstAwareRemapping
       //   C  v5 default   npm run test:coverage
       //
-      //   (A on main@88b1798 / vitest 3.2.4; B likewise; C on this branch.
+      //   (A on main@88b1798 / vitest 3.2.7; B likewise; C on this branch.
       //    Add --coverage.reporter=json-summary and read total in
       //    coverage-summary.json.)
       //
@@ -94,10 +94,12 @@ export default defineConfig({
       // 1 and 4 files, by 2 and 10 covered on identical denominators: ordinary
       // run-to-run variance.)
       //
-      // A is the odd column out, and gives itself away: it reports
-      // `statements === lines` exactly (4552/5001 for both), which no
-      // source-based counter does. B and C, remapping to the AST, separate them
-      // (1857 statements over 1674 lines).
+      // A is the odd column out, and reads like a coarser count: it reports
+      // `statements === lines` exactly (4552/5001 for both), where B and C,
+      // remapping to the AST, separate them (1857 statements over 1674 lines).
+      // That equality is suggestive rather than conclusive — it could in
+      // principle be a coincidence — so the per-file B-vs-C comparison above is
+      // what carries the conclusion.
       //
       // Each floor below sits under the observed C column with 3.0-3.6pp of
       // headroom, and three of the four are *higher* than the flat 80 they
