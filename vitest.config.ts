@@ -67,26 +67,42 @@ export default defineConfig({
       // ledger atomicity, cross-store denial, import rollback. A gate that
       // could not see any of that would be back to measuring skeletons.
       //
-      // Re-based for @vitest/coverage-v8 v5, which counts differently. This is
-      // the same coverage measured a new way, not a lowered bar — the tests did
-      // not change, and the number of branch points they cover more than
-      // doubled:
+      // Re-based for @vitest/coverage-v8 v5. The tests did not change; the
+      // *counting method* did. v5 makes AST-aware remapping the default. The
+      // proof is that v3 reproduces v5's numbers exactly once you ask it for
+      // the same method:
       //
-      //              v3          v5
-      //   covered    422   ->    967   (+545)
-      //   total      485   ->   1268   (+783)
-      //   pct     87.08%   -> 76.26%
+      //   A  v3 default   npm run test:coverage
+      //   B  v3 + remap   npm run test:coverage -- \
+      //                     --coverage.experimentalAstAwareRemapping
+      //   C  v5 default   npm run test:coverage
       //
-      // v3's provider reported `statements === lines` exactly (5001 for both)
-      // and credited whole service files with 0 or 1 branch points —
-      // catalog/service.ts 1 -> 97, stores/repo.ts 0 -> 38. That was a
-      // degenerate count. v5 remaps against the AST and finds the branches that
-      // were always there; 70% of the newly-counted ones were already covered.
-      // The percentage fell because the denominator grew faster than the
-      // numerator. Evidence: hive stabilization-report.md.
+      //   (A on main@88b1798 / vitest 3.2.4; B likewise; C on this branch.
+      //    Add --coverage.reporter=json-summary and read total in
+      //    coverage-summary.json.)
       //
-      // So three of these four floors are now *higher* than the flat 80 they
+      //                   A v3 default    B v3 + remap    C v5 default
+      //   lines           4552/5001 91.02  1501/1674 89.66  1499/1674 89.54
+      //   statements      4552/5001 91.02  1627/1857 87.61  1617/1857 87.07
+      //   functions        372/412  90.29   469/530  88.49   469/530  88.49
+      //   branches        1232/1416 87.00   967/1268 76.26   967/1268 76.26
+      //
+      // B and C agree on branches and functions to the unit in every one of the
+      // 48 per-file summaries — zero mismatches — so the branch drop
+      // 87.00 -> 76.26 is A-vs-B, a remapping difference, not coverage the
+      // suite stopped reaching. (Lines and statements differ between B and C in
+      // 1 and 4 files, by 2 and 10 covered on identical denominators: ordinary
+      // run-to-run variance.)
+      //
+      // A is the odd column out, and gives itself away: it reports
+      // `statements === lines` exactly (4552/5001 for both), which no
+      // source-based counter does. B and C, remapping to the AST, separate them
+      // (1857 statements over 1674 lines).
+      //
+      // Each floor below sits under the observed C column with 3.0-3.6pp of
+      // headroom, and three of the four are *higher* than the flat 80 they
       // replace. Only branches moves down, and only because its definition did.
+      // Full evidence and logs: hive stabilization-report.md.
       thresholds: {
         lines: 86,
         statements: 84,
