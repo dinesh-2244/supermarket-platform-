@@ -13,4 +13,5 @@ export const EXPECTED_MIGRATIONS: readonly string[] = [
   '20260907230000_audit_log_store_scope',
   '20260908120000_customer_session',
   '20260908190000_cart_pending_notice',
+  '20260909131451_order_slot_index',
 ];

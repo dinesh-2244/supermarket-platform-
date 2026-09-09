@@ -152,11 +152,29 @@ export default async function OrderDetailPage({
               ) : null}
             </ActionForm>
           </>
+        ) : order.status === 'CANCELLED_BY_STORE' ? (
+          <>
+            <p
+              role="status"
+              className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+            >
+              Cancelled by the shop.
+              {order.correctionReason === null ? '' : ` Reason: ${order.correctionReason}`}
+            </p>
+            {/* D6 asks for the restored quantities to be visible *afterwards*.
+                Read from `stockRestoredQty` rather than from the action's reply,
+                because that message disappears with the form that produced it —
+                and a manager who reloads the page still needs the answer. */}
+            <p className="mt-2 text-sm text-slate-600">
+              {restoredAlready > 0
+                ? `Restored ${String(restoredAlready)} unit(s) to website stock across ${String(
+                    order.lines.filter((line) => line.stockRestoredQty > 0).length,
+                  )} line(s) — see the Restored column above.`
+                : 'No stock needed restoring.'}
+            </p>
+          </>
         ) : (
-          <Empty>
-            This order is {order.status} and can no longer be cancelled by the shop.
-            {order.correctionReason === null ? '' : ` Reason recorded: ${order.correctionReason}`}
-          </Empty>
+          <Empty>This order is {order.status} and can no longer be cancelled by the shop.</Empty>
         )}
       </Card>
     </>
