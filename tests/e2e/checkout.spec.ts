@@ -207,6 +207,7 @@ test.describe.serial('checkout', () => {
     await page.goto('/checkout');
     await page.getByLabel('Your name').fill('Tracking Shopper');
     await page.getByLabel('Phone number').fill('9812300007');
+    await page.getByRole('main').getByLabel('Address line 1').fill('5 Tracking Way');
     await page.getByRole('button', { name: 'Place order' }).click();
     await expect(page).toHaveURL(/\/order-placed\//);
 
