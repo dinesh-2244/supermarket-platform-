@@ -184,6 +184,8 @@ export interface TrackedOrder {
   readonly slotLabel: string;
   readonly placedAt: Date;
   readonly storeName: string;
+  /** The shop's timezone, so a page renders every time in it and not the reader's. */
+  readonly storeTimeZone: string;
   readonly deliveryLocality: string | null;
   readonly subtotalPaise: number;
   readonly deliveryFeePaise: number;
@@ -267,6 +269,7 @@ export async function orderForTracking(trackingToken: string): Promise<TrackedOr
     slotLabel: formatSlot(row.deliverySlotStart, row.deliverySlotEnd, row.store.timezone),
     placedAt: row.placedAt,
     storeName: row.store.name,
+    storeTimeZone: row.store.timezone,
     deliveryLocality: localityFrom(row.deliveryAddressSnapshotJson),
     subtotalPaise: row.subtotalPaise,
     deliveryFeePaise: row.deliveryFeePaise,

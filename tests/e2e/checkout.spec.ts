@@ -201,6 +201,45 @@ test.describe.serial('checkout', () => {
     await expect(page).toHaveURL(/\/checkout$/);
   });
 
+  test('the tracking link opens a read-only status page for a guest', async ({ page }) => {
+    await pickFirstArea(page);
+    await fillBasket(page);
+    await page.goto('/checkout');
+    await page.getByLabel('Your name').fill('Tracking Shopper');
+    await page.getByLabel('Phone number').fill('9812300007');
+    await page.getByRole('button', { name: 'Place order' }).click();
+    await expect(page).toHaveURL(/\/order-placed\//);
+
+    await page.getByRole('link', { name: /track this order/i }).click();
+    await expect(page).toHaveURL(/\/order-status\/t_[0-9A-Z]{20}$/);
+
+    await expect(
+      page.getByRole('heading', { name: /^Order S\d-\d{6}-[0-9A-Z]{5}$/ }),
+    ).toBeVisible();
+    await expect(page.getByRole('status')).toHaveText('Order placed');
+    await expect(page.getByRole('heading', { name: 'Progress' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'What you ordered' })).toBeVisible();
+
+    // Read-only: nothing in the page's own content offers to change the order.
+    // Scoped to `main`, because the storefront layout's header carries a
+    // "Change delivery area" button on every page.
+    await expect(page.getByRole('main').getByRole('button')).toHaveCount(0);
+    await expect(page.getByRole('main').locator('form')).toHaveCount(0);
+    // …and the shopper's own phone number is not on it.
+    await expect(page.getByText('9812300007')).toHaveCount(0);
+
+    // The link works with no cookies at all — the token is the credential.
+    await page.context().clearCookies();
+    await page.reload();
+    await expect(page.getByRole('heading', { name: /^Order S\d/ })).toBeVisible();
+  });
+
+  test('an unknown order-status token is a plain 404', async ({ page }) => {
+    const response = await page.goto('/order-status/t_AAAAAAAAAAAAAAAAAAAA');
+    expect(response?.status()).toBe(404);
+    await expect(page.getByText(/S\d-\d{6}/)).toHaveCount(0);
+  });
+
   test('an unknown tracking token is a plain 404, with no hint that it might exist', async ({
     page,
   }) => {
