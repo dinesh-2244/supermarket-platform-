@@ -33,6 +33,33 @@ export function auditedExecutor(tx: Tx): Tx {
   return tx;
 }
 
+/**
+ * Whether a user has enrolled a second factor, and the secret if so.
+ *
+ * Read separately from `publicUserSelect` on purpose: the secret is a
+ * credential, and a column that is never in the shape a screen renders cannot
+ * be leaked by a screen. Only the sign-in and enrolment paths call this.
+ */
+export async function findTwoFactorSecret(userId: string, db?: DbExecutor): Promise<string | null> {
+  const row = await executor(db).user.findUnique({
+    where: { id: userId },
+    select: { twoFactorSecret: true },
+  });
+  return row?.twoFactorSecret ?? null;
+}
+
+/** Enrol or withdraw a second factor. `null` withdraws it. */
+export async function setTwoFactorSecret(
+  tx: Tx,
+  userId: string,
+  secret: string | null,
+): Promise<void> {
+  await auditedExecutor(tx).user.update({
+    where: { id: userId },
+    data: { twoFactorSecret: secret },
+  });
+}
+
 /** Columns safe to return from a list — never `passwordHash` or `twoFactorSecret`. */
 const publicUserSelect = {
   id: true,

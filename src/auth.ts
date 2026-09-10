@@ -50,15 +50,19 @@ export const authConfig = {
       credentials: {
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' },
+        totp: { label: 'Authenticator code', type: 'text' },
       },
       authorize: async (raw) => {
         const email = typeof raw.email === 'string' ? raw.email : '';
         const password = typeof raw.password === 'string' ? raw.password : '';
+        const totp = typeof raw.totp === 'string' ? raw.totp : '';
         if (email === '' || password === '') return null;
 
-        // One undifferentiated failure for unknown email, wrong password and
-        // disabled account — the form must not double as an enumeration oracle.
-        const user = await verifyCredentials(email, password);
+        // One undifferentiated failure for unknown email, wrong password,
+        // disabled account and a missing or wrong second factor — the form must
+        // not double as an oracle for which addresses have accounts, nor for
+        // which of those have 2FA switched on.
+        const user = await verifyCredentials(email, password, totp);
         if (user === null) return null;
 
         const session = await createSessionForUser(user.id);

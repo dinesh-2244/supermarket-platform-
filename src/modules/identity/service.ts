@@ -5,6 +5,7 @@
 import argon2 from 'argon2';
 import {
   assertAuthorized,
+  AuthzError,
   canAccessStore,
   ConflictError,
   emit,
@@ -34,6 +35,7 @@ import {
   type PrincipalSource,
 } from './domain/index';
 import * as repo from './repo';
+import { generateTotpSecret, otpauthUri, verifyTotpCode } from './domain/totp';
 
 /** What this module owns and is allowed to depend on (§4). */
 export function moduleDescriptor(): ModuleDescriptor {
@@ -69,14 +71,22 @@ export interface AuthenticatedUser extends PrincipalSource {
 }
 
 /**
- * Check an email + password pair.
+ * Check an email + password pair, ignoring any second factor.
+ *
+ * Module-private, and deliberately so: this is the *re-authentication* used by
+ * the screens that make you retype your password (changing it, enrolling or
+ * withdrawing a second factor). Those already hold a live session, so demanding
+ * a TOTP code there would only ask the same authenticator twice — and in the
+ * enrolment case, for a factor that is not switched on yet.
+ *
+ * Signing in goes through {@link verifyCredentials}, which adds the gate.
  *
  * Returns `null` for *every* failure — unknown email, wrong password, disabled
  * account — and always performs a verification, so a caller (and anyone timing
  * it) cannot tell which. That is what stops the sign-in form doubling as an
  * account-enumeration oracle.
  */
-export async function verifyCredentials(
+async function verifyPassword(
   email: string,
   password: string,
 ): Promise<AuthenticatedUser | null> {
@@ -101,7 +111,6 @@ export async function verifyCredentials(
 
   if (!user || !ok || !user.isActive) return null;
 
-  await repo.touchLastLogin(user.id);
   return {
     id: user.id,
     email: user.email,
@@ -110,6 +119,38 @@ export async function verifyCredentials(
     storeId: user.storeId,
     isActive: user.isActive,
   };
+}
+
+/**
+ * Check a sign-in: email + password, and the authenticator code when the
+ * account has one enrolled.
+ *
+ * Enrolment is optional (arch phase 2 — 2FA is offered, not required), but it
+ * is not decorative: once a secret is stored, **the code is required to sign
+ * in**. A second factor that the sign-in form did not ask for would protect
+ * nothing at all.
+ *
+ * The gate keeps the same shape as the rest of this function — one
+ * undifferentiated `null`. A missing or wrong code is not distinguishable from
+ * a wrong password, so the form cannot be used to discover *who* has 2FA on.
+ *
+ * `lastLoginAt` is stamped here rather than in {@link verifyPassword}: it
+ * records a sign-in, not every time someone retypes their password.
+ */
+export async function verifyCredentials(
+  email: string,
+  password: string,
+  totpCode = '',
+  now = Date.now(),
+): Promise<AuthenticatedUser | null> {
+  const user = await verifyPassword(email, password);
+  if (user === null) return null;
+
+  const secret = await repo.findTwoFactorSecret(user.id);
+  if (secret !== null && !(await verifyTotpCode(secret, totpCode, now))) return null;
+
+  await repo.touchLastLogin(user.id);
+  return user;
 }
 
 /**
@@ -390,7 +431,7 @@ export async function changeOwnPassword(
   const user = await repo.findById(principal.userId);
   if (user === null) throw new NotFoundError('User not found', { userId: principal.userId });
 
-  const verified = await verifyCredentials(user.email, currentPassword);
+  const verified = await verifyPassword(user.email, currentPassword);
   if (verified === null) {
     throw new ValidationError('Your current password is not correct', {});
   }
@@ -409,6 +450,135 @@ export async function changeOwnPassword(
       after: { passwordChangedAt: new Date(), self: true },
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Optional two-factor authentication (TOTP)
+// ---------------------------------------------------------------------------
+
+export interface TotpEnrolment {
+  /** Base32, shown once so it can be typed if the QR cannot be scanned. */
+  readonly secret: string;
+  /** The `otpauth://` URI an authenticator app scans. */
+  readonly uri: string;
+}
+
+/**
+ * Begin enrolling a second factor: mint a secret and hand it back.
+ *
+ * **Nothing is stored yet.** The secret is only written once the person has
+ * proved their app is generating the right codes from it — see
+ * {@link confirmTotpEnrolment}. Storing it here would switch 2FA on for someone
+ * who then closed the tab, and lock them out of their own account.
+ *
+ * The secret therefore makes a round trip through the enrolment form. That is
+ * the cost of not adding a column to hold a pending one, and it is bounded: it
+ * travels over the same channel as the password that created the session.
+ */
+export async function beginTotpEnrolment(
+  principal: Principal,
+  issuer = 'Munder Fresh',
+): Promise<TotpEnrolment> {
+  if (principal.kind !== 'user') {
+    throw new AuthzError('Only a signed-in staff member can enrol a second factor', {});
+  }
+  const user = await repo.findById(principal.userId);
+  if (user === null) throw new NotFoundError('User not found', { userId: principal.userId });
+
+  const secret = generateTotpSecret();
+  // The email, not the id: an authenticator app lists the account label, and a
+  // cuid tells its owner nothing about which login it belongs to.
+  return { secret, uri: otpauthUri({ secret, account: user.email, issuer }) };
+}
+
+/**
+ * Finish enrolling: store the secret, but only against a code it produced.
+ *
+ * Requires the current password as well. Enrolling a second factor changes how
+ * the account is entered, so it is exactly the kind of change a borrowed,
+ * still-signed-in browser should not be able to make.
+ */
+export async function confirmTotpEnrolment(
+  principal: Principal,
+  input: { secret: string; code: string; password: string },
+  now = Date.now(),
+): Promise<void> {
+  if (principal.kind !== 'user') {
+    throw new AuthzError('Only a signed-in staff member can enrol a second factor', {});
+  }
+  const user = await repo.findById(principal.userId);
+  if (user === null) throw new NotFoundError('User not found', { userId: principal.userId });
+
+  if ((await verifyPassword(user.email, input.password)) === null) {
+    throw new ValidationError('That password is not correct', {});
+  }
+  if (!(await verifyTotpCode(input.secret, input.code, now))) {
+    throw new ValidationError(
+      'That code does not match — check your authenticator and try the next one',
+      {},
+    );
+  }
+
+  await withTransaction(async (tx) => {
+    await repo.setTwoFactorSecret(tx, principal.userId, input.secret);
+    await writeAuditLog(tx, {
+      principal,
+      action: 'update',
+      entityType: 'User',
+      entityId: principal.userId,
+      storeId: principal.storeId,
+      before: { twoFactorEnrolled: false },
+      after: { twoFactorEnrolled: true },
+    });
+  });
+}
+
+/**
+ * Withdraw the second factor.
+ *
+ * Needs a current code as well as the password: if someone has the password
+ * alone, the second factor is precisely what should stop them turning it off.
+ * The secret itself is never logged — only that enrolment changed.
+ */
+export async function disableTotp(
+  principal: Principal,
+  input: { code: string; password: string },
+  now = Date.now(),
+): Promise<void> {
+  if (principal.kind !== 'user') {
+    throw new AuthzError('Only a signed-in staff member can change their second factor', {});
+  }
+  const user = await repo.findById(principal.userId);
+  if (user === null) throw new NotFoundError('User not found', { userId: principal.userId });
+
+  const secret = await repo.findTwoFactorSecret(principal.userId);
+  if (secret === null) throw new ConflictError('You do not have a second factor enrolled', {});
+
+  if ((await verifyPassword(user.email, input.password)) === null) {
+    throw new ValidationError('That password is not correct', {});
+  }
+  if (!(await verifyTotpCode(secret, input.code, now))) {
+    throw new ValidationError('That code does not match', {});
+  }
+
+  await withTransaction(async (tx) => {
+    await repo.setTwoFactorSecret(tx, principal.userId, null);
+    await writeAuditLog(tx, {
+      principal,
+      action: 'update',
+      entityType: 'User',
+      entityId: principal.userId,
+      storeId: principal.storeId,
+      before: { twoFactorEnrolled: true },
+      after: { twoFactorEnrolled: false },
+    });
+  });
+}
+
+/** Has this user enrolled a second factor? For the account screen's copy. */
+export async function hasTotpEnrolled(principal: Principal): Promise<boolean> {
+  if (principal.kind !== 'user') return false;
+  return (await repo.findTwoFactorSecret(principal.userId)) !== null;
 }
 
 /**

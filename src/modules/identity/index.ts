@@ -6,14 +6,18 @@
  */
 export {
   type ActiveSession,
+  beginTotpEnrolment,
   canManageStoreUsers,
   changeOwnPassword,
+  confirmTotpEnrolment,
   createSessionForUser,
   createUser,
   type CreateUserInput,
   destroySession,
+  disableTotp,
   getUser,
   hashPassword,
+  hasTotpEnrolled,
   listUsers,
   moduleDescriptor,
   principalForUserId,
@@ -24,6 +28,7 @@ export {
   updateUser,
   type UpdateUserInput,
   type AuthenticatedUser,
+  type TotpEnrolment,
   type UserRecord,
   verifyCredentials,
 } from './service';

@@ -35,6 +35,18 @@ export default async function SignInPage({
         <Hidden name="next" value={next} />
         <Field label="Email" name="email" type="email" required width="w-full" />
         <Field label="Password" name="password" type="password" required width="w-full" />
+        {/*
+          Always shown, never required. A two-step flow — password first, then
+          ask for a code only if this account has one — would answer "does this
+          address have 2FA?" to anyone who can type an email address. Leaving
+          the field blank is fine for the accounts that have not enrolled.
+        */}
+        <Field
+          label="Authenticator code (only if you have set one up)"
+          name="totp"
+          placeholder="123456"
+          width="w-full"
+        />
       </ActionForm>
     </div>
   );

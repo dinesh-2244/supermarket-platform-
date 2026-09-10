@@ -1,5 +1,7 @@
+import Link from 'next/link';
 import { requirePrincipal } from '@/auth';
 import { formatDateTime, overview, resolveStoreId } from '@/modules/admin';
+import { hasTotpEnrolled } from '@/modules/identity';
 import { changePasswordAction } from './actions';
 import { ActionForm, Field } from './form';
 import { Card, Empty, PageHeading, StoreSwitcher, Table } from './ui';
@@ -15,6 +17,7 @@ export default async function OverviewPage({
   const params = await searchParams;
   const requested = typeof params.store === 'string' ? params.store : undefined;
 
+  const twoFactor = await hasTotpEnrolled(principal);
   const data = await overview(principal, null);
   const storeId = resolveStoreId(principal, requested, data.stores);
   const view = storeId === data.storeId ? data : await overview(principal, storeId);
@@ -52,6 +55,17 @@ export default async function OverviewPage({
             ))}
           </Table>
         )}
+      </Card>
+
+      <Card title="Two-factor authentication">
+        <p className="mb-2 text-sm text-slate-600">
+          {twoFactor
+            ? 'On — signing in asks for a code from your authenticator app.'
+            : 'Off — your password alone signs you in. Recommended for super admins.'}
+        </p>
+        <Link href="/admin/two-factor" className="text-sm text-slate-900 underline">
+          {twoFactor ? 'Manage two-factor authentication' : 'Set up two-factor authentication'}
+        </Link>
       </Card>
 
       <Card title="Change my password">
