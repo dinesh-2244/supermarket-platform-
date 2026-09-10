@@ -544,8 +544,14 @@ NO-SUCH-SKU-${run},1
       await page.getByLabel('Password').fill(MANAGER_PASSWORD);
       await page.getByRole('button', { name: 'Sign in' }).click();
 
-      // Always somewhere under /admin on this origin.
-      await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:\d+\/admin/);
+      // Always somewhere under /admin on this origin — and **not still on the
+      // sign-in page**, which `/admin` also prefixes.
+      //
+      // Without the lookahead this was satisfied the instant it ran, because
+      // the page it runs on *is* `/admin/sign-in?next=…`. It never waited for
+      // the sign-in to come back, so a failure after it was reported against
+      // whatever the next step happened to touch.
+      await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:\d+\/admin(?!\/sign-in)/);
       await signOut(page);
     }
 
