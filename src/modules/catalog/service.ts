@@ -195,6 +195,32 @@ export async function countProducts(
  * shared between customers of either shop.
  */
 /**
+ * Which of these products the store has set up — the stock import's scope check.
+ *
+ * `inventory` used to query `StoreProduct` itself. §4 scopes `pricing` to that
+ * table's *price fields*; which products a store carries is a per-store
+ * cataloguing concern and belongs here — and `inventory` is already permitted to
+ * depend on `catalog`, which is why this needs no change to §4's dependency
+ * table.
+ *
+ * Named for what it does rather than for `isListed`: it reports that a
+ * `StoreProduct` row exists, which is the question the importer asks and what
+ * its "not set up for this store" message means.
+ *
+ * Authorized like every other catalogue read: the importer is staff and holds
+ * `product:read`.
+ */
+export async function productIdsSetUpForStore(
+  principal: Principal,
+  storeId: string,
+  productIds: readonly string[],
+): Promise<ReadonlySet<string>> {
+  assertAuthorized(principal, 'product:read', CATALOG);
+  if (productIds.length === 0) return new Set();
+  return repo.findProductIdsSetUpForStore(storeId, productIds);
+}
+
+/**
  * Resolve SKUs to product ids in one query — the CSV import's hot path.
  *
  * `inventory` used to query `Product` itself, which is `catalog`'s table (§4);

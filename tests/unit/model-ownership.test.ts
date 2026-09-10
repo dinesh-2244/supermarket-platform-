@@ -93,6 +93,21 @@ interface Access {
   readonly module: string;
   readonly file: string;
   readonly model: string;
+  /** The call's argument list, so a *column-level* rule can be expressed. */
+  readonly args: string;
+}
+
+/** The balanced `( … )` that follows a delegate call, however many lines it spans. */
+function argumentsAt(source: string, from: number): string {
+  let depth = 0;
+  for (let i = from; i < source.length; i += 1) {
+    if (source[i] === '(') depth += 1;
+    else if (source[i] === ')') {
+      depth -= 1;
+      if (depth === 0) return source.slice(from, i + 1);
+    }
+  }
+  return source.slice(from);
 }
 
 function everyModelAccess(): readonly Access[] {
@@ -105,34 +120,60 @@ function everyModelAccess(): readonly Access[] {
           module,
           file: file.slice(process.cwd().length + 1),
           model: match[1] ?? '',
+          args: argumentsAt(source, (match.index ?? 0) + match[0].length),
         }));
       }),
     );
 }
 
 /**
- * Violations of the same class that predate this rule, listed rather than
- * excused away.
+ * `StoreProduct` has two owners, by column.
  *
- * Two of the original three are gone (`p3-followup-model-ownership`): the
- * low-stock threshold now comes from `stores.lowStockThresholdFor` and the CSV
- * import's SKU→id resolve from `catalog.findProductIdsBySku`.
+ * §4 scopes `pricing` to "StoreProduct **price fields**, PriceChange" — not the
+ * whole table. Which products a store carries, and whether it lists them, is a
+ * per-store cataloguing concern and belongs to `catalog`. That reading is now a
+ * decision rather than an observation, and this is where it is expressed.
  *
- * The one that remains is not an oversight — it is **blocked by §4 itself**.
- * `StoreProduct` belongs to `pricing`, and §4 permits `inventory` to depend on
- * `platform`, `catalog` and `stores` only. Routing the import's listing-scope
- * check through `pricing` would mean `inventory` depending on a module the
- * architecture does not allow it to, which is a decision for the architecture
- * and not for a follow-up card. The read itself is narrow and safe: it selects
- * `productId` filtered by `storeId`, applies no rule `pricing` would apply
- * differently, and sits behind a back-office import screen.
+ * So `catalog` may query `storeProduct`, but only for the cataloguing columns
+ * below. A `catalog` query that reached for `sellingPricePaise` would fail here,
+ * which is the point: a per-table allow-list would have let it through.
  *
- * The list is asserted to be *exactly* this, so it cannot quietly grow: a second
- * entry fails the suite.
+ * This replaces the last `KNOWN_EXCEPTIONS` entry. The list is gone: an
+ * exception that has become a rule should not keep being called an exception.
  */
-const KNOWN_EXCEPTIONS: readonly string[] = [
-  'src/modules/inventory/repo.ts → storeProduct (owned by pricing)',
+const CATALOGUING_COLUMNS: readonly string[] = [
+  'id',
+  'storeId',
+  'productId',
+  'isListed',
+  'listedAt',
+  'delistedAt',
 ];
+
+const SPLIT_OWNERSHIP: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
+  storeProduct: { catalog: CATALOGUING_COLUMNS },
+};
+
+/** The object keys a call names, which is near enough "the columns it touches". */
+function columnsTouched(args: string): readonly string[] {
+  return [...args.matchAll(/(?:^|[{,\s])([a-zA-Z_]\w*)\s*:/g)].map((match) => match[1] ?? '');
+}
+
+/**
+ * Is this cross-module access covered by a column-level carve-out?
+ *
+ * Only when *every* column it names is one the carve-out grants. Prisma
+ * operators (`in`, `not`, `select`, …) are not columns and are ignored.
+ */
+function withinSplitOwnership(access: Access): boolean {
+  const granted = SPLIT_OWNERSHIP[access.model]?.[access.module];
+  if (granted === undefined) return false;
+
+  const operators = new Set(['where', 'select', 'data', 'orderBy', 'in', 'not', 'take', 'include']);
+  return columnsTouched(access.args)
+    .filter((column) => !operators.has(column))
+    .every((column) => granted.includes(column));
+}
 
 describe('§4 — a module queries only the models it owns', () => {
   it('finds the Prisma calls it is supposed to be checking', () => {
@@ -162,9 +203,40 @@ describe('§4 — a module queries only the models it owns', () => {
         const owner = OWNER[access.model];
         return owner !== undefined && owner !== access.module && owner !== 'platform';
       })
+      // A column-level carve-out is a rule, not an exception — see SPLIT_OWNERSHIP.
+      .filter((access) => !withinSplitOwnership(access))
       .map((access) => `${access.file} → ${access.model} (owned by ${OWNER[access.model] ?? '?'})`);
 
-    expect([...new Set(trespass)].sort()).toEqual([...KNOWN_EXCEPTIONS].sort());
+    expect([...new Set(trespass)].sort()).toEqual([]);
+  });
+
+  it('lets catalog read StoreProduct’s cataloguing columns, and only those', () => {
+    // The split is a rule, so it is asserted from both sides.
+    const catalogReads = everyModelAccess().filter(
+      (access) => access.module === 'catalog' && access.model === 'storeProduct',
+    );
+    expect(catalogReads.length).toBeGreaterThan(0);
+    for (const access of catalogReads) {
+      expect(
+        withinSplitOwnership(access),
+        `${access.file} reaches beyond the cataloguing columns`,
+      ).toBe(true);
+    }
+  });
+
+  it('would refuse a catalog query that reached for a price column', () => {
+    // The carve-out has to bite, or it is just a per-table allow-list wearing a
+    // column-level costume.
+    const priceQuery: Access = {
+      module: 'catalog',
+      file: 'src/modules/catalog/repo.ts',
+      model: 'storeProduct',
+      args: '({ where: { storeId }, select: { productId: true, sellingPricePaise: true } })',
+    };
+    expect(withinSplitOwnership(priceQuery)).toBe(false);
+
+    const cataloguingQuery: Access = { ...priceQuery, args: '({ select: { productId: true } })' };
+    expect(withinSplitOwnership(cataloguingQuery)).toBe(true);
   });
 
   it('no longer lets customers read a delivery area for itself (R7)', () => {
