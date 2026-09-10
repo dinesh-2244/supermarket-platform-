@@ -86,10 +86,7 @@ export interface AuthenticatedUser extends PrincipalSource {
  * it) cannot tell which. That is what stops the sign-in form doubling as an
  * account-enumeration oracle.
  */
-async function verifyPassword(
-  email: string,
-  password: string,
-): Promise<AuthenticatedUser | null> {
+async function verifyPassword(email: string, password: string): Promise<AuthenticatedUser | null> {
   let normalized: string;
   try {
     normalized = normalizeEmail(email);
