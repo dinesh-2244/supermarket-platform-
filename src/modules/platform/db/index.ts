@@ -1,3 +1,4 @@
+import { PrismaPg } from '@prisma/adapter-pg';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { getConfig } from '../config/index';
 import { childLogger } from '../logger/index';
@@ -24,10 +25,89 @@ export type DbExecutor = PrismaClient | Tx;
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
+/**
+ * `pg` pool settings, and the URL with Prisma's own knobs taken back out of it.
+ *
+ * ## Why this function exists at all
+ *
+ * Under Prisma 6 the query engine owned the pool and read its size from the
+ * connection string. Under the driver adapter the pool is **`pg`'s**, and `pg`
+ * has never heard of `connection_limit` — it is not a libpq parameter. Left
+ * alone it would be ignored in silence and every connection string in this
+ * project would quietly get `pg`'s default pool of 10.
+ *
+ * That is not a tuning detail here. Phase 4's concurrency tests (ADR-0011) are
+ * run under `?connection_limit=5` on purpose, because five is what a 2-vCPU CI
+ * runner gives Prisma and it is the constraint that caught the original
+ * advisory-lock design: a blocking `pg_advisory_xact_lock` holds its connection
+ * while it waits, so a dozen callers queueing on one key exhaust the pool and
+ * deadlock the suite. Those tests still pass against a pool of 10 — they simply
+ * stop proving anything. So the translation is the difference between a live
+ * regression test and a decorative one.
+ *
+ * ## The mapping
+ *
+ * | `DATABASE_URL` (Prisma) | `pg.Pool` | note |
+ * |---|---|---|
+ * | `connection_limit` | `max` | same meaning, same units |
+ * | `pool_timeout` (s) | `connectionTimeoutMillis` | wait for a usable connection |
+ * | `connect_timeout` (s) | `connectionTimeoutMillis` | see below |
+ *
+ * Prisma splits *waiting for a free slot* (`pool_timeout`) from *opening a
+ * socket* (`connect_timeout`); `pg` has one knob covering both. Taking the
+ * larger of the two is the only translation that cannot make a timeout stricter
+ * than it was, which would turn a slow connection into a spurious failure. Both
+ * are seconds in Prisma and milliseconds in `pg`. Prisma's `pool_timeout=0`
+ * means "wait forever", and so does `connectionTimeoutMillis: 0`.
+ *
+ * The consumed parameters are stripped from the URL that reaches `pg`, so what
+ * it parses is a plain PostgreSQL connection string. Everything else —
+ * `sslmode`, `schema`, `application_name` — is left exactly as written.
+ */
+export function poolConfigFromUrl(databaseUrl: string): {
+  connectionString: string;
+  max?: number;
+  connectionTimeoutMillis?: number;
+} {
+  let url: URL;
+  try {
+    url = new URL(databaseUrl);
+  } catch {
+    // Not our business to validate the URL — `pg` will report it far better
+    // than a guess here would.
+    return { connectionString: databaseUrl };
+  }
+
+  const seconds = (name: string): number | undefined => {
+    const raw = url.searchParams.get(name);
+    if (raw === null) return undefined;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+  };
+
+  const connectionLimit = seconds('connection_limit');
+  const timeouts = [seconds('pool_timeout'), seconds('connect_timeout')].filter(
+    (value): value is number => value !== undefined,
+  );
+
+  for (const consumed of ['connection_limit', 'pool_timeout', 'connect_timeout']) {
+    url.searchParams.delete(consumed);
+  }
+
+  return {
+    connectionString: url.toString(),
+    ...(connectionLimit !== undefined && connectionLimit > 0 ? { max: connectionLimit } : {}),
+    ...(timeouts.length > 0 ? { connectionTimeoutMillis: Math.max(...timeouts) * 1_000 } : {}),
+  };
+}
+
 function createClient(): PrismaClient {
   const config = getConfig();
   return new PrismaClient({
-    datasources: { db: { url: config.DATABASE_URL } },
+    // Prisma 7 takes a driver adapter rather than a URL; the adapter owns the
+    // `pg` pool's lifecycle, which is why a `PoolConfig` is handed over rather
+    // than a `Pool` this module would then have to close.
+    adapter: new PrismaPg(poolConfigFromUrl(config.DATABASE_URL)),
     log: config.APP_ENV === 'local' ? ['warn', 'error'] : ['error'],
   });
 }
@@ -146,13 +226,27 @@ function asTx(client: Prisma.TransactionClient): Tx {
 /**
  * Belt-and-braces for the type brand: refuse a root client at runtime too.
  *
- * Prisma's interactive-transaction proxy deliberately omits `$transaction` and
- * `$connect`, so their presence is a reliable "this is the singleton client"
- * signal — and catches anyone who reached for `as unknown as Tx`.
+ * Prisma's interactive-transaction proxy omits the connection-lifecycle methods,
+ * so their presence is a reliable "this is the singleton client" signal — and
+ * catches anyone who reached for `as unknown as Tx`.
+ *
+ * **`$transaction` used to be on that list and no longer is.** Prisma 6's proxy
+ * omitted it; Prisma 7's keeps it, so testing for it rejected every legitimate
+ * transaction handle. Measured on 7.10.0 inside a `$transaction` callback:
+ *
+ *     $transaction  root: function   tx: function
+ *     $connect      root: function   tx: undefined
+ *     $disconnect   root: function   tx: undefined
+ *     $on           root: function   tx: undefined
+ *     $extends      root: function   tx: undefined
+ *
+ * The guard is no weaker for the change — it still only ever passes something
+ * the root client would fail — and both methods checked are root-only on 6 and
+ * 7 alike, so it does not depend on which of them a future version keeps.
  */
 export function assertTransactionHandle(candidate: DbExecutor): asserts candidate is Tx {
   const suspect = candidate as Partial<PrismaClient>;
-  if (typeof suspect.$transaction === 'function' || typeof suspect.$connect === 'function') {
+  if (typeof suspect.$connect === 'function' || typeof suspect.$disconnect === 'function') {
     throw new Error(
       'Expected a transaction handle from withTransaction(), got the root Prisma client. ' +
         'A row lock or audited write taken outside a transaction is released immediately.',

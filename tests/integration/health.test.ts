@@ -1,3 +1,4 @@
+import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
@@ -115,7 +116,12 @@ describe('platform db health', () => {
     // has to degrade rather than crash — this exercises checkDbHealth itself,
     // not a bare PrismaClient call that happens to fail.
     const unreachable = new PrismaClient({
-      datasources: { db: { url: 'postgresql://postgres:postgres@127.0.0.1:1/none' } },
+      adapter: new PrismaPg({
+        connectionString: 'postgresql://postgres:postgres@127.0.0.1:1/none',
+        // Without this the adapter waits on `pg`'s default, and the test would
+        // sit on a dead port until the suite timeout instead of asserting.
+        connectionTimeoutMillis: 2_000,
+      }),
     });
 
     try {

@@ -7,9 +7,11 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Prisma 7 refuses `url` here: the CLI takes it from `prisma.config.ts` and the
+// client takes a driver adapter instead. Nothing about the datasource itself
+// changed — only where its URL is read from.
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,3 @@
-import { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getPrisma, selectForUpdate, withTransaction } from '@/modules/platform';
 import {
@@ -9,6 +8,7 @@ import {
   createStoreProduct,
   createStoreSettings,
 } from '../factories/index';
+import { newTestClient } from './prisma-client';
 
 /**
  * R3 — a row lock must stay held until the transaction ends.
@@ -24,7 +24,7 @@ import {
  * error (see tests/unit/transaction-handle.test.ts); the raw SQL is inlined here
  * to prove the behaviour it used to permit.
  */
-const observer = new PrismaClient();
+const observer = newTestClient();
 
 /**
  * Committed fixtures, not the usual rolled-back ones: the whole point is that a

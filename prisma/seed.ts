@@ -15,10 +15,22 @@
  * - an opening-balance `StockLedger` row for every `InventoryItem`, written in
  *   the same transaction as the item (§3/§7) and only on first creation.
  */
+import { PrismaPg } from '@prisma/adapter-pg';
 import { Prisma, PrismaClient } from '@prisma/client';
 import argon2 from 'argon2';
 
-const prisma = new PrismaClient();
+/**
+ * Prisma 7 clients take a driver adapter rather than a URL.
+ *
+ * The connection string is used as written, with none of the pool translation
+ * the application does: this is a one-shot CLI script on a single connection,
+ * so `connection_limit` — which exists to reproduce CI's *concurrent* pool
+ * pressure — has nothing to constrain here. It connects the way the Prisma CLI
+ * next to it does.
+ */
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL ?? '' }),
+});
 
 /** Shared dev password. Never used outside a local/CI database. */
 /** Dev-only demo shopper. Never a real credential — see the README. */
