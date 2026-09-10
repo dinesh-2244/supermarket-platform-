@@ -686,6 +686,21 @@ async function seedCustomer(): Promise<void> {
  * point of demo data is that every screen it feeds behaves as it will in
  * anger, and the correction screen is one of those screens.
  */
+/**
+ * A demo order that cannot be filled from the shelf.
+ *
+ * Thrown from *inside* the seeding transaction and handled outside it, so every
+ * write that order had already made is rolled back before it is skipped. The
+ * skip therefore happens outside the committing callback, which is the whole
+ * point: nothing partial can commit.
+ */
+class DemoOrderUnfillable extends Error {
+  constructor(readonly orderNumber: string) {
+    super(`Demo order ${orderNumber} cannot be filled`);
+    this.name = 'DemoOrderUnfillable';
+  }
+}
+
 async function seedDemoOrders(storeIds: Map<string, string>): Promise<void> {
   const customer = await prisma.customer.findUnique({
     where: { email: DEV_CUSTOMER_EMAIL },
@@ -730,96 +745,137 @@ async function seedDemoOrders(storeIds: Map<string, string>): Promise<void> {
       });
       const deliveryFeePaise = settings?.deliveryFeePaise ?? 0;
 
-      await prisma.$transaction(async (tx) => {
-        // Take the stock first, so an order is never written against a shelf
-        // that cannot cover it — the same order of operations `placeOrder` uses.
-        const movements: { productId: string; qty: number; balanceAfter: number }[] = [];
-        for (const line of lines) {
-          const item = await tx.inventoryItem.findFirst({
-            where: { storeId, productId: line.productId },
-            select: { id: true, websiteStock: true },
-          });
-          if (item === null || item.websiteStock < index + 1) return;
+      await prisma
+        .$transaction(async (tx) => {
+          // **Plan every line before writing a single one.**
+          //
+          // This loop used to `return` when a line could not be filled — and a
+          // `return` from a transaction callback *commits*. A demo order whose
+          // second line was short therefore left the first line's decrement
+          // committed with no order, no history and no ledger row: stock gone with
+          // no movement to explain it, which is exactly what the sum-of-movements
+          // invariant in `schema.test.ts` forbids. Repeating a partial seed drained
+          // more each time, and row-count idempotence could not see any of it.
+          //
+          // So: resolve and check every line first, then write. A line that cannot
+          // be filled throws, and the throw is what guarantees the rollback —
+          // `return` never could.
+          const planned: {
+            itemId: string;
+            productId: string;
+            qty: number;
+            balanceAfter: number;
+          }[] = [];
 
-          const balanceAfter = item.websiteStock - (index + 1);
-          await tx.inventoryItem.update({
-            where: { id: item.id },
-            data: { websiteStock: balanceAfter },
-          });
-          movements.push({ productId: line.productId, qty: index + 1, balanceAfter });
-        }
+          for (const line of lines) {
+            const item = await tx.inventoryItem.findFirst({
+              where: { storeId, productId: line.productId },
+              select: { id: true, websiteStock: true },
+            });
+            if (item === null || item.websiteStock < index + 1) {
+              throw new DemoOrderUnfillable(orderNumber);
+            }
+            planned.push({
+              itemId: item.id,
+              productId: line.productId,
+              qty: index + 1,
+              balanceAfter: item.websiteStock - (index + 1),
+            });
+          }
 
-        const order = await tx.order.create({
-          data: {
-            orderNumber,
-            trackingToken: `t_DEMO${code}${String(index + 1).padStart(2, '0')}`.padEnd(22, '0'),
-            customerId: customer.id,
-            storeId,
-            contactNameSnapshot: customer.name ?? 'Demo Shopper',
-            contactPhoneSnapshot: customer.phone,
-            deliveryAddressSnapshotJson: {
-              line1: '221, 9th Main',
-              locality: 'Jayanagar 4th Block',
-              pincode: '560041',
-            },
-            deliverySlotStart: slotStart,
-            deliverySlotEnd: slotEnd,
-            paymentMethod: index === 0 ? 'COD' : 'UPI_ON_DELIVERY',
-            status,
-            subtotalPaise,
-            deliveryFeePaise,
-            estimatedTotalPaise: subtotalPaise + deliveryFeePaise,
-            ...(status === 'ACCEPTED' ? { acceptedAt: slotStart } : {}),
-            lines: {
-              create: lines.map((line) => ({
-                productId: line.productId,
-                nameSnapshot: line.product.name,
-                packSizeSnapshot: line.product.packSize,
-                unitPricePaise: line.sellingPricePaise,
-                qtyOrdered: index + 1,
-              })),
-            },
-          },
-          select: { id: true },
-        });
+          const movements: { productId: string; qty: number; balanceAfter: number }[] = [];
+          for (const step of planned) {
+            await tx.inventoryItem.update({
+              where: { id: step.itemId },
+              data: { websiteStock: step.balanceAfter },
+            });
+            movements.push({
+              productId: step.productId,
+              qty: step.qty,
+              balanceAfter: step.balanceAfter,
+            });
+          }
 
-        // One ledger row per line, with the resulting balance, in this same
-        // transaction — the invariant §3 exists for, and the reason a later
-        // cancellation gives back exactly what was taken.
-        for (const movement of movements) {
-          await tx.stockLedger.create({
+          const order = await tx.order.create({
             data: {
+              orderNumber,
+              trackingToken: `t_DEMO${code}${String(index + 1).padStart(2, '0')}`.padEnd(22, '0'),
+              customerId: customer.id,
               storeId,
-              productId: movement.productId,
-              delta: -movement.qty,
-              reason: 'ORDER_PLACED',
-              refType: 'Order',
-              refId: order.id,
-              balanceAfter: movement.balanceAfter,
-              actorType: 'SYSTEM',
-              note: 'Seeded demo order (development seed)',
+              contactNameSnapshot: customer.name ?? 'Demo Shopper',
+              contactPhoneSnapshot: customer.phone,
+              deliveryAddressSnapshotJson: {
+                line1: '221, 9th Main',
+                locality: 'Jayanagar 4th Block',
+                pincode: '560041',
+              },
+              deliverySlotStart: slotStart,
+              deliverySlotEnd: slotEnd,
+              paymentMethod: index === 0 ? 'COD' : 'UPI_ON_DELIVERY',
+              status,
+              subtotalPaise,
+              deliveryFeePaise,
+              estimatedTotalPaise: subtotalPaise + deliveryFeePaise,
+              ...(status === 'ACCEPTED' ? { acceptedAt: slotStart } : {}),
+              lines: {
+                create: lines.map((line) => ({
+                  productId: line.productId,
+                  nameSnapshot: line.product.name,
+                  packSizeSnapshot: line.product.packSize,
+                  unitPricePaise: line.sellingPricePaise,
+                  qtyOrdered: index + 1,
+                })),
+              },
             },
+            select: { id: true },
           });
-        }
 
-        // Every status an order has ever held gets a history row, including the
-        // one it was created at (§11) — the same shape `orders.createOrder`
-        // writes, so the tracking page's timeline renders for these too.
-        await tx.orderStatusHistory.create({
-          data: { orderId: order.id, fromStatus: null, toStatus: 'PLACED', actorType: 'SYSTEM' },
-        });
-        if (status === 'ACCEPTED') {
+          // One ledger row per line, with the resulting balance, in this same
+          // transaction — the invariant §3 exists for, and the reason a later
+          // cancellation gives back exactly what was taken.
+          for (const movement of movements) {
+            await tx.stockLedger.create({
+              data: {
+                storeId,
+                productId: movement.productId,
+                delta: -movement.qty,
+                reason: 'ORDER_PLACED',
+                refType: 'Order',
+                refId: order.id,
+                balanceAfter: movement.balanceAfter,
+                actorType: 'SYSTEM',
+                note: 'Seeded demo order (development seed)',
+              },
+            });
+          }
+
+          // Every status an order has ever held gets a history row, including the
+          // one it was created at (§11) — the same shape `orders.createOrder`
+          // writes, so the tracking page's timeline renders for these too.
           await tx.orderStatusHistory.create({
-            data: {
-              orderId: order.id,
-              fromStatus: 'PLACED',
-              toStatus: 'ACCEPTED',
-              actorType: 'SYSTEM',
-              note: 'Seeded demo order',
-            },
+            data: { orderId: order.id, fromStatus: null, toStatus: 'PLACED', actorType: 'SYSTEM' },
           });
-        }
-      });
+          if (status === 'ACCEPTED') {
+            await tx.orderStatusHistory.create({
+              data: {
+                orderId: order.id,
+                fromStatus: 'PLACED',
+                toStatus: 'ACCEPTED',
+                actorType: 'SYSTEM',
+                note: 'Seeded demo order',
+              },
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          // The one case we skip, and only *after* its transaction has rolled
+          // back. Anything else is a real failure and is re-thrown: a seed that
+          // swallows errors is a seed nobody can trust.
+          if (!(error instanceof DemoOrderUnfillable)) throw error;
+          console.warn(
+            `Seed: skipped demo order ${error.orderNumber} — not enough stock to fill it.`,
+          );
+        });
     }
   }
 }

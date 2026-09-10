@@ -350,6 +350,196 @@ describe('the seed is idempotent', () => {
     }
   });
 
+  /**
+   * Which shelves the seed's demo orders will draw on, in the order it picks
+   * them: the first two listed products of a store, by `productId`.
+   */
+  async function demoShelves(
+    storeId: string,
+  ): Promise<{ productId: string; itemId: string; stock: number }[]> {
+    const listed = await prisma.storeProduct.findMany({
+      where: { storeId, isListed: true },
+      select: { productId: true },
+      orderBy: { productId: 'asc' },
+      take: 2,
+    });
+    const shelves = [];
+    for (const row of listed) {
+      const item = await prisma.inventoryItem.findFirstOrThrow({
+        where: { storeId, productId: row.productId },
+        select: { id: true, websiteStock: true },
+      });
+      shelves.push({ productId: row.productId, itemId: item.id, stock: item.websiteStock });
+    }
+    return shelves;
+  }
+
+  /**
+   * Move a shelf to `target`, **with** the ledger row that explains it.
+   *
+   * A fixture that just wrote `websiteStock` would break the sum-of-movements
+   * invariant these tests then assert, and the failure would look like the
+   * defect rather than like the fixture.
+   */
+  async function setShelf(
+    storeId: string,
+    productId: string,
+    itemId: string,
+    target: number,
+  ): Promise<void> {
+    const item = await prisma.inventoryItem.findUniqueOrThrow({ where: { id: itemId } });
+    const delta = target - item.websiteStock;
+    await prisma.inventoryItem.update({ where: { id: itemId }, data: { websiteStock: target } });
+    if (delta !== 0) {
+      await prisma.stockLedger.create({
+        data: {
+          storeId,
+          productId,
+          delta,
+          reason: 'RECONCILE',
+          balanceAfter: target,
+          actorType: 'SYSTEM',
+          note: 'test fixture',
+        },
+      });
+    }
+  }
+
+  /** Whole-row snapshots of everything a demo order would touch. */
+  async function snapshot(storeId: string) {
+    return {
+      inventory: await prisma.inventoryItem.findMany({
+        where: { storeId },
+        orderBy: { productId: 'asc' },
+      }),
+      ledger: await prisma.stockLedger.findMany({
+        where: { storeId },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      }),
+      orders: await prisma.order.findMany({ where: { storeId }, orderBy: { orderNumber: 'asc' } }),
+      history: await prisma.orderStatusHistory.findMany({
+        where: { order: { storeId } },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      }),
+    };
+  }
+
+  /** Every shelf must equal the sum of the movements recorded against it (§3). */
+  async function assertBalancesExplained(storeId: string): Promise<void> {
+    for (const item of await prisma.inventoryItem.findMany({ where: { storeId } })) {
+      const movements = await prisma.stockLedger.findMany({
+        where: { storeId, productId: item.productId },
+      });
+      expect(
+        movements.reduce((sum, entry) => sum + entry.delta, 0),
+        `shelf ${item.productId} is not explained by its ledger`,
+      ).toBe(item.websiteStock);
+    }
+  }
+
+  it('commits nothing at all when a later line is short (R4 residual)', async () => {
+    // OSCAR's repro. `DEMO-02` needs two units of each of the first two listed
+    // products. Leave the *second* shelf one short and the seed used to `return`
+    // from inside the transaction — which commits — so the first shelf's two
+    // units vanished with no order, no history and no ledger row to explain them.
+    await clearDemoOrders();
+    const store = await prisma.store.findFirstOrThrow({ where: { code: 'S1' } });
+    const shelves = await demoShelves(store.id);
+    expect(shelves).toHaveLength(2);
+
+    // DEMO-01 needs 1 of the first shelf; DEMO-02 needs 2 of each. One unit on
+    // the second shelf lets the first order through and stops the second.
+    await setShelf(store.id, shelves[1]!.productId, shelves[1]!.itemId, 1);
+
+    const before = await snapshot(store.id);
+    execFileSync('npx', ['tsx', 'prisma/seed.ts'], { env: process.env, stdio: 'ignore' });
+    const after = await snapshot(store.id);
+
+    // DEMO-01 is filled; DEMO-02 is not written at all.
+    const numbers = after.orders.map((o) => o.orderNumber).filter((n) => n.includes('-DEMO-'));
+    expect(numbers).toEqual([`${store.code}-DEMO-01`]);
+    expect(after.history.filter((h) => h.orderId === undefined)).toEqual([]);
+
+    // The decisive assertion: the first shelf lost exactly DEMO-01's one unit —
+    // not that plus DEMO-02's abandoned two.
+    const firstAfter = after.inventory.find((i) => i.productId === shelves[0]!.productId);
+    expect(firstAfter?.websiteStock).toBe(shelves[0]!.stock - 1);
+
+    // …and the shelf DEMO-02 could not fill is untouched, row for row.
+    const secondBefore = before.inventory.find((i) => i.productId === shelves[1]!.productId);
+    const secondAfter = after.inventory.find((i) => i.productId === shelves[1]!.productId);
+    expect(secondAfter).toEqual(secondBefore);
+
+    // Exactly one new ledger row: DEMO-01's. Nothing was written for DEMO-02.
+    const newLedger = after.ledger.filter(
+      (row) => !before.ledger.some((prior) => prior.id === row.id),
+    );
+    expect(newLedger).toHaveLength(1);
+    expect(newLedger[0]).toMatchObject({ reason: 'ORDER_PLACED', delta: -1 });
+
+    await assertBalancesExplained(store.id);
+  });
+
+  it('commits nothing at all when a later line has no stock whatsoever (R4 residual)', async () => {
+    // The same guard reached the other way. OSCAR asked for a *missing
+    // inventory row* here, and that case takes an identical path
+    // (`item === null || item.websiteStock < qty` — one condition, one throw) —
+    // but it cannot be produced through a full seed run: `seedStore` recreates
+    // an inventory row for every product the store could stock, and it runs
+    // before `seedDemoOrders`. Deleting the row simply gets it back. So this
+    // drives the reachable half of the same condition, on the other store.
+    await clearDemoOrders();
+    const store = await prisma.store.findFirstOrThrow({ where: { code: 'S2' } });
+    const shelves = await demoShelves(store.id);
+    expect(shelves).toHaveLength(2);
+
+    await setShelf(store.id, shelves[1]!.productId, shelves[1]!.itemId, 0);
+
+    const before = await snapshot(store.id);
+    execFileSync('npx', ['tsx', 'prisma/seed.ts'], { env: process.env, stdio: 'ignore' });
+    const after = await snapshot(store.id);
+
+    expect(after.orders.map((o) => o.orderNumber).filter((n) => n.includes('-DEMO-'))).toEqual([
+      `${store.code}-DEMO-01`,
+    ]);
+    const firstAfter = after.inventory.find((i) => i.productId === shelves[0]!.productId);
+    expect(firstAfter?.websiteStock).toBe(shelves[0]!.stock - 1);
+
+    const secondBefore = before.inventory.find((i) => i.productId === shelves[1]!.productId);
+    const secondAfter = after.inventory.find((i) => i.productId === shelves[1]!.productId);
+    expect(secondAfter).toEqual(secondBefore);
+
+    const newLedger = after.ledger.filter(
+      (row) => !before.ledger.some((prior) => prior.id === row.id),
+    );
+    expect(newLedger).toHaveLength(1);
+
+    await assertBalancesExplained(store.id);
+  });
+
+  it('loses nothing when a partial seed is repeated (R4 residual)', async () => {
+    // Row-count idempotence could not see the old defect: the counts were right
+    // and the balances were wrong, and each repeat drained more. This measures
+    // the balances.
+    await clearDemoOrders();
+    const store = await prisma.store.findFirstOrThrow({ where: { code: 'S1' } });
+    const shelves = await demoShelves(store.id);
+    await setShelf(store.id, shelves[1]!.productId, shelves[1]!.itemId, 1);
+
+    execFileSync('npx', ['tsx', 'prisma/seed.ts'], { env: process.env, stdio: 'ignore' });
+    const afterFirst = await snapshot(store.id);
+
+    for (let run = 0; run < 2; run += 1) {
+      execFileSync('npx', ['tsx', 'prisma/seed.ts'], { env: process.env, stdio: 'ignore' });
+    }
+    const afterRepeats = await snapshot(store.id);
+
+    expect(afterRepeats.inventory).toEqual(afterFirst.inventory);
+    expect(afterRepeats.ledger).toEqual(afterFirst.ledger);
+    expect(afterRepeats.orders).toEqual(afterFirst.orders);
+    await assertBalancesExplained(store.id);
+  }, 120_000);
+
   it('gives back exactly what a demo order took when it is cancelled (R4)', async () => {
     await clearDemoOrders();
     execFileSync('npx', ['tsx', 'prisma/seed.ts'], { env: process.env, stdio: 'ignore' });
