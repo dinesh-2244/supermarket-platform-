@@ -67,6 +67,12 @@ drive them. `main` stays CI + E2E green.
   **re-checks** `authorize(...)` server-side (middleware is not the boundary).
 - TOTP 2FA: schema field already exists; wire an **optional** enrol/verify path,
   not enforced this phase (recommended-on for `SUPER_ADMIN`, documented).
+  **"Not enforced" governs enrolment, not verification:** nobody is *made* to
+  enrol — no role mandate, no forced prompt, nobody blocked for not having set
+  it up — but an account that *has* enrolled is asked for its code at every
+  sign-in. A stored secret that sign-in never checked would leave the person who
+  enrolled less safe than they believe they are, which is worse than not
+  offering it.
 
 ### D2 — `stores`: stores, settings, zones/areas, serviceability
 
@@ -262,7 +268,11 @@ invariant) individually reviewable.
 - **No production hosting or managed-Postgres vendor/budget decision** — Phase 7.
 - **No rate-limit / security hardening pass or load testing** — Phase 6 (keep
   whatever `RATE_LIMIT_*` config the kernel already reads; don't build the limiter).
-- **No 2FA enforcement** — optional enrol path only.
+- **No 2FA enforcement** — optional enrol path only; see D1 for what that does
+  and does not mean. Nobody is made to enrol; a code *is* required once enrolled.
+- **No brute-force limiter on the 2FA code step** — same Phase 6 deferral as the
+  line above, and the limiter that lands there must cover the code step and not
+  only the password step (card `totp-code-step-rate-limit`).
 
 ## OSCAR — independent review scope for Phase 2
 
