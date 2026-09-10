@@ -48,15 +48,35 @@ export async function findTwoFactorSecret(userId: string, db?: DbExecutor): Prom
   return row?.twoFactorSecret ?? null;
 }
 
-/** Enrol or withdraw a second factor. `null` withdraws it. */
-export async function setTwoFactorSecret(
+/**
+ * Store a second factor, but **only** on an account that has none.
+ *
+ * The `twoFactorSecret: null` in the where-clause is the guard, not a
+ * convenience: it makes enrolment a compare-and-set that the database
+ * arbitrates, so two confirms racing on the same account cannot both believe
+ * they won. Returns whether this call was the one that wrote.
+ *
+ * `updateMany` rather than `update` because `update` requires a unique
+ * where-clause and would refuse the extra condition — and because the row
+ * count is exactly the answer needed.
+ */
+export async function enrolTwoFactorSecret(
   tx: Tx,
   userId: string,
-  secret: string | null,
-): Promise<void> {
+  secret: string,
+): Promise<boolean> {
+  const { count } = await auditedExecutor(tx).user.updateMany({
+    where: { id: userId, twoFactorSecret: null },
+    data: { twoFactorSecret: secret },
+  });
+  return count === 1;
+}
+
+/** Withdraw a second factor. */
+export async function clearTwoFactorSecret(tx: Tx, userId: string): Promise<void> {
   await auditedExecutor(tx).user.update({
     where: { id: userId },
-    data: { twoFactorSecret: secret },
+    data: { twoFactorSecret: null },
   });
 }
 

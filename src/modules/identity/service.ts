@@ -494,6 +494,24 @@ export async function beginTotpEnrolment(
  * Requires the current password as well. Enrolling a second factor changes how
  * the account is entered, so it is exactly the kind of change a borrowed,
  * still-signed-in browser should not be able to make.
+ *
+ * ## R1 — this is a strict `null` -> secret transition, and nothing else
+ *
+ * It used to write whatever secret it was handed, so an account that *already*
+ * had a factor could have it replaced by someone holding only a live session
+ * and the password: confirm a secret of your own, then `disableTotp` with a
+ * code you can compute, and the original factor is gone without anyone ever
+ * proving possession of it. The second factor existed precisely to stop the
+ * person who has the password, so that path defeated the feature.
+ *
+ * Rotating a factor is therefore two deliberate steps — {@link disableTotp},
+ * which demands a code from the *stored* secret, and then a fresh
+ * {@link beginTotpEnrolment}. There is no in-place replace.
+ *
+ * The read below is for the error message; the guard that actually holds is
+ * the conditional write in `repo.enrolTwoFactorSecret`, which lets the database
+ * arbitrate two confirms racing on the same account. A check followed by an
+ * unconditional write would let both believe they won.
  */
 export async function confirmTotpEnrolment(
   principal: Principal,
@@ -515,9 +533,16 @@ export async function confirmTotpEnrolment(
       {},
     );
   }
+  if ((await repo.findTwoFactorSecret(principal.userId)) !== null) {
+    throw new ConflictError('A second factor is already enrolled — disable it first', {});
+  }
 
   await withTransaction(async (tx) => {
-    await repo.setTwoFactorSecret(tx, principal.userId, input.secret);
+    if (!(await repo.enrolTwoFactorSecret(tx, principal.userId, input.secret))) {
+      // Somebody else enrolled between the read above and this write. Throwing
+      // inside the transaction rolls the audit row back with it.
+      throw new ConflictError('A second factor is already enrolled — disable it first', {});
+    }
     await writeAuditLog(tx, {
       principal,
       action: 'update',
@@ -559,7 +584,7 @@ export async function disableTotp(
   }
 
   await withTransaction(async (tx) => {
-    await repo.setTwoFactorSecret(tx, principal.userId, null);
+    await repo.clearTwoFactorSecret(tx, principal.userId);
     await writeAuditLog(tx, {
       principal,
       action: 'update',

@@ -236,6 +236,124 @@ describe('identity — signing in with a second factor', () => {
   });
 });
 
+describe('identity — R1: an enrolled factor cannot be replaced in place', () => {
+  let staff: { id: string; email: string; principal: Principal };
+  let secretA: string;
+  let now: number;
+
+  beforeEach(async () => {
+    staff = await newStaff('r1');
+    now = Date.now();
+    secretA = (await beginTotpEnrolment(staff.principal)).secret;
+    await confirmTotpEnrolment(
+      staff.principal,
+      { secret: secretA, code: await totpCodeAt(secretA, now), password: PASSWORD },
+      now,
+    );
+  });
+
+  it('refuses a second enrolment and leaves the stored secret byte-for-byte alone', async () => {
+    const { secret: secretB } = await beginTotpEnrolment(staff.principal);
+
+    await expect(
+      confirmTotpEnrolment(
+        staff.principal,
+        { secret: secretB, code: await totpCodeAt(secretB, now), password: PASSWORD },
+        now,
+      ),
+    ).rejects.toThrow(/already enrolled/i);
+
+    expect(await storedSecret(staff.id)).toBe(secretA);
+  });
+
+  it('closes the replace-then-disable chain that removed a factor nobody could prove', async () => {
+    // The whole attack, in order. Someone holding a live session and the
+    // password — but not the enrolled authenticator — enrols a secret of their
+    // own, then withdraws it with a code they can compute. Before the fix that
+    // left the account on its password alone.
+    const { secret: secretB } = await beginTotpEnrolment(staff.principal);
+
+    await expect(
+      confirmTotpEnrolment(
+        staff.principal,
+        { secret: secretB, code: await totpCodeAt(secretB, now), password: PASSWORD },
+        now,
+      ),
+    ).rejects.toThrow(/already enrolled/i);
+
+    // Withdrawal still demands a code from the *stored* secret, so B is no use.
+    await expect(
+      disableTotp(
+        staff.principal,
+        { code: await totpCodeAt(secretB, now), password: PASSWORD },
+        now,
+      ),
+    ).rejects.toThrow(/does not match/i);
+
+    // The original factor is intact and still the thing that opens the account.
+    expect(
+      await verifyCredentials(staff.email, PASSWORD, await totpCodeAt(secretA, now), now),
+    ).not.toBeNull();
+    expect(
+      await verifyCredentials(staff.email, PASSWORD, await totpCodeAt(secretB, now), now),
+    ).toBeNull();
+    expect(await verifyCredentials(staff.email, PASSWORD, '', now)).toBeNull();
+  });
+
+  it('refuses a valid confirmation resubmitted after it already succeeded', async () => {
+    // A double-clicked form must not silently rewrite the same secret — the
+    // transition is null -> secret, and it has already happened.
+    await expect(
+      confirmTotpEnrolment(
+        staff.principal,
+        { secret: secretA, code: await totpCodeAt(secretA, now), password: PASSWORD },
+        now,
+      ),
+    ).rejects.toThrow(/already enrolled/i);
+
+    expect(await storedSecret(staff.id)).toBe(secretA);
+  });
+});
+
+describe('identity — R1: two confirmations racing on one account', () => {
+  it('lets exactly one win, and the loser changes nothing', async () => {
+    const staff = await newStaff('r1-race');
+    const now = Date.now();
+    const first = (await beginTotpEnrolment(staff.principal)).secret;
+    const second = (await beginTotpEnrolment(staff.principal)).secret;
+
+    // Both read a null secret before either writes. The read is only for the
+    // error message; the conditional write is what actually arbitrates, so this
+    // is the case that would pass a check-then-write and fail here.
+    const results = await Promise.allSettled([
+      confirmTotpEnrolment(
+        staff.principal,
+        { secret: first, code: await totpCodeAt(first, now), password: PASSWORD },
+        now,
+      ),
+      confirmTotpEnrolment(
+        staff.principal,
+        { secret: second, code: await totpCodeAt(second, now), password: PASSWORD },
+        now,
+      ),
+    ]);
+
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toMatchObject({
+      message: expect.stringMatching(/already enrolled/i),
+    });
+
+    // Whichever won, the account holds exactly that one and it works.
+    const stored = await storedSecret(staff.id);
+    expect([first, second]).toContain(stored);
+    expect(
+      await verifyCredentials(staff.email, PASSWORD, await totpCodeAt(stored ?? '', now), now),
+    ).not.toBeNull();
+  });
+});
+
 describe('identity — withdrawing a second factor', () => {
   let staff: { id: string; email: string; principal: Principal };
   let secret: string;

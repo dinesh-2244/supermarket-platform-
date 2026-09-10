@@ -133,7 +133,18 @@ export function totpCodeAt(secret: string, atMs: number, digits = TOTP_DIGITS): 
   return totpCodeFor(secret, counterFor(atMs), digits);
 }
 
-/** Length-independent, value-independent comparison. */
+/**
+ * Value-independent comparison of two strings **of the same length**.
+ *
+ * N1 — this used to claim to be length-independent, which it is not: the early
+ * return on a length mismatch is a branch an attacker could time. Nothing here
+ * can reach it — `verifyTotpCode` rejects anything that is not exactly six
+ * digits before it calls this, and the codes it compares against are six digits
+ * by construction — so the guarantee that matters is the one now written down:
+ * for equal-length inputs the time taken says nothing about *where* they
+ * differ, or whether they differ at all. The length check stays as a
+ * correctness guard for a future caller; the comment no longer over-promises.
+ */
 function constantTimeEquals(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
