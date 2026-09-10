@@ -114,19 +114,23 @@ function everyModelAccess(): readonly Access[] {
  * Violations of the same class that predate this rule, listed rather than
  * excused away.
  *
- * All three are Phase 2 reads in `inventory`: a store's low-stock threshold, a
- * SKU→id lookup for the CSV import, and the import's listing scope check. Each
- * would be corrected by a narrow read on the owning module's public interface,
- * and none of them is R7 — they are read-only, they apply no rule the owning
- * module would apply differently, and they sit behind back-office screens this
- * corrective round was told not to touch.
+ * Two of the original three are gone (`p3-followup-model-ownership`): the
+ * low-stock threshold now comes from `stores.lowStockThresholdFor` and the CSV
+ * import's SKU→id resolve from `catalog.findProductIdsBySku`.
  *
- * The list is asserted to be *exactly* this, so it cannot quietly grow: a fourth
- * entry fails the suite. Tracked as `p3-followup-model-ownership`.
+ * The one that remains is not an oversight — it is **blocked by §4 itself**.
+ * `StoreProduct` belongs to `pricing`, and §4 permits `inventory` to depend on
+ * `platform`, `catalog` and `stores` only. Routing the import's listing-scope
+ * check through `pricing` would mean `inventory` depending on a module the
+ * architecture does not allow it to, which is a decision for the architecture
+ * and not for a follow-up card. The read itself is narrow and safe: it selects
+ * `productId` filtered by `storeId`, applies no rule `pricing` would apply
+ * differently, and sits behind a back-office import screen.
+ *
+ * The list is asserted to be *exactly* this, so it cannot quietly grow: a second
+ * entry fails the suite.
  */
 const KNOWN_EXCEPTIONS: readonly string[] = [
-  'src/modules/inventory/repo.ts → storeSettings (owned by stores)',
-  'src/modules/inventory/repo.ts → product (owned by catalog)',
   'src/modules/inventory/repo.ts → storeProduct (owned by pricing)',
 ];
 

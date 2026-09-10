@@ -24,6 +24,7 @@ import {
 } from './domain/csv';
 import { announceMovement, applyMovement, type MovementResult } from './service';
 import * as repo from './repo';
+import { findProductIdsBySku } from '../catalog/index';
 
 export type { ImportMode, RowError } from './domain/csv';
 export { MAX_IMPORT_BYTES, MAX_IMPORT_ROWS, IMPORT_MODES } from './domain/csv';
@@ -82,7 +83,7 @@ export async function planStockImport(
   const errors: RowError[] = [...parsed.errors];
 
   const skus = parsed.rows.map((row) => row.sku);
-  const productIdBySku = await repo.findProductIdsBySku(skus);
+  const productIdBySku = await findProductIdsBySku(principal, skus);
   const listed = await repo.findListedProductIds(input.storeId, [...productIdBySku.values()]);
 
   const resolvable = parsed.rows.filter((row) => {

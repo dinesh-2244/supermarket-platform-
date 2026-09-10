@@ -11,6 +11,7 @@ import {
   ValidationError,
   withTransaction,
   writeAuditLog,
+  type DbExecutor,
   type Principal,
 } from '../platform/index';
 import {
@@ -518,6 +519,39 @@ export interface StorefrontArea {
   readonly pincode: string | null;
   readonly storeId: string;
   readonly isAcceptingOrders: boolean;
+}
+
+/**
+ * The store's low-stock threshold (§22).
+ *
+ * `inventory` needs this to decide whether a movement crossed the line and
+ * should emit `stock.low`. It used to read `StoreSettings` directly — a §4
+ * violation pinned as a known exception in `model-ownership.test.ts` and tracked
+ * as `p3-followup-model-ownership`.
+ *
+ * Principal-less, deliberately, and for a narrower reason than
+ * {@link listServiceableAreas}. The caller is `applyMovement`, whose principal
+ * is whoever *caused* the movement — a staff member adjusting stock, the seed
+ * writing opening balances, or a shopper whose order took a unit off the shelf.
+ * `getSettings` refuses a customer principal on purpose, because its shape
+ * carries POS mode and variance thresholds; routing this through it would deny
+ * a legitimate movement over a number that is neither confidential nor ever
+ * rendered to a shopper. So this returns the one integer and nothing else.
+ *
+ * `0` when the store has no settings row: a threshold nothing can fall below,
+ * which is the safe reading of "not configured".
+ *
+ * Takes the caller's `DbExecutor` for a reason that is easy to miss.
+ * `applyMovement` runs inside an interactive transaction, and a query issued on
+ * the singleton client from in there takes a *second* connection out of the
+ * pool while the first is still held. With a small pool — CI runs
+ * `connection_limit=5` — enough concurrent movements would then wait on a
+ * connection none of them can release. Reading on the caller's handle keeps it
+ * to the one connection they already hold.
+ */
+export async function lowStockThresholdFor(storeId: string, db?: DbExecutor): Promise<number> {
+  const settings = await repo.findSettings(storeId, db);
+  return settings?.lowStockThreshold ?? 0;
 }
 
 /** Record an out-of-zone attempt as a demand signal (§15). */

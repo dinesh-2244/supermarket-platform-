@@ -194,6 +194,26 @@ export async function countProducts(
  * is in stock. Keeping those two questions separate is what lets one URL be
  * shared between customers of either shop.
  */
+/**
+ * Resolve SKUs to product ids in one query — the CSV import's hot path.
+ *
+ * `inventory` used to query `Product` itself, which is `catalog`'s table (§4);
+ * pinned as a known exception and tracked as `p3-followup-model-ownership`.
+ * Authorized like every other catalogue read: the importer is staff and holds
+ * `product:read`, so nothing here is looser than the screen they came from.
+ *
+ * A SKU with no product is simply absent from the map — the import reports it
+ * per row, which is a better error than a partial failure.
+ */
+export async function findProductIdsBySku(
+  principal: Principal,
+  skus: readonly string[],
+): Promise<ReadonlyMap<string, string>> {
+  assertAuthorized(principal, 'product:read', CATALOG);
+  if (skus.length === 0) return new Map();
+  return repo.findProductIdsBySku(skus);
+}
+
 export async function getProductBySlug(
   principal: Principal,
   slug: string,

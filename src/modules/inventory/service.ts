@@ -31,6 +31,7 @@ import {
   type StockReason,
 } from './domain/index';
 import * as repo from './repo';
+import { lowStockThresholdFor } from '../stores/index';
 
 /** What this module owns and is allowed to depend on (§4). */
 export function moduleDescriptor(): ModuleDescriptor {
@@ -129,7 +130,7 @@ export async function applyMovement(
     note: input.note ?? null,
   });
 
-  const threshold = await repo.lowStockThresholdFor(input.storeId, tx);
+  const threshold = await lowStockThresholdFor(input.storeId, tx);
 
   return {
     storeId: input.storeId,
@@ -429,7 +430,7 @@ export async function listLowStock(
   limit = 100,
 ): Promise<{ threshold: number; items: readonly repo.InventoryRecord[] }> {
   assertAuthorized(principal, 'inventory:read', { type: 'InventoryItem', storeId });
-  const threshold = await repo.lowStockThresholdFor(storeId);
+  const threshold = await lowStockThresholdFor(storeId);
   const items = await repo.listLowStock(principal, storeId, threshold, Math.min(limit, 500));
   return { threshold, items };
 }

@@ -17,6 +17,7 @@ export {
   isDeliverableArea,
   listAreas,
   listServiceableAreas,
+  lowStockThresholdFor,
   listStores,
   listZones,
   moduleDescriptor,

@@ -5,6 +5,7 @@
  * `service.ts`, `repo.ts` and `domain/` are module-private.
  */
 export {
+  findProductIdsBySku,
   addProductImage,
   createCategory,
   countProducts,

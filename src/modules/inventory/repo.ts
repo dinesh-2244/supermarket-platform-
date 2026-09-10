@@ -235,27 +235,6 @@ export async function listLedger(
   });
 }
 
-/** The store's low-stock threshold, from its settings (§22). */
-export async function lowStockThresholdFor(storeId: string, db?: DbExecutor): Promise<number> {
-  const settings = await executor(db).storeSettings.findUnique({
-    where: { storeId },
-    select: { lowStockThreshold: true },
-  });
-  return settings?.lowStockThreshold ?? 0;
-}
-
-/** Resolve SKUs to product ids in one query — the CSV import's hot path. */
-export async function findProductIdsBySku(
-  skus: readonly string[],
-  db?: DbExecutor,
-): Promise<ReadonlyMap<string, string>> {
-  const rows = await executor(db).product.findMany({
-    where: { sku: { in: [...skus] } },
-    select: { id: true, sku: true },
-  });
-  return new Map(rows.map((row) => [row.sku, row.id]));
-}
-
 /** Which of these products this store actually lists (the import's scope check). */
 export async function findListedProductIds(
   storeId: string,
