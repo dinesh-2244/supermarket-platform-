@@ -197,6 +197,18 @@ export async function countProducts(
   });
 }
 
+/** SKU → product id, for the stock import's bulk resolve. */
+export async function findProductIdsBySku(
+  skus: readonly string[],
+  db?: DbExecutor,
+): Promise<ReadonlyMap<string, string>> {
+  const rows = await executor(db).product.findMany({
+    where: { sku: { in: [...skus] } },
+    select: { id: true, sku: true },
+  });
+  return new Map(rows.map((row) => [row.sku, row.id]));
+}
+
 export async function findProductBySlug(
   slug: string,
   db?: DbExecutor,
