@@ -235,19 +235,6 @@ export async function listLedger(
   });
 }
 
-/** Which of these products this store actually lists (the import's scope check). */
-export async function findListedProductIds(
-  storeId: string,
-  productIds: readonly string[],
-  db?: DbExecutor,
-): Promise<ReadonlySet<string>> {
-  const rows = await executor(db).storeProduct.findMany({
-    where: { storeId, productId: { in: [...productIds] } },
-    select: { productId: true },
-  });
-  return new Set(rows.map((row) => row.productId));
-}
-
 // ---------------------------------------------------------------------------
 // Import history (D6)
 // ---------------------------------------------------------------------------

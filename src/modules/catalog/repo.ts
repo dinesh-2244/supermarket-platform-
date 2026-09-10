@@ -197,6 +197,35 @@ export async function countProducts(
   });
 }
 
+/**
+ * Which of these products the store has set up at all — a `StoreProduct` row
+ * exists for the pair.
+ *
+ * `StoreProduct` is a **split-ownership table**: §4 scopes `pricing` to
+ * "StoreProduct *price fields*, PriceChange", so the price columns are theirs,
+ * while which products a store carries is a per-store cataloguing concern and
+ * therefore `catalog`'s. This read touches the cataloguing side only — the
+ * store/product pairing — and no price column, which is what makes it
+ * `catalog`'s to do.
+ *
+ * Deliberately **not** filtered on `isListed`. It answers "is this product set
+ * up for this store", which is what its one caller asks and what that caller's
+ * error message says. Adding `isListed: true` would quietly start rejecting
+ * stock imports for delisted-but-stocked products, and that is a product
+ * decision, not a refactor's to make.
+ */
+export async function findProductIdsSetUpForStore(
+  storeId: string,
+  productIds: readonly string[],
+  db?: DbExecutor,
+): Promise<ReadonlySet<string>> {
+  const rows = await executor(db).storeProduct.findMany({
+    where: { storeId, productId: { in: [...productIds] } },
+    select: { productId: true },
+  });
+  return new Set(rows.map((row) => row.productId));
+}
+
 /** SKU → product id, for the stock import's bulk resolve. */
 export async function findProductIdsBySku(
   skus: readonly string[],
