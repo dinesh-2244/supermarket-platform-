@@ -259,11 +259,18 @@ describe('schema invariants (Phase 1 Definition of Done)', () => {
       expect(entry.delta).toBe(entry.balanceAfter);
     }
 
-    const balances = new Map(
-      items.map((item) => [`${item.storeId}:${item.productId}`, item.websiteStock]),
-    );
-    for (const entry of opening) {
-      expect(entry.balanceAfter).toBe(balances.get(`${entry.storeId}:${entry.productId}`));
+    // The opening row explains the *opening* balance, not necessarily the
+    // current one: the seed's demo orders now take stock and write their own
+    // `ORDER_PLACED` rows (OSCAR R4), so a shelf can legitimately sit below
+    // where it started. What §3 actually requires is stronger and is what is
+    // asserted here — **every** balance is the sum of every movement recorded
+    // against it. A shelf that moved without a ledger row fails this; one that
+    // moved with one does not.
+    for (const item of items) {
+      const movements = await prisma.stockLedger.findMany({
+        where: { storeId: item.storeId, productId: item.productId },
+      });
+      expect(movements.reduce((sum, entry) => sum + entry.delta, 0)).toBe(item.websiteStock);
     }
   });
 

@@ -22,6 +22,7 @@ export {
   listZones,
   moduleDescriptor,
   resolveServiceability,
+  slotGridFor,
   updateArea,
   updatePosMode,
   updateSettings,
@@ -32,6 +33,7 @@ export {
   type SettingsRecord,
   type StorefrontArea,
   type StorefrontSettings,
+  type SlotGrid,
   type StoreRecord,
   type ZoneRecord,
 } from './service';
@@ -51,3 +53,16 @@ export {
   type ServiceableResult,
   type UnserviceableResult,
 } from './domain/index';
+
+export {
+  assertSlotLength,
+  isBookableSlot,
+  localDayStart,
+  SLOT_HORIZON_DAYS,
+  SLOT_LEAD_MINUTES,
+  slotEndOf,
+  slotGrid,
+  zoneOffsetMs,
+  type Slot,
+  type SlotGridInput,
+} from './domain/slots';

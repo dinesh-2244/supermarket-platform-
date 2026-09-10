@@ -26,6 +26,7 @@ import {
   type ServiceabilityInput,
   type ServiceabilityResult,
 } from './domain/index';
+import { slotGrid } from './domain/slots';
 import * as repo from './repo';
 
 /** What this module owns and is allowed to depend on (§4). */
@@ -183,6 +184,62 @@ export async function getStorefrontSettings(
     isAcceptingOrders: settings.isAcceptingOrders,
     slotLengthMinutes: settings.slotLengthMinutes,
     slotCapacity: settings.slotCapacity,
+  };
+}
+
+export interface SlotGrid {
+  readonly storeId: string;
+  readonly timeZone: string;
+  readonly slotLengthMinutes: number;
+  readonly slotCapacity: number;
+  /** Every window a shopper may choose, in order. Empty when the shop is shut. */
+  readonly starts: readonly Date[];
+}
+
+/**
+ * The delivery windows this store offers, and how they are shaped.
+ *
+ * The **single definition** of "is that a real window": the picker and
+ * `placeOrder` both ask this rather than each doing their own arithmetic, so a
+ * slot that can be offered is exactly a slot that can be booked.
+ *
+ * It stops short of saying whether a window still has room. That is a fact about
+ * `Order` rows, which belong to `orders` (§4, R7) — `stores` may not read them,
+ * and inverting the layering so it could would put the module every other module
+ * depends on above the one that depends on it. `checkout.availableSlots`
+ * composes this with the usage count; see the note in that function.
+ */
+export async function slotGridFor(
+  principal: Principal,
+  storeId: string,
+  from: Date,
+  options: { horizonDays?: number; leadMinutes?: number } = {},
+): Promise<SlotGrid> {
+  const [store, settings] = await Promise.all([
+    getStore(principal, storeId),
+    getStorefrontSettings(principal, storeId),
+  ]);
+
+  const shape = {
+    storeId,
+    timeZone: store.timezone,
+    slotLengthMinutes: settings.slotLengthMinutes,
+    slotCapacity: settings.slotCapacity,
+  };
+
+  // A shop that has paused orders offers no windows at all, rather than windows
+  // that turn out to be unbookable at the last step.
+  if (!settings.isAcceptingOrders) return { ...shape, starts: [] };
+
+  return {
+    ...shape,
+    starts: slotGrid({
+      from,
+      slotLengthMinutes: settings.slotLengthMinutes,
+      timeZone: store.timezone,
+      ...(options.horizonDays === undefined ? {} : { horizonDays: options.horizonDays }),
+      ...(options.leadMinutes === undefined ? {} : { leadMinutes: options.leadMinutes }),
+    }),
   };
 }
 

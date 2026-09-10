@@ -1,8 +1,11 @@
 /**
  * Pure domain logic for `checkout` — no I/O, no Prisma, no framework types.
- * Phase 1 ships the folder and the module descriptor only; the rules land with
- * the Phase 2 use-cases (docs/phase-0-architecture.md §4).
+ *
+ * Everything here is a rule that can be decided from numbers and dates alone, so
+ * the interesting cases (a slot half an hour off the grid, a basket a rupee under
+ * the minimum) are testable without a database.
  */
+import { ValidationError } from '../../platform/index';
 
 /** Static description of what this module owns and may depend on (§4). */
 export interface ModuleDescriptor {
@@ -18,3 +21,64 @@ export const descriptor: ModuleDescriptor = {
   dependsOn: ['platform', 'cart', 'orders', 'inventory', 'stores', 'customers'],
   emits: ['order.placed'],
 };
+
+export type PaymentMethod = 'COD' | 'UPI_ON_DELIVERY';
+
+export const PAYMENT_METHODS: readonly PaymentMethod[] = ['COD', 'UPI_ON_DELIVERY'];
+
+/** Both are collected on delivery; neither takes money now (Phase 4 boundary). */
+export function assertPaymentMethod(value: string): PaymentMethod {
+  if (!PAYMENT_METHODS.includes(value as PaymentMethod)) {
+    throw new ValidationError('Choose how you will pay on delivery', { value });
+  }
+  return value as PaymentMethod;
+}
+
+export interface LineShortfall {
+  readonly productId: string;
+  readonly name: string;
+  readonly reason: 'out-of-stock' | 'insufficient-stock' | 'unlisted';
+  readonly available?: number;
+}
+
+/**
+ * Turn a revalidated basket into the list of reasons it cannot be ordered.
+ *
+ * A cart *flags* a short line and keeps it (the shopper may still want to look
+ * at it); checkout is where that stops being something to look at and becomes a
+ * rejection. Removed lines count too: a delisted product silently vanishing
+ * between the basket page and the confirmation is worse than being told.
+ */
+export function shortfallsIn(view: {
+  lines: readonly {
+    productId: string;
+    name: string;
+    issues: readonly ({ kind: string } & { available?: number })[];
+  }[];
+  removed: readonly { productId: string; name: string }[];
+}): LineShortfall[] {
+  const shortfalls: LineShortfall[] = [];
+
+  for (const line of view.lines) {
+    for (const issue of line.issues) {
+      if (issue.kind === 'out-of-stock') {
+        shortfalls.push({ productId: line.productId, name: line.name, reason: 'out-of-stock' });
+      } else if (issue.kind === 'insufficient-stock') {
+        shortfalls.push({
+          productId: line.productId,
+          name: line.name,
+          reason: 'insufficient-stock',
+          ...(issue.available === undefined ? {} : { available: issue.available }),
+        });
+      }
+      // A price change is not a shortfall: the line already carries the current
+      // price, and the shopper is quoted from that. It is shown, not refused.
+    }
+  }
+
+  for (const removed of view.removed) {
+    shortfalls.push({ productId: removed.productId, name: removed.name, reason: 'unlisted' });
+  }
+
+  return shortfalls;
+}

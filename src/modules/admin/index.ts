@@ -5,15 +5,19 @@
  * and `domain/` are module-private.
  */
 export {
+  ACTIONABLE_ORDER_STATUSES,
   auditEntries,
   listingRows,
   moduleDescriptor,
+  orderDetail,
+  orderQueue,
   overview,
   resolveStoreId,
   stockRows,
   type AuditEntryRecord,
   type AuditQuery,
   type ListingRow,
+  type OrderQueue,
   type Overview,
   type StockRow,
 } from './service';

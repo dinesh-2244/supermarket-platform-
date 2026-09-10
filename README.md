@@ -17,10 +17,12 @@ service, and renders.
 > that store's prices, open product pages, and fill a basket — **with no
 > login**. Optional email/password accounts add a profile and an address book.
 >
-> **There is still no checkout.** Nothing in Phase 3 writes an `Order`, an
-> `OrderLine`, `websiteStock` or a `StockLedger` row; the basket's "Proceed to
-> checkout" control is visibly disabled. Ordering, delivery slots, payment
-> choice and the order lifecycle are Phase 4.
+> **Checkout is live as of Phase 4.** A shopper with no account can take a
+> revalidated basket through address, delivery slot and payment choice to a
+> placed order. Placement is one transaction: each line's stock is decremented
+> under a row lock with an `ORDER_PLACED` ledger row, the `Order` and its line
+> snapshots are written, and the basket is converted — all of it together, or
+> none of it. Picking, POS billing, packing and delivery are Phase 5.
 
 ## Requirements
 
@@ -161,6 +163,52 @@ docker compose --env-file .env -f docker/docker-compose.yml config
 `migrate` is its own image target with the full locked dependency tree — the
 Prisma CLI needs far more than `node_modules/prisma`, and a partial copy fails at
 run time with `Cannot find module 'effect'` rather than at build time.
+
+## Checkout, slots and tracking (Phase 4)
+
+A shopper with **no account** goes basket → `/checkout` → placed order. The
+checkout page asks for a name and phone, a delivery address (which resolves,
+through the same `resolveServiceability` the storefront uses, to the shop that
+serves it), a delivery window, and whether they will pay cash or UPI **on
+delivery**. Nothing is charged online; there is no payment gateway.
+
+**Delivery windows** are generated from the shop's own `StoreSettings`
+(`slotLengthMinutes`, `slotCapacity`) and `Store.timezone`, anchored to midnight
+_in that timezone_ — so an `Asia/Kolkata` shop's hourly windows sit on the hour
+locally, and every shopper is offered the same grid. A window opens
+`SLOT_LEAD_MINUTES` (120) ahead and closes at `SLOT_HORIZON_DAYS` (3). The
+remaining-capacity number on the picker is advisory; the binding check happens
+inside the placing transaction under an advisory lock, so a window that fills
+between page load and submit is refused rather than oversold (ADR-0011).
+
+**Placement is one transaction.** Cart row locked (which is also the
+double-submit guard), revalidated server-side, minimum order enforced, each
+line's `InventoryItem` locked in `productId` order and decremented with an
+`ORDER_PLACED` `StockLedger` row carrying the resulting balance, a lightweight
+`Customer` upserted by phone, the `Order` and its line snapshots written, and the
+cart marked `CONVERTED`. Any failure rolls back all of it. `order.placed` is
+emitted once, **after** the commit.
+
+The shopper is quoted an **estimated total** — `subtotal + deliveryFee`, integer
+paise — and told the final amount is confirmed when the shop bills the order.
+
+**Tracking.** `/order-status/<trackingToken>` is read-only, needs no login, and
+is opened by the token alone: an opaque 20-character value, not an order id. An
+unknown or malformed token is a plain 404 with nothing to enumerate. The
+confirmation page after checkout links to it.
+
+**Back office.** `/admin/orders` is a store-scoped queue defaulting to the orders
+that still need action (`?all=1` for the rest); each order has a detail page with
+its line snapshots, status timeline and price-variance state. A
+`STORE_MANAGER` or `SUPER_ADMIN` can issue the audited `CANCELLED_BY_STORE`
+correction with a mandatory reason, which restores each line's not-yet-restored
+stock via an `ADMIN_CORRECTION` ledger row. **There is no customer-facing
+cancellation** — no route, no status value, no reachable service method.
+
+**Demo data.** `npm run db:seed` writes two orders per store, `S1-DEMO-01` /
+`S1-DEMO-02` and the `S2-` equivalents, in `PLACED` and `ACCEPTED`. They are
+keyed by order number, so re-seeding does not duplicate them, and they do not
+move stock — real placement is what exercises that path.
 
 ## Scripts
 

@@ -39,6 +39,7 @@ export {
   selectForUpdate,
   selectManyForUpdate,
   type TransactionOptions,
+  tryAdvisoryXactLock,
   type Tx,
   withTransaction,
 } from './db/index';

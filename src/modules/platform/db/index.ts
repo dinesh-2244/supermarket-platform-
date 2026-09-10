@@ -82,6 +82,14 @@ export const LOCK_NAMESPACE = {
   customerAddresses: 0x0_11_58,
   /** One shopper's carts: at most one of them is `ACTIVE`. */
   customerCarts: 0x0_11_59,
+  /**
+   * One store's delivery slot: how many orders that window already holds.
+   *
+   * The rule is about a *set* of orders, and the order about to join it does not
+   * exist yet, so no row lock can serialise it: two placements would each count
+   * the same N and each commit the N+1st. The key is `(storeId, slotStart)`.
+   */
+  deliverySlot: 0x0_11_5a,
 } as const;
 
 export type LockNamespace = (typeof LOCK_NAMESPACE)[keyof typeof LOCK_NAMESPACE];
@@ -108,6 +116,27 @@ export async function advisoryXactLock(
   key: string,
 ): Promise<void> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(${namespace}::int, hashtext(${key}))`;
+}
+
+/**
+ * Take the lock **if it is free right now**, rather than queueing for it.
+ *
+ * `pg_advisory_xact_lock` blocks, and a blocked transaction goes on holding its
+ * database connection for as long as it waits. With a small pool — CI runs
+ * `connection_limit=5` — a dozen callers queueing on one key exhaust the pool
+ * before the queue drains, and callers that never even reached the lock fail
+ * with a pool timeout. Trying instead lets the caller roll back, give the
+ * connection up, and come back; see `withSlotLock` in `checkout`.
+ */
+export async function tryAdvisoryXactLock(
+  tx: Tx,
+  namespace: LockNamespace,
+  key: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ locked: boolean }[]>`
+    SELECT pg_try_advisory_xact_lock(${namespace}::int, hashtext(${key})) AS "locked"
+  `;
+  return rows[0]?.locked === true;
 }
 
 function asTx(client: Prisma.TransactionClient): Tx {

@@ -665,6 +665,221 @@ async function seedCustomer(): Promise<void> {
   });
 }
 
+/**
+ * A couple of demo orders per store, so the admin queue and the tracking page
+ * have something to render on a fresh database.
+ *
+ * **Idempotent by order number, not by count.** The number is derived from the
+ * store code and an index rather than minted randomly, so a re-run finds the
+ * same rows and does nothing. Seeding "two orders" by counting would double them
+ * every time, which is exactly the bug an idempotence test is for.
+ *
+ * They decrement stock and write their `ORDER_PLACED` ledger rows, in the same
+ * transaction as the order, exactly as `checkout.placeOrder` would.
+ *
+ * The first version deliberately did not, on the reasoning that the opening
+ * balances already had their own ledger rows and a demo order need not disturb
+ * them. That was wrong, and OSCAR found the consequence (R4): cancelling
+ * `S1-DEMO-01` through the ordinary admin correction restored a quantity that
+ * had never been deducted, so a demo database grew stock out of nothing. An
+ * order that is not a faithful example is worse than no example — the whole
+ * point of demo data is that every screen it feeds behaves as it will in
+ * anger, and the correction screen is one of those screens.
+ */
+/**
+ * A demo order that cannot be filled from the shelf.
+ *
+ * Thrown from *inside* the seeding transaction and handled outside it, so every
+ * write that order had already made is rolled back before it is skipped. The
+ * skip therefore happens outside the committing callback, which is the whole
+ * point: nothing partial can commit.
+ */
+class DemoOrderUnfillable extends Error {
+  constructor(readonly orderNumber: string) {
+    super(`Demo order ${orderNumber} cannot be filled`);
+    this.name = 'DemoOrderUnfillable';
+  }
+}
+
+async function seedDemoOrders(storeIds: Map<string, string>): Promise<void> {
+  const customer = await prisma.customer.findUnique({
+    where: { email: DEV_CUSTOMER_EMAIL },
+    select: { id: true, name: true, phone: true },
+  });
+  if (customer === null) return;
+
+  // A fixed instant, so re-running the seed does not walk the slot forward and
+  // produce a different-looking database each time.
+  const slotStart = new Date('2026-12-01T10:30:00.000Z');
+  const slotEnd = new Date('2026-12-01T11:30:00.000Z');
+
+  for (const [code, storeId] of storeIds) {
+    const listed = await prisma.storeProduct.findMany({
+      where: { storeId, isListed: true },
+      select: {
+        productId: true,
+        sellingPricePaise: true,
+        product: { select: { name: true, packSize: true } },
+      },
+      orderBy: { productId: 'asc' },
+      take: 2,
+    });
+    if (listed.length === 0) continue;
+
+    for (const [index, status] of (['PLACED', 'ACCEPTED'] as const).entries()) {
+      const orderNumber = `${code}-DEMO-${String(index + 1).padStart(2, '0')}`;
+      const existing = await prisma.order.findUnique({
+        where: { orderNumber },
+        select: { id: true },
+      });
+      if (existing !== null) continue;
+
+      const lines = listed.slice(0, index + 1);
+      const subtotalPaise = lines.reduce(
+        (sum, line) => sum + line.sellingPricePaise * (index + 1),
+        0,
+      );
+      const settings = await prisma.storeSettings.findUnique({
+        where: { storeId },
+        select: { deliveryFeePaise: true },
+      });
+      const deliveryFeePaise = settings?.deliveryFeePaise ?? 0;
+
+      await prisma
+        .$transaction(async (tx) => {
+          // **Plan every line before writing a single one.**
+          //
+          // This loop used to `return` when a line could not be filled — and a
+          // `return` from a transaction callback *commits*. A demo order whose
+          // second line was short therefore left the first line's decrement
+          // committed with no order, no history and no ledger row: stock gone with
+          // no movement to explain it, which is exactly what the sum-of-movements
+          // invariant in `schema.test.ts` forbids. Repeating a partial seed drained
+          // more each time, and row-count idempotence could not see any of it.
+          //
+          // So: resolve and check every line first, then write. A line that cannot
+          // be filled throws, and the throw is what guarantees the rollback —
+          // `return` never could.
+          const planned: {
+            itemId: string;
+            productId: string;
+            qty: number;
+            balanceAfter: number;
+          }[] = [];
+
+          for (const line of lines) {
+            const item = await tx.inventoryItem.findFirst({
+              where: { storeId, productId: line.productId },
+              select: { id: true, websiteStock: true },
+            });
+            if (item === null || item.websiteStock < index + 1) {
+              throw new DemoOrderUnfillable(orderNumber);
+            }
+            planned.push({
+              itemId: item.id,
+              productId: line.productId,
+              qty: index + 1,
+              balanceAfter: item.websiteStock - (index + 1),
+            });
+          }
+
+          const movements: { productId: string; qty: number; balanceAfter: number }[] = [];
+          for (const step of planned) {
+            await tx.inventoryItem.update({
+              where: { id: step.itemId },
+              data: { websiteStock: step.balanceAfter },
+            });
+            movements.push({
+              productId: step.productId,
+              qty: step.qty,
+              balanceAfter: step.balanceAfter,
+            });
+          }
+
+          const order = await tx.order.create({
+            data: {
+              orderNumber,
+              trackingToken: `t_DEMO${code}${String(index + 1).padStart(2, '0')}`.padEnd(22, '0'),
+              customerId: customer.id,
+              storeId,
+              contactNameSnapshot: customer.name ?? 'Demo Shopper',
+              contactPhoneSnapshot: customer.phone,
+              deliveryAddressSnapshotJson: {
+                line1: '221, 9th Main',
+                locality: 'Jayanagar 4th Block',
+                pincode: '560041',
+              },
+              deliverySlotStart: slotStart,
+              deliverySlotEnd: slotEnd,
+              paymentMethod: index === 0 ? 'COD' : 'UPI_ON_DELIVERY',
+              status,
+              subtotalPaise,
+              deliveryFeePaise,
+              estimatedTotalPaise: subtotalPaise + deliveryFeePaise,
+              ...(status === 'ACCEPTED' ? { acceptedAt: slotStart } : {}),
+              lines: {
+                create: lines.map((line) => ({
+                  productId: line.productId,
+                  nameSnapshot: line.product.name,
+                  packSizeSnapshot: line.product.packSize,
+                  unitPricePaise: line.sellingPricePaise,
+                  qtyOrdered: index + 1,
+                })),
+              },
+            },
+            select: { id: true },
+          });
+
+          // One ledger row per line, with the resulting balance, in this same
+          // transaction — the invariant §3 exists for, and the reason a later
+          // cancellation gives back exactly what was taken.
+          for (const movement of movements) {
+            await tx.stockLedger.create({
+              data: {
+                storeId,
+                productId: movement.productId,
+                delta: -movement.qty,
+                reason: 'ORDER_PLACED',
+                refType: 'Order',
+                refId: order.id,
+                balanceAfter: movement.balanceAfter,
+                actorType: 'SYSTEM',
+                note: 'Seeded demo order (development seed)',
+              },
+            });
+          }
+
+          // Every status an order has ever held gets a history row, including the
+          // one it was created at (§11) — the same shape `orders.createOrder`
+          // writes, so the tracking page's timeline renders for these too.
+          await tx.orderStatusHistory.create({
+            data: { orderId: order.id, fromStatus: null, toStatus: 'PLACED', actorType: 'SYSTEM' },
+          });
+          if (status === 'ACCEPTED') {
+            await tx.orderStatusHistory.create({
+              data: {
+                orderId: order.id,
+                fromStatus: 'PLACED',
+                toStatus: 'ACCEPTED',
+                actorType: 'SYSTEM',
+                note: 'Seeded demo order',
+              },
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          // The one case we skip, and only *after* its transaction has rolled
+          // back. Anything else is a real failure and is re-thrown: a seed that
+          // swallows errors is a seed nobody can trust.
+          if (!(error instanceof DemoOrderUnfillable)) throw error;
+          console.warn(
+            `Seed: skipped demo order ${error.orderNumber} — not enough stock to fill it.`,
+          );
+        });
+    }
+  }
+}
+
 async function seedFeatureFlags(): Promise<void> {
   const flags = [
     {
@@ -704,6 +919,7 @@ async function main(): Promise<void> {
 
   await seedUsers(storeIds);
   await seedCustomer();
+  await seedDemoOrders(storeIds);
   await seedFeatureFlags();
 
   const counts = {
@@ -715,6 +931,7 @@ async function main(): Promise<void> {
     deliveryAreas: await prisma.deliveryArea.count(),
     users: await prisma.user.count(),
     customers: await prisma.customer.count(),
+    orders: await prisma.order.count(),
     featureFlags: await prisma.featureFlag.count(),
   };
   console.log('Seed complete:', counts);

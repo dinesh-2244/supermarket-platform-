@@ -69,11 +69,11 @@ test('the whole of Phase 3, without ever being asked to sign in', async ({ page 
   await expect(addForm.getByRole('status')).toContainText(/in your basket/i);
   await expect(page.getByLabel(/item\(s\) in your basket/i)).toHaveText('3');
 
-  // 7. The basket revalidates on every look, and stops honestly at Phase 4.
+  // 7. The basket revalidates on every look, and now offers a live checkout.
   await page.goto('/cart');
   await expect(page.getByText(/subtotal \(3 item\(s\)\)/i)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Proceed to checkout' })).toBeDisabled();
-  await expect(page.getByText(/checkout arrives in phase 4/i)).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Proceed to checkout' })).toBeVisible();
+  await expect(page.getByText(/no account needed/i)).toBeVisible();
 
   // 8. Move to an area the *other* shop serves. The basket follows and is
   //    re-priced, with a summary of what came and what could not.

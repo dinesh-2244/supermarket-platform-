@@ -688,6 +688,9 @@ model Order {
   @@index([storeId, status, placedAt])
   @@index([customerId, placedAt])
   @@index([priceVarianceFlagged])
+  /// The slot-capacity count in `checkout.placeOrder` runs inside the advisory
+  /// lock, so its cost is time every other placement into that window waits.
+  @@index([storeId, deliverySlotStart])
 }
 
 model OrderLine {

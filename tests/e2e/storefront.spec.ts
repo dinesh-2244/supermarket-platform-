@@ -248,10 +248,9 @@ test.describe.serial('storefront', () => {
     await expect(page.getByRole('heading', { name: 'Your basket' })).toBeVisible();
     await expect(page.getByText(/subtotal \(2 item\(s\)\)/i)).toBeVisible();
 
-    // Checkout exists, is disabled, and says where it went.
-    const checkout = page.getByRole('button', { name: 'Proceed to checkout' });
-    await expect(checkout).toBeDisabled();
-    await expect(page.getByText(/checkout arrives in phase 4/i)).toBeVisible();
+    // Checkout is live as of Phase 4, and still asks for no account.
+    await expect(page.getByRole('link', { name: 'Proceed to checkout' })).toBeVisible();
+    await expect(page.getByText(/no account needed/i)).toBeVisible();
 
     // At no point was there a sign-in.
     await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
