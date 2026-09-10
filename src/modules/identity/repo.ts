@@ -33,6 +33,53 @@ export function auditedExecutor(tx: Tx): Tx {
   return tx;
 }
 
+/**
+ * Whether a user has enrolled a second factor, and the secret if so.
+ *
+ * Read separately from `publicUserSelect` on purpose: the secret is a
+ * credential, and a column that is never in the shape a screen renders cannot
+ * be leaked by a screen. Only the sign-in and enrolment paths call this.
+ */
+export async function findTwoFactorSecret(userId: string, db?: DbExecutor): Promise<string | null> {
+  const row = await executor(db).user.findUnique({
+    where: { id: userId },
+    select: { twoFactorSecret: true },
+  });
+  return row?.twoFactorSecret ?? null;
+}
+
+/**
+ * Store a second factor, but **only** on an account that has none.
+ *
+ * The `twoFactorSecret: null` in the where-clause is the guard, not a
+ * convenience: it makes enrolment a compare-and-set that the database
+ * arbitrates, so two confirms racing on the same account cannot both believe
+ * they won. Returns whether this call was the one that wrote.
+ *
+ * `updateMany` rather than `update` because `update` requires a unique
+ * where-clause and would refuse the extra condition — and because the row
+ * count is exactly the answer needed.
+ */
+export async function enrolTwoFactorSecret(
+  tx: Tx,
+  userId: string,
+  secret: string,
+): Promise<boolean> {
+  const { count } = await auditedExecutor(tx).user.updateMany({
+    where: { id: userId, twoFactorSecret: null },
+    data: { twoFactorSecret: secret },
+  });
+  return count === 1;
+}
+
+/** Withdraw a second factor. */
+export async function clearTwoFactorSecret(tx: Tx, userId: string): Promise<void> {
+  await auditedExecutor(tx).user.update({
+    where: { id: userId },
+    data: { twoFactorSecret: null },
+  });
+}
+
 /** Columns safe to return from a list — never `passwordHash` or `twoFactorSecret`. */
 const publicUserSelect = {
   id: true,

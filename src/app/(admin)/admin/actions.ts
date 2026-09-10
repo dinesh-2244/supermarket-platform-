@@ -7,7 +7,9 @@ import { isAppError, ValidationError } from '@/modules/platform';
 import { safeNextPath } from '@/modules/admin';
 import {
   changeOwnPassword,
+  confirmTotpEnrolment,
   createUser,
+  disableTotp,
   resetPassword,
   setUserActive,
   updateUser,
@@ -105,10 +107,11 @@ function checked(form: FormData, key: string): boolean {
 export async function signInAction(_state: ActionState, form: FormData): Promise<string> {
   const email = text(form, 'email');
   const password = text(form, 'password');
+  const totp = text(form, 'totp');
   const next = text(form, 'next');
 
   try {
-    await signIn('credentials', { email, password, redirect: false });
+    await signIn('credentials', { email, password, totp, redirect: false });
   } catch {
     // One message for every failure — the form must not tell an attacker which
     // addresses have accounts.
@@ -126,6 +129,35 @@ export async function changePasswordAction(_state: ActionState, form: FormData):
     const principal = await requirePrincipal();
     await changeOwnPassword(principal, text(form, 'current'), text(form, 'next'));
     return 'Password changed. Your other sessions are unaffected.';
+  });
+}
+
+/**
+ * Finish enrolling a second factor.
+ *
+ * The secret arrives back in the form because nothing stored it: it was minted
+ * when the page rendered and is only written once a code proves the
+ * authenticator holds the same one.
+ */
+export async function enrolTotpAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    await confirmTotpEnrolment(principal, {
+      secret: text(form, 'secret'),
+      code: text(form, 'code'),
+      password: text(form, 'password'),
+    });
+    revalidatePath('/admin/two-factor');
+    return 'Two-factor authentication is on. You will need a code the next time you sign in.';
+  });
+}
+
+export async function disableTotpAction(_state: ActionState, form: FormData): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    await disableTotp(principal, { code: text(form, 'code'), password: text(form, 'password') });
+    revalidatePath('/admin/two-factor');
+    return 'Two-factor authentication is off. Your password alone signs you in again.';
   });
 }
 
