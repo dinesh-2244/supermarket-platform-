@@ -36,6 +36,18 @@ const admin = newTestClient();
 const app = newTestClient(urlFor(scratchDatabase, SCHEMA));
 /** Same database, no schema asked for: sees `public`, and can name `retail` explicitly. */
 const plain = newTestClient(urlFor(scratchDatabase));
+/**
+ * The schema *and* a libpq `options=` the URL already carried. pg lets a URL's
+ * own `options=` beat a top-level one, so a translation that merely sets the
+ * search path on top loses it exactly here — generated SQL still lands in
+ * `retail` through the adapter option while raw SQL drifts back to `public`.
+ */
+const OPTION_MARK = 'p7_options_probe';
+const withOptions = (() => {
+  const url = new URL(urlFor(scratchDatabase, SCHEMA));
+  url.searchParams.set('options', `-c application_name=${OPTION_MARK}`);
+  return newTestClient(url.toString());
+})();
 
 let owned = false;
 
@@ -74,21 +86,25 @@ beforeAll(async () => {
   // steps, so `retail` below holds what a deployment's would.
   runAgainstScratch('prisma migrate deploy', ['prisma', 'migrate', 'deploy']);
   runAgainstScratch('seed', ['tsx', 'prisma/seed.ts']);
+  // A distractor: a `public."Store"` with one row, so a client that quietly
+  // drifts back to `public` gets a *different answer* rather than an error.
+  await plain.$executeRawUnsafe('CREATE TABLE public."Store" (id text PRIMARY KEY)');
+  await plain.$executeRawUnsafe(`INSERT INTO public."Store" (id) VALUES ('distractor')`);
 }, 120_000);
 
 afterAll(async () => {
-  await Promise.all([app.$disconnect(), plain.$disconnect()]);
+  await Promise.all([app.$disconnect(), plain.$disconnect(), withOptions.$disconnect()]);
   if (owned) await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${scratchDatabase}"`);
   await admin.$disconnect();
 });
 
 describe('a custom schema in DATABASE_URL', () => {
-  it('is where migrate and seed put the data, with public left empty', async () => {
-    expect(await seededStores()).toBeGreaterThan(0);
-    const publicTables = await plain.$queryRaw<{ count: bigint }[]>`
-      SELECT count(*) AS count FROM information_schema.tables WHERE table_schema = 'public'
+  it('is where migrate and seed put the data, with public holding only the distractor', async () => {
+    expect(await seededStores()).toBeGreaterThan(1);
+    const publicTables = await plain.$queryRaw<{ table_name: string }[]>`
+      SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'
     `;
-    expect(only(publicTables)).toBe(0);
+    expect(publicTables.map((row) => row.table_name)).toEqual(['Store']);
   });
 
   it('is what generated queries read through the application client', async () => {
@@ -116,5 +132,20 @@ describe('a custom schema in DATABASE_URL', () => {
     );
     expect(locked?.storeId).toBe(target.storeId);
     expect(locked?.productId).toBe(target.productId);
+  });
+
+  it('survives a libpq options= the URL already carried, for generated and raw SQL alike', async () => {
+    // The pre-existing option must still reach the server …
+    const [name] = await withOptions.$queryRaw<
+      { application_name: string }[]
+    >`SHOW application_name`;
+    expect(name?.application_name).toBe(OPTION_MARK);
+    // … and so must the search path, or this raw count is the distractor's 1.
+    const seeded = await seededStores();
+    expect(await withOptions.store.count()).toBe(seeded);
+    const raw = await withOptions.$queryRaw<
+      { count: bigint }[]
+    >`SELECT count(*) AS count FROM "Store"`;
+    expect(only(raw)).toBe(seeded);
   });
 });

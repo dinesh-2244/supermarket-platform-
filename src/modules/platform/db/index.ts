@@ -61,6 +61,7 @@ const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
  * means "wait forever", and so does `connectionTimeoutMillis: 0`.
  *
  * | `schema` | `options: -c search_path=…` | see {@link prismaAdapterFromUrl} |
+ * | `options` (libpq) | `options` | kept, with the search path appended |
  *
  * `schema` is the parameter that is easiest to lose. Prisma's engine used it
  * twice: to qualify every generated query and to set the connection's
@@ -93,6 +94,16 @@ export function poolConfigFromUrl(databaseUrl: string): {
   }
 
   const schema = schemaFromUrl(databaseUrl);
+  // A URL may already carry libpq's `options=` (say `-c statement_timeout=…`).
+  // It has to be consumed too: pg re-parses `connectionString` after merging
+  // the config object and lets the URL's value win over a top-level one, so
+  // leaving it in the string would silently discard the search path below.
+  // One string, existing settings first, search path last so that it wins any
+  // accidental collision.
+  const existingOptions = url.searchParams.get('options');
+  const options = [existingOptions, schema === undefined ? null : `-c search_path="${schema}"`]
+    .filter((part): part is string => part !== null && part !== '')
+    .join(' ');
 
   const seconds = (name: string): number | undefined => {
     const raw = url.searchParams.get(name);
@@ -106,7 +117,13 @@ export function poolConfigFromUrl(databaseUrl: string): {
     (value): value is number => value !== undefined,
   );
 
-  for (const consumed of ['connection_limit', 'pool_timeout', 'connect_timeout', 'schema']) {
+  for (const consumed of [
+    'connection_limit',
+    'pool_timeout',
+    'connect_timeout',
+    'schema',
+    'options',
+  ]) {
     url.searchParams.delete(consumed);
   }
 
@@ -121,7 +138,7 @@ export function poolConfigFromUrl(databaseUrl: string): {
     connectionString: url.toString(),
     ...(connectionLimit !== undefined && connectionLimit > 0 ? { max: connectionLimit } : {}),
     ...(timeouts.length > 0 ? { connectionTimeoutMillis } : {}),
-    ...(schema !== undefined ? { options: `-c search_path="${schema}"` } : {}),
+    ...(options === '' ? {} : { options }),
   };
 }
 

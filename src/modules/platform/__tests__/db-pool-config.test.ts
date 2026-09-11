@@ -1,3 +1,4 @@
+import pg from 'pg';
 import { describe, expect, it } from 'vitest';
 import { poolConfigFromUrl, prismaAdapterFromUrl, schemaFromUrl } from '../db/index';
 
@@ -9,6 +10,16 @@ import { poolConfigFromUrl, prismaAdapterFromUrl, schemaFromUrl } from '../db/in
  * concurrency tests still mean something — see `poolConfigFromUrl`.
  */
 const BASE = 'postgresql://postgres:postgres@localhost:5432/supermarket';
+
+/**
+ * The startup `options` pg will actually send for a config — read off the real
+ * client, not off our own object. `connectionParameters` is where pg keeps the
+ * merged result; `@types/pg` does not declare it.
+ */
+function optionsSentBy(config: ReturnType<typeof poolConfigFromUrl>): string | undefined {
+  const client = new pg.Client(config) as unknown as { connectionParameters: { options?: string } };
+  return client.connectionParameters.options;
+}
 
 describe('poolConfigFromUrl', () => {
   it('turns connection_limit into the pool size', () => {
@@ -116,6 +127,22 @@ describe('schema in the URL', () => {
 
   it('sets no search path when no schema was asked for', () => {
     expect(poolConfigFromUrl(BASE).options).toBeUndefined();
+  });
+
+  it('keeps an options= the URL already carried, and still appends the search path', () => {
+    // Asked of the real pg client, because that is where the earlier version
+    // lost: pg re-parses `connectionString` after merging the config object
+    // and lets the URL's own `options=` win over a top-level one. So the URL
+    // value has to be consumed here and folded into the one string pg gets,
+    // search path last so it wins any accidental collision.
+    const config = poolConfigFromUrl(`${BASE}?schema=retail&options=-c%20statement_timeout%3D5000`);
+    expect(config.connectionString).not.toContain('options=');
+    expect(optionsSentBy(config)).toBe('-c statement_timeout=5000 -c search_path="retail"');
+  });
+
+  it('leaves an options= alone when no schema joins it', () => {
+    const config = poolConfigFromUrl(`${BASE}?options=-c%20statement_timeout%3D5000`);
+    expect(optionsSentBy(config)).toBe('-c statement_timeout=5000');
   });
 
   it('refuses a schema it cannot pass through safely rather than dropping it', () => {
