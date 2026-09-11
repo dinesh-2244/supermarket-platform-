@@ -8,21 +8,17 @@ import {
   storefrontPrincipal,
 } from '@/storefront';
 import { clearAreaAction } from './actions';
+import { communityNameForStore } from './communities';
+import { MobileCartBar } from './mobile-cart-bar';
 
 /**
- * The storefront shell (arch §9).
+ * The redesigned storefront shell (D1, D2, D5).
  *
- * The header names the area the visitor picked and the store serving it, so
- * "which shop am I looking at, and at whose prices?" is answerable from every
- * page. That question has a wrong answer available — the other store's — which
- * is why the label is read from the freshly resolved context rather than from
- * anything the page was passed.
- *
- * There is deliberately **no guard here**. Browsing requires no account and no
- * area: a visitor with neither still gets the shell, and each page decides for
- * itself whether it needs a store context. Redirecting from the layout would
- * make the locality picker unreachable, which is the mistake the admin sign-in
- * page already taught us once.
+ * Features:
+ * - Prominent Store Community Selector in the header
+ * - Universal Header Search Bar embedded across all storefront pages (D5)
+ * - Thumb-friendly mobile layout with accessible tap targets (≥44px)
+ * - Clear basket status with live item count
  */
 export default async function StorefrontLayout({
   children,
@@ -37,63 +33,239 @@ export default async function StorefrontLayout({
   const basketCount = await cartItemCount(await currentCartToken());
   const customer = await currentCustomer();
 
+  const communityName = communityNameForStore(store?.id, store?.name);
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-          <Link href="/" className="text-base font-semibold">
-            Munder Fresh
-          </Link>
-
-          <nav className="flex flex-wrap gap-3 text-sm">
-            <Link href="/search" className="text-slate-600 hover:text-slate-900">
-              Search
-            </Link>
-            <Link href="/cart" className="text-slate-600 hover:text-slate-900">
-              Basket
-              {basketCount === 0 ? null : (
-                <span
-                  className="ml-1 rounded-full bg-emerald-700 px-1.5 py-0.5 text-xs text-white"
-                  aria-label={`${String(basketCount)} item(s) in your basket`}
-                >
-                  {basketCount}
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col antialiased">
+      {/* Top Banner & Header */}
+      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur shadow-xs">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          {/* Main Header Row */}
+          <div className="flex items-center justify-between gap-3 py-2.5 sm:py-3.5">
+            {/* Brand Logo & Community Pill */}
+            <div className="flex items-center gap-3 sm:gap-6 min-w-0">
+              <Link href="/" className="flex items-center gap-2 shrink-0">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-700 text-white font-black text-lg shadow-xs">
+                  M
                 </span>
-              )}
-            </Link>
-            <Link href="/account" className="text-slate-600 hover:text-slate-900">
-              {customer === null ? 'Sign in' : 'Account'}
-            </Link>
-          </nav>
-
-          <div className="ml-auto flex flex-wrap items-center gap-3 text-sm">
-            {context === null ? (
-              <Link href="/locality" className="text-emerald-800 underline">
-                Choose your area
+                <span className="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900">
+                  Munder<span className="text-emerald-700">Fresh</span>
+                </span>
               </Link>
-            ) : (
-              <form action={clearAreaAction}>
-                <button
-                  type="submit"
-                  className="rounded border border-slate-300 px-2 py-1 text-left text-xs"
-                  aria-label="Change delivery area"
-                >
-                  <span className="block text-slate-500">Delivering to</span>
-                  <span className="block font-medium text-slate-900">
-                    {store?.name ?? 'your area'}
-                  </span>
-                </button>
+
+              {/* Community Selector Header Control (D2) */}
+              <div className="min-w-0">
+                {context === null ? (
+                  <Link
+                    href="/store/select"
+                    className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-600/20 hover:bg-emerald-100 transition min-h-[44px] sm:min-h-0"
+                    aria-label="Select delivery community"
+                  >
+                    <span className="text-emerald-700">📍</span>
+                    <span className="truncate max-w-[140px] sm:max-w-none">Select Community ▼</span>
+                  </Link>
+                ) : (
+                  <form action={clearAreaAction} className="inline-block">
+                    <button
+                      type="submit"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-left text-xs font-medium text-slate-800 hover:bg-slate-200/80 transition min-h-[44px] sm:min-h-0"
+                      aria-label="Change delivery area"
+                      title="Click to switch community or store"
+                    >
+                      <span className="text-emerald-700">📍</span>
+                      <span className="text-slate-500 hidden sm:inline">Delivering to:</span>
+                      <span className="font-semibold text-slate-900 truncate max-w-[140px] sm:max-w-[220px]">
+                        {communityName}
+                      </span>
+                      <span className="text-slate-400 text-[10px]">▼</span>
+                    </button>
+                  </form>
+                )}
+              </div>
+            </div>
+
+            {/* Desktop Universal Search Bar (D5) */}
+            <div className="hidden md:flex flex-1 max-w-lg mx-4">
+              <form action="/search" method="get" className="w-full relative">
+                <input
+                  type="search"
+                  name="q"
+                  placeholder="Search fresh vegetables, milk, atta, fruits, snacks..."
+                  className="w-full rounded-full border border-slate-300 bg-slate-50/70 py-2 pl-10 pr-4 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600/20 transition"
+                  aria-label="Search grocery catalogue"
+                />
+                <div className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-400">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                    />
+                  </svg>
+                </div>
               </form>
-            )}
+            </div>
+
+            {/* Navigation Right: Search, Basket, Account */}
+            <nav className="flex items-center gap-2 sm:gap-4 shrink-0">
+              <Link
+                href="/search"
+                className="hidden sm:inline-flex text-xs font-semibold text-slate-700 hover:text-emerald-800 px-2 py-1.5"
+              >
+                Search
+              </Link>
+
+              <Link
+                href="/cart"
+                className="relative inline-flex items-center gap-1.5 rounded-full bg-emerald-700 px-3.5 py-2 text-xs font-semibold text-white hover:bg-emerald-800 transition min-h-[44px]"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
+                  />
+                </svg>
+                <span className="hidden sm:inline">Basket</span>
+                {basketCount === 0 ? null : (
+                  <span
+                    className="ml-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1 text-[11px] font-bold text-emerald-800"
+                    aria-label={`${String(basketCount)} item(s) in your basket`}
+                  >
+                    {basketCount}
+                  </span>
+                )}
+              </Link>
+
+              <Link
+                href="/account"
+                className="inline-flex items-center text-xs font-medium text-slate-600 hover:text-slate-900 px-2 py-2 min-h-[44px]"
+              >
+                {customer === null ? 'Sign in' : 'Account'}
+              </Link>
+            </nav>
+          </div>
+
+          {/* Mobile Search Bar Row (D5 - Thumb Zone) */}
+          <div className="pb-2.5 md:hidden">
+            <form action="/search" method="get" className="relative w-full">
+              <input
+                type="search"
+                name="q"
+                placeholder="Search fresh vegetables, dairy, atta..."
+                className="w-full rounded-xl border border-slate-300 bg-slate-50/80 py-2 pl-9 pr-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-emerald-600 focus:bg-white focus:outline-none min-h-[44px]"
+                aria-label="Search grocery catalogue"
+              />
+              <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
+              </div>
+            </form>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-4 py-5">{children}</main>
+      {/* Main Content Area */}
+      <main className="flex-1 mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-5 sm:py-7">
+        {children}
+      </main>
 
-      <footer className="mx-auto max-w-5xl px-4 py-8 text-xs text-slate-500">
-        Prices and availability are those of the store serving your area, and are confirmed again
-        when you view your basket.
+      {/* Footer */}
+      <footer className="mt-auto border-t border-slate-200 bg-white">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+          <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-700 text-white font-black text-sm">
+                  M
+                </span>
+                <span className="text-base font-extrabold tracking-tight text-slate-900">
+                  Munder<span className="text-emerald-700">Fresh</span>
+                </span>
+              </div>
+              <p className="mt-2 text-xs text-slate-500 leading-relaxed">
+                Dedicated hyperlocal grocery shopping for residential communities. Scheduled slot
+                delivery of fresh vegetables, fruits, dairy, staples, and daily household needs.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                Communities Served
+              </h3>
+              <ul className="mt-3 space-y-2 text-xs text-slate-600">
+                <li>
+                  <Link href="/store/select" className="hover:text-emerald-800">
+                    Store 1 Community
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/store/select" className="hover:text-emerald-800">
+                    Store 2 Community
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/unserviceable"
+                    className="text-emerald-700 font-medium hover:underline"
+                  >
+                    Living elsewhere? Request delivery →
+                  </Link>
+                </li>
+              </ul>
+            </div>
+
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                Shopping & Orders
+              </h3>
+              <ul className="mt-3 space-y-2 text-xs text-slate-600">
+                <li>
+                  <Link href="/shop" className="hover:text-emerald-800">
+                    Browse All Products
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/cart" className="hover:text-emerald-800">
+                    Your Basket
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/account" className="hover:text-emerald-800">
+                    Account & Past Orders
+                  </Link>
+                </li>
+              </ul>
+            </div>
+
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                Quality Guarantee
+              </h3>
+              <p className="mt-3 text-xs text-slate-500 leading-relaxed">
+                Prices and availability are verified from your community&apos;s dedicated store.
+                Free delivery options available on meeting order thresholds. Pay via Cash or UPI on
+                delivery.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-8 border-t border-slate-100 pt-6 text-center text-xs text-slate-400">
+            © {new Date().getFullYear()} Munder Fresh Supermarket Platform. All rights reserved.
+          </div>
+        </div>
       </footer>
+
+      {/* Floating Mobile Cart Summary (D7) */}
+      <MobileCartBar basketCount={basketCount} />
     </div>
   );
 }

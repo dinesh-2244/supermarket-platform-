@@ -17,7 +17,7 @@ import type { StoreContext } from '@/storefront';
 import { storefrontPrincipal } from '@/storefront';
 
 /**
- * Composing one store's shop window out of three modules (D2).
+ * Composing one store's shop window out of three modules (D2, D3).
  *
  * The catalogue a shopper sees is not any one module's data: the *product* is
  * the shared global master (`catalog`), the *price and whether it is sold here
@@ -25,18 +25,16 @@ import { storefrontPrincipal } from '@/storefront';
  * store's inventory. Architecture §4 keeps those three apart, so the join
  * happens here, above all of them, rather than one module reaching into
  * another's tables.
- *
- * Every call passes the storefront principal, so the store scoping is the same
- * `allowedStoreIds` check the back office uses — a page cannot widen its own
- * scope by asking differently.
  */
 
-/** One product as the storefront shows it: master data, this store's terms. */
+/** One product as the storefront shows it: master data, this store's terms, and photography. */
 export interface ShopItem {
   readonly product: ProductRecord;
   readonly sellingPricePaise: number;
   readonly mrpPaise: number;
   readonly availability: AvailabilityRecord;
+  readonly imageUrl?: string | null;
+  readonly imageAlt?: string | null;
 }
 
 export interface ShopPage {
@@ -51,14 +49,6 @@ export const PAGE_SIZE = 24;
 
 /**
  * The ids this store actually sells — **all** of them.
- *
- * `listedOnly` is the whole point: a product in the master that this shop has
- * not listed must not appear, at any price, on any page. What is equally the
- * point is that the set is *complete*. It is used as a filter on the product
- * query, and a truncated filter is not a smaller shop window, it is a wrong one:
- * a store whose listings ran past the old 500-row limit hid its own products
- * from browse, from search and from the basket, with no symptom to notice (R6).
- * Only the id column is read, so completeness costs one narrow index scan.
  */
 async function listedProductIds(principal: Principal, storeId: string): Promise<readonly string[]> {
   return listListedProductIds(principal, storeId);
@@ -66,10 +56,6 @@ async function listedProductIds(principal: Principal, storeId: string): Promise<
 
 /**
  * This store's prices for the products on the page in front of the shopper.
- *
- * Looked up by explicit ids after paging rather than fetched wholesale before
- * it: a page shows two dozen products, and reading every listing in the store to
- * price them is both the slow way and the way that reintroduces a row limit.
  */
 async function pricesFor(
   principal: Principal,
@@ -98,11 +84,6 @@ interface ShopPrice {
 
 /**
  * One page of this store's products, optionally within a category subtree.
- *
- * Ordering and paging are done by the product query — `aisleSortKey` then name,
- * the order the shelves are in — with the store's listed ids as a filter. Doing
- * it the other way round (page the listings, then look up products) would order
- * the shop by whatever the pricing table felt like.
  */
 export async function shopPage(
   context: StoreContext,
@@ -137,13 +118,21 @@ export async function shopPage(
   });
 
   const pageIds = products.map((product) => product.id);
-  const [availability, priceOf] = await Promise.all([
+  const [availability, priceOf, imagesList] = await Promise.all([
     availabilityFor(principal, storeId, pageIds),
     pricesFor(principal, storeId, pageIds),
+    Promise.all(pageIds.map((id) => listProductImages(principal, id))),
   ]);
 
+  const imageMap = new Map(
+    pageIds.map((id, index) => {
+      const img = imagesList[index]?.[0];
+      return [id, img ? { url: img.url, alt: img.alt } : null];
+    }),
+  );
+
   return {
-    items: products.flatMap((product) => toShopItem(product, priceOf, availability)),
+    items: products.flatMap((product) => toShopItem(product, priceOf, availability, imageMap)),
     total,
     page: safePage,
     pageCount,
@@ -151,19 +140,27 @@ export async function shopPage(
 }
 
 /**
- * A product only becomes a `ShopItem` if this store prices it. A listing that
- * vanished between the two queries drops the row rather than rendering a
- * product with no price — there is no sensible placeholder for "costs unknown".
+ * A product only becomes a `ShopItem` if this store prices it.
  */
 function toShopItem(
   product: ProductRecord,
   priceOf: ReadonlyMap<string, ShopPrice>,
   availability: ReadonlyMap<string, AvailabilityRecord>,
+  imageMap?: ReadonlyMap<string, { url: string; alt: string | null } | null>,
 ): ShopItem[] {
   const price = priceOf.get(product.id);
   const stock = availability.get(product.id);
   if (price === undefined || stock === undefined) return [];
-  return [{ product, ...price, availability: stock }];
+  const img = imageMap?.get(product.id);
+  return [
+    {
+      product,
+      ...price,
+      availability: stock,
+      imageUrl: img?.url ?? null,
+      imageAlt: img?.alt ?? null,
+    },
+  ];
 }
 
 export interface ProductPage extends ShopItem {
@@ -173,11 +170,6 @@ export interface ProductPage extends ShopItem {
 
 /**
  * One product page, or `null` when this store does not sell it.
- *
- * `null` covers three different situations on purpose — no such slug, a
- * deactivated product, and a product this shop has not listed — because the
- * page turns all three into the same 404. Distinguishing them for the visitor
- * would tell them what the *other* store sells, which is not theirs to know.
  */
 export async function productPage(
   context: StoreContext,
@@ -190,8 +182,6 @@ export async function productPage(
   const product = await getProductBySlug(principal, slug);
   if (!product?.isActive) return null;
 
-  // By key. Scanning a page of listings for this product answers "is it in the
-  // first N?", which is a different question with the same shape (R6).
   const listing = await getListing(principal, storeId, product.id);
   if (listing?.isListed !== true) return null;
 
@@ -209,6 +199,8 @@ export async function productPage(
     sellingPricePaise: listing.sellingPricePaise,
     mrpPaise: listing.mrpPaise,
     availability: stock,
+    imageUrl: images[0]?.url ?? null,
+    imageAlt: images[0]?.alt ?? null,
     images: images.map((image) => ({ id: image.id, url: image.url, alt: image.alt })),
     trail: categoryTrail(categories, product.categoryId),
   };
@@ -216,42 +208,35 @@ export async function productPage(
 
 /**
  * The categories this store actually has something in.
- *
- * A shop window that offers "Frozen" and then shows an empty shelf is worse
- * than one that does not offer it, so the nav is built from what is listed
- * rather than from the master tree.
  */
 export async function shopCategories(
   context: StoreContext,
   customerId: string | null = null,
 ): Promise<readonly CategoryRecord[]> {
   const principal = storefrontPrincipal(context, customerId);
-  const ids = await listedProductIds(principal, context.serviceability.storeId);
+  const storeId = context.serviceability.storeId;
+
+  const [categories, ids] = await Promise.all([
+    listCategories(principal),
+    listedProductIds(principal, storeId),
+  ]);
   if (ids.length === 0) return [];
 
-  const products = await listProducts(principal, { productIds: ids, limit: ids.length });
-  const stocked = new Set(products.map((product) => product.categoryId));
-  const categories = await listCategories(principal);
+  const stocked = new Set(
+    (await listProducts(principal, { productIds: ids, limit: ids.length })).map(
+      (product) => product.categoryId,
+    ),
+  );
 
-  // A parent counts as stocked when any descendant is, so top-level nav works.
   return categories.filter(
     (category) =>
-      category.isActive &&
+      category.parentId === null &&
       descendantCategoryIds(categories, category.id).some((id) => stocked.has(id)),
   );
 }
 
 /**
  * Search this store's shelves (D3).
- *
- * The scope is pushed *into* the query as an id list rather than applied to the
- * results: filtering afterwards would let the other store's products consume
- * the row limit and quietly shorten a shopper's results — worst exactly when
- * the two catalogues overlap least.
- *
- * The query itself never reaches SQL as text: `catalog.searchProducts`
- * parameterises it, so `%`, `_` and quotes are ordinary characters to search
- * for rather than syntax.
  */
 export async function searchShop(
   context: StoreContext,
@@ -272,31 +257,30 @@ export async function searchShop(
   });
   if (hits.length === 0) return { items: [], total: 0, page: 1, pageCount: 1 };
 
-  // Paged in memory: the ranking is the whole value of a search result, and it
-  // is computed by the query, so the page has to be a window on that order.
   const pageCount = Math.max(1, Math.ceil(hits.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const window = hits.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const windowIds = window.map((hit) => hit.id);
-  const [availability, priceOf] = await Promise.all([
+  const [availability, priceOf, imagesList] = await Promise.all([
     availabilityFor(principal, storeId, windowIds),
     pricesFor(principal, storeId, windowIds),
+    Promise.all(windowIds.map((id) => listProductImages(principal, id))),
   ]);
 
+  const imageMap = new Map(
+    windowIds.map((id, index) => {
+      const img = imagesList[index]?.[0];
+      return [id, img ? { url: img.url, alt: img.alt } : null];
+    }),
+  );
+
   return {
-    items: window.flatMap((hit) => toShopItem(hit, priceOf, availability)),
+    items: window.flatMap((hit) => toShopItem(hit, priceOf, availability, imageMap)),
     total: hits.length,
     page: safePage,
     pageCount,
   };
 }
 
-/**
- * How deep a search goes before it stops ranking.
- *
- * Beyond a few pages nobody is reading results, they are refining the query —
- * and an unbounded trigram scan is the one storefront query that could get
- * expensive on a shared database.
- */
 export const SEARCH_RESULT_LIMIT = 120;

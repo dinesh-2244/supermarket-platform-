@@ -33,10 +33,14 @@ test.describe.serial('storefront', () => {
   }) => {
     await page.goto('/');
 
-    // No default store: the picker is an interstitial, not a suggestion.
-    await expect(page).toHaveURL(/\/locality$/);
-    await expect(page.getByRole('heading', { name: /where should we deliver/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Deliver here' }).first()).toBeVisible();
+    // Redesigned D1: engaging homepage with community selector, no prices shown before binding
+    await expect(
+      page.getByRole('heading', {
+        name: /fresh groceries delivered in/i,
+      }),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: /shop store 1/i })).toBeVisible();
+    await expect(page.locator('article')).toHaveCount(0);
   });
 
   test('choosing an area binds the store that serves it', async ({ page }) => {
@@ -59,7 +63,7 @@ test.describe.serial('storefront', () => {
     await expect(page).toHaveURL(/\/locality$/);
     // Forgetting the area really forgets it.
     await page.goto('/');
-    await expect(page).toHaveURL(/\/locality$/);
+    await expect(page.locator('article')).toHaveCount(0);
   });
 
   test('a pincode nobody serves still shows the areas we do serve', async ({ page }) => {

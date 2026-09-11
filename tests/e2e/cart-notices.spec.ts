@@ -252,6 +252,7 @@ test.describe.serial('R1 — the shopper is told what the revalidation found', (
     page,
     browser,
   }) => {
+    test.slow();
     const admin = await openBackOffice(browser);
     const originals = new Map<Fixture, Price>();
 

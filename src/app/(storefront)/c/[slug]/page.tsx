@@ -7,13 +7,11 @@ import { shopPage } from '../../catalogue';
 import { pageNumber } from '../../paging';
 import { Pager, ProductGrid } from '../../product-card';
 import { Card, Empty, PageHeading } from '../../ui';
+import { CategoryTiles } from '../../category-tiles';
+import { getCartQuantities } from '../../cart-quantities';
 
 /**
- * Category browse (D2).
- *
- * A category page shows its **subtree**: browsing "Staples" must include the
- * rice filed under "Staples › Rice", or the aisle looks empty to anyone who
- * files things properly.
+ * Category browse (D2, D3).
  */
 export async function generateMetadata({
   params,
@@ -26,7 +24,7 @@ export async function generateMetadata({
 
   const categories = await listCategories(storefrontPrincipal(context));
   const category = categories.find((row) => row.slug === slug);
-  return { title: category?.name ?? 'Browse' };
+  return { title: `${category?.name ?? 'Browse'} | Munder Fresh` };
 }
 
 export default async function CategoryPage({
@@ -37,36 +35,44 @@ export default async function CategoryPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }): Promise<React.ReactElement> {
   const context = await currentStoreContext();
-  if (context === null) redirect('/locality');
+  if (context === null) redirect('/store/select');
 
   const { slug } = await params;
   const page = pageNumber((await searchParams).page);
 
   const categories = await listCategories(storefrontPrincipal(context));
   const category = categories.find((row) => row.slug === slug && row.isActive);
-  // An unknown or retired aisle is a 404, not an empty shop.
   if (category === undefined) notFound();
 
-  const shop = await shopPage(context, { categoryId: category.id, page });
+  const [shop, cartQuantities] = await Promise.all([
+    shopPage(context, { categoryId: category.id, page }),
+    getCartQuantities(),
+  ]);
 
   return (
-    <>
-      <p className="mb-2 text-sm">
-        <Link href="/" className="text-emerald-800 underline">
+    <div className="space-y-6">
+      <nav aria-label="Breadcrumb" className="text-xs text-slate-500 flex items-center gap-1.5">
+        <Link href="/" className="hover:text-emerald-800">
           All products
         </Link>
-      </p>
+        <span>›</span>
+        <span className="font-semibold text-slate-800">{category.name}</span>
+      </nav>
+
       <PageHeading
         title={category.name}
         subtitle={`${String(shop.total)} product(s) in this aisle`}
       />
+
+      {/* Category selector row */}
+      <CategoryTiles categories={categories} activeSlug={slug} />
 
       <Card>
         {shop.items.length === 0 ? (
           <Empty>Nothing in this aisle at your shop right now.</Empty>
         ) : (
           <>
-            <ProductGrid items={shop.items} />
+            <ProductGrid items={shop.items} cartQuantities={cartQuantities} />
             <Pager
               page={shop.page}
               pageCount={shop.pageCount}
@@ -75,6 +81,6 @@ export default async function CategoryPage({
           </>
         )}
       </Card>
-    </>
+    </div>
   );
 }
