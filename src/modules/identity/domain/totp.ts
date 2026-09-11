@@ -153,28 +153,41 @@ function constantTimeEquals(a: string, b: string): boolean {
 }
 
 /**
- * Is this the code that secret is showing, within the accepted window?
+ * Which step, if any, is this code the code for — within the accepted window?
  *
- * Every candidate step is compared even after a match, and the comparison is
- * constant-time: the time this takes must not say which step matched, or
- * whether the first character was right.
+ * Returns the step's counter rather than a boolean because the caller has to
+ * *record* it: a code accepted once must not be accepted again inside its own
+ * thirty seconds, and "the same code" is "a counter no greater than the last
+ * one accepted". Every candidate step is compared even after a match, and the
+ * comparison is constant-time: the time this takes must not say which step
+ * matched, or whether the first character was right.
  */
+export async function matchTotpCode(
+  secret: string,
+  code: string,
+  atMs: number,
+  windowSteps = TOTP_WINDOW_STEPS,
+): Promise<number | null> {
+  const candidate = code.replace(/\s/g, '');
+  if (!/^\d{6}$/.test(candidate)) return null;
+
+  const centre = counterFor(atMs);
+  let matched: number | null = null;
+  for (let step = -windowSteps; step <= windowSteps; step += 1) {
+    const expected = await totpCodeFor(secret, centre + step);
+    if (constantTimeEquals(expected, candidate)) matched = centre + step;
+  }
+  return matched;
+}
+
+/** Is this the code that secret is showing, within the accepted window? */
 export async function verifyTotpCode(
   secret: string,
   code: string,
   atMs: number,
   windowSteps = TOTP_WINDOW_STEPS,
 ): Promise<boolean> {
-  const candidate = code.replace(/\s/g, '');
-  if (!/^\d{6}$/.test(candidate)) return false;
-
-  const centre = counterFor(atMs);
-  let matched = false;
-  for (let step = -windowSteps; step <= windowSteps; step += 1) {
-    const expected = await totpCodeFor(secret, centre + step);
-    if (constantTimeEquals(expected, candidate)) matched = true;
-  }
-  return matched;
+  return (await matchTotpCode(secret, code, atMs, windowSteps)) !== null;
 }
 
 /**

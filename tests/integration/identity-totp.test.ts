@@ -181,10 +181,13 @@ describe('identity — signing in with a second factor', () => {
     staff = await newStaff('signin');
     now = Date.now();
     secret = (await beginTotpEnrolment(staff.principal)).secret;
+    // Enrolled three steps ago: the confirming code counts as *accepted*, so
+    // an enrolment at `now` would make every "current code" below a replay.
+    const enrolledAt = now - 3 * TOTP_PERIOD_SECONDS * 1000;
     await confirmTotpEnrolment(
       staff.principal,
-      { secret, code: await totpCodeAt(secret, now), password: PASSWORD },
-      now,
+      { secret, code: await totpCodeAt(secret, enrolledAt), password: PASSWORD },
+      enrolledAt,
     );
   });
 
@@ -231,6 +234,93 @@ describe('identity — signing in with a second factor', () => {
         'AnotherLongPassword9',
         await totpCodeAt(secret, now),
         now,
+      ),
+    ).not.toBeNull();
+  });
+});
+
+describe('identity — a code is accepted once, and never again inside its step', () => {
+  // RFC 6238 §5.2: a verifier must not accept a second use of an OTP. Without
+  // this, anyone who sees a code in flight has the whole of its thirty seconds
+  // (and the window either side) to sign in with it again.
+  let staff: { id: string; email: string; principal: Principal };
+  let secret: string;
+  let now: number;
+  const step = TOTP_PERIOD_SECONDS * 1000;
+
+  beforeEach(async () => {
+    staff = await newStaff('replay');
+    now = Date.now();
+    secret = (await beginTotpEnrolment(staff.principal)).secret;
+    const enrolledAt = now - 3 * step;
+    await confirmTotpEnrolment(
+      staff.principal,
+      { secret, code: await totpCodeAt(secret, enrolledAt), password: PASSWORD },
+      enrolledAt,
+    );
+  });
+
+  it('refuses the same code a second time', async () => {
+    const code = await totpCodeAt(secret, now);
+    expect(await verifyCredentials(staff.email, PASSWORD, code, now)).not.toBeNull();
+    expect(await verifyCredentials(staff.email, PASSWORD, code, now)).toBeNull();
+  });
+
+  it('refuses a code older than the last one accepted, even inside the window', async () => {
+    // Accept the current step, then offer the previous step's code: still
+    // within ±1 of "now", but behind what has already been used.
+    expect(
+      await verifyCredentials(staff.email, PASSWORD, await totpCodeAt(secret, now), now),
+    ).not.toBeNull();
+    expect(
+      await verifyCredentials(staff.email, PASSWORD, await totpCodeAt(secret, now - step), now),
+    ).toBeNull();
+    // The next step is new, and fine.
+    expect(
+      await verifyCredentials(staff.email, PASSWORD, await totpCodeAt(secret, now + step), now),
+    ).not.toBeNull();
+  });
+
+  it('counts the enrolment confirmation as a use', async () => {
+    const fresh = await newStaff('replay-enrol');
+    const s = (await beginTotpEnrolment(fresh.principal)).secret;
+    const code = await totpCodeAt(s, now);
+    await confirmTotpEnrolment(fresh.principal, { secret: s, code, password: PASSWORD }, now);
+    expect(await verifyCredentials(fresh.email, PASSWORD, code, now)).toBeNull();
+    expect(
+      await verifyCredentials(fresh.email, PASSWORD, await totpCodeAt(s, now + step), now + step),
+    ).not.toBeNull();
+  });
+
+  it('lets exactly one of two simultaneous sign-ins with the same code through', async () => {
+    const code = await totpCodeAt(secret, now);
+    const results = await Promise.all([
+      verifyCredentials(staff.email, PASSWORD, code, now),
+      verifyCredentials(staff.email, PASSWORD, code, now),
+    ]);
+    expect(results.filter((user) => user !== null)).toHaveLength(1);
+  });
+
+  it('starts afresh after the factor is withdrawn and enrolled again', async () => {
+    await disableTotp(
+      staff.principal,
+      { password: PASSWORD, code: await totpCodeAt(secret, now) },
+      now,
+    );
+    const next = (await beginTotpEnrolment(staff.principal)).secret;
+    const later = now + 2 * step;
+    await confirmTotpEnrolment(
+      staff.principal,
+      { secret: next, code: await totpCodeAt(next, later), password: PASSWORD },
+      later,
+    );
+    const afterwards = later + step;
+    expect(
+      await verifyCredentials(
+        staff.email,
+        PASSWORD,
+        await totpCodeAt(next, afterwards),
+        afterwards,
       ),
     ).not.toBeNull();
   });
@@ -291,13 +381,15 @@ describe('identity — R1: an enrolled factor cannot be replaced in place', () =
     ).rejects.toThrow(/does not match/i);
 
     // The original factor is intact and still the thing that opens the account.
+    // The next step's code: the one that confirmed the enrolment has been used.
+    const later = now + TOTP_PERIOD_SECONDS * 1000;
     expect(
-      await verifyCredentials(staff.email, PASSWORD, await totpCodeAt(secretA, now), now),
+      await verifyCredentials(staff.email, PASSWORD, await totpCodeAt(secretA, later), later),
     ).not.toBeNull();
     expect(
-      await verifyCredentials(staff.email, PASSWORD, await totpCodeAt(secretB, now), now),
+      await verifyCredentials(staff.email, PASSWORD, await totpCodeAt(secretB, later), later),
     ).toBeNull();
-    expect(await verifyCredentials(staff.email, PASSWORD, '', now)).toBeNull();
+    expect(await verifyCredentials(staff.email, PASSWORD, '', later)).toBeNull();
   });
 
   it('refuses a valid confirmation resubmitted after it already succeeded', async () => {
@@ -345,11 +437,13 @@ describe('identity — R1: two confirmations racing on one account', () => {
       message: expect.stringMatching(/already enrolled/i),
     });
 
-    // Whichever won, the account holds exactly that one and it works.
+    // Whichever won, the account holds exactly that one and it works — with
+    // the next step's code, since the confirming one has been used.
     const stored = await storedSecret(staff.id);
     expect([first, second]).toContain(stored);
+    const later = now + TOTP_PERIOD_SECONDS * 1000;
     expect(
-      await verifyCredentials(staff.email, PASSWORD, await totpCodeAt(stored ?? '', now), now),
+      await verifyCredentials(staff.email, PASSWORD, await totpCodeAt(stored ?? '', later), later),
     ).not.toBeNull();
   });
 });
@@ -363,10 +457,12 @@ describe('identity — withdrawing a second factor', () => {
     staff = await newStaff('disable');
     now = Date.now();
     secret = (await beginTotpEnrolment(staff.principal)).secret;
+    // Enrolled a step ago, so the code that withdraws it below is a new one.
+    const enrolledAt = now - TOTP_PERIOD_SECONDS * 1000;
     await confirmTotpEnrolment(
       staff.principal,
-      { secret, code: await totpCodeAt(secret, now), password: PASSWORD },
-      now,
+      { secret, code: await totpCodeAt(secret, enrolledAt), password: PASSWORD },
+      enrolledAt,
     );
   });
 

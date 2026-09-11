@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { totpCodeAt } from '../../src/modules/identity/domain/totp';
+import { counterFor, totpCodeFor, TOTP_WINDOW_STEPS } from '../../src/modules/identity/domain/totp';
 
 /**
  * P2 — optional two-factor authentication, end to end.
@@ -25,6 +25,29 @@ const staffEmail = `e2e.2fa.${run}@example.test`;
 /** The secret shown during enrolment, carried between tests in this file. */
 let secret = '';
 
+/**
+ * A code this account has not used yet.
+ *
+ * A code is accepted once: the server records the step it came from and
+ * refuses that step and every earlier one afterwards. This whole story happens
+ * inside one thirty-second step, so it cannot simply ask the clock four times —
+ * it hands out consecutive steps instead, starting one step *behind* now (the
+ * window accepts it, and it leaves more room ahead) and waiting for the clock
+ * when the next step is further ahead than the window allows.
+ */
+let nextCounter: number | null = null;
+
+async function freshCode(): Promise<string> {
+  const behind = counterFor(Date.now()) - 1;
+  nextCounter = nextCounter === null ? behind : Math.max(nextCounter, behind);
+  while (nextCounter > counterFor(Date.now()) + TOTP_WINDOW_STEPS) {
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  const code = await totpCodeFor(secret, nextCounter);
+  nextCounter += 1;
+  return code;
+}
+
 async function signIn(page: Page, email: string, password: string, code = ''): Promise<void> {
   await page.goto('/admin/sign-in');
   await page.getByLabel('Email').fill(email);
@@ -43,6 +66,9 @@ async function signOut(page: Page): Promise<void> {
  * code, then withdrawn. Each step depends on the previous one having happened.
  */
 test.describe.serial('two-factor authentication', () => {
+  // `freshCode` may wait for the next thirty-second step.
+  test.describe.configure({ timeout: 90_000 });
+
   test('a super-admin creates the account that will enrol', async ({ page }) => {
     await signIn(page, SEED_ADMIN, SEED_PASSWORD);
     await expect(page).toHaveURL(/\/admin(\?|$)/);
@@ -75,7 +101,7 @@ test.describe.serial('two-factor authentication', () => {
 
     const form = page.locator('form').filter({ hasText: 'Turn on' });
     await form.getByLabel('Current password').fill(STAFF_PASSWORD);
-    await form.getByLabel('Code from your app').fill(await totpCodeAt(secret, Date.now()));
+    await form.getByLabel('Code from your app').fill(await freshCode());
     await form.getByRole('button', { name: 'Turn on' }).click();
 
     await expect(page.getByRole('status').first()).toContainText('is on');
@@ -90,13 +116,13 @@ test.describe.serial('two-factor authentication', () => {
   });
 
   test('the password plus a current code does', async ({ page }) => {
-    await signIn(page, staffEmail, STAFF_PASSWORD, await totpCodeAt(secret, Date.now()));
+    await signIn(page, staffEmail, STAFF_PASSWORD, await freshCode());
     await expect(page).toHaveURL(/\/admin(\?|$)/);
     await expect(page.getByText('On — signing in asks for a code')).toBeVisible();
   });
 
   test('withdrawing it returns sign-in to the password alone', async ({ page }) => {
-    await signIn(page, staffEmail, STAFF_PASSWORD, await totpCodeAt(secret, Date.now()));
+    await signIn(page, staffEmail, STAFF_PASSWORD, await freshCode());
     // Wait for the sign-in redirect to land: navigating straight to the page
     // races the server action, and the request arrives with no session.
     await expect(page).toHaveURL(/\/admin(\?|$)/);
@@ -104,7 +130,7 @@ test.describe.serial('two-factor authentication', () => {
 
     const form = page.locator('form').filter({ hasText: 'Turn off' });
     await form.getByLabel('Current password').fill(STAFF_PASSWORD);
-    await form.getByLabel('Code from your app').fill(await totpCodeAt(secret, Date.now()));
+    await form.getByLabel('Code from your app').fill(await freshCode());
     await form.getByRole('button', { name: 'Turn off' }).click();
     await expect(page.getByRole('status').first()).toContainText('is off');
 

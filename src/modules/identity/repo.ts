@@ -64,20 +64,47 @@ export async function enrolTwoFactorSecret(
   tx: Tx,
   userId: string,
   secret: string,
+  acceptedCounter: number,
 ): Promise<boolean> {
   const { count } = await auditedExecutor(tx).user.updateMany({
     where: { id: userId, twoFactorSecret: null },
-    data: { twoFactorSecret: secret },
+    // The confirming code has been *used*: it must not sign the account in
+    // as well, so it is recorded exactly as a sign-in would record it.
+    data: { twoFactorSecret: secret, twoFactorLastCounter: acceptedCounter },
   });
   return count === 1;
 }
 
-/** Withdraw a second factor. */
+/** Withdraw a second factor. The step record goes with it; the next enrolment starts its own. */
 export async function clearTwoFactorSecret(tx: Tx, userId: string): Promise<void> {
   await auditedExecutor(tx).user.update({
     where: { id: userId },
-    data: { twoFactorSecret: null },
+    data: { twoFactorSecret: null, twoFactorLastCounter: null },
   });
+}
+
+/**
+ * Record that a code from `counter` has been accepted — **only if it is later
+ * than the last one**. Returns whether it was.
+ *
+ * This is the replay guard, and it is a compare-and-set the database arbitrates
+ * for the same reason enrolment is: two sign-ins carrying the same code at the
+ * same instant must not both be told yes. A counter no greater than the one
+ * already stored is the same code, or an older one, being used again.
+ */
+export async function claimTotpCounter(
+  userId: string,
+  counter: number,
+  db?: DbExecutor,
+): Promise<boolean> {
+  const { count } = await executor(db).user.updateMany({
+    where: {
+      id: userId,
+      OR: [{ twoFactorLastCounter: null }, { twoFactorLastCounter: { lt: counter } }],
+    },
+    data: { twoFactorLastCounter: counter },
+  });
+  return count === 1;
 }
 
 /** Columns safe to return from a list — never `passwordHash` or `twoFactorSecret`. */
