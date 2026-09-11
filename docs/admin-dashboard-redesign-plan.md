@@ -68,6 +68,13 @@ always-visible, sticky part of the shell (not a page-level dropdown that resets 
 gives `SUPER_ADMIN` a clear "both stores" vs "Store 1" vs "Store 2" switch that persists across the
 whole session, not just the current page's query param.
 
+**Guardrail (human, 2026-09-11):** a `SUPER_ADMIN` "both stores" view is allowed **only** where an
+existing, authorized backend read path already returns the combined-store result. PAM must not fetch
+per-store data and sum/merge/aggregate it client-side to fabricate a cross-store view — that would be a
+UI-layer computation standing in for a backend guarantee, exactly the kind of silent scope-widening this
+plan's boundary exists to prevent. If a screen wants a combined view and no such read path exists today,
+that is a backend requirement reported to god (routed to JIM), not something PAM works around in React.
+
 ### AD4 — Orders screens
 
 Redesign the queue (status filters, search, at-a-glance SLA/age indicators) and the detail/timeline view
@@ -105,6 +112,13 @@ A new surface, additive to what exists: order volume/status breakdown, top produ
 per-store comparison for `SUPER_ADMIN`. Built entirely from existing read paths (`modules/orders`,
 `modules/inventory`, `modules/catalog` list/count functions) — if a report needs data no current query
 provides, that's flagged to god as a backend need, not computed ad hoc in a React component.
+
+**Guardrail (human, 2026-09-11):** every number on every report/KPI screen must trace to an existing,
+authoritative read path. A missing aggregate (a sum, a trend, a cross-store rollup, anything a current
+query doesn't already return) is a backend requirement PAM reports to god for JIM/Michael to scope and
+build — never a frontend calculation over raw rows fetched for the purpose. This is the same rule as
+AD3's "both stores" guardrail, generalized to the whole reports surface: PAM presents what the backend
+already proves, she doesn't compute new truths in the UI layer.
 
 ### AD10 — Phase 5 fulfillment screens (reserved, not designed yet)
 
