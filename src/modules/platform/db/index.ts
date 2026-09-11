@@ -1,3 +1,4 @@
+import { PrismaPg } from '@prisma/adapter-pg';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { getConfig } from '../config/index';
 import { childLogger } from '../logger/index';
@@ -24,10 +25,167 @@ export type DbExecutor = PrismaClient | Tx;
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
+/**
+ * `pg` pool settings, and the URL with Prisma's own knobs taken back out of it.
+ *
+ * ## Why this function exists at all
+ *
+ * Under Prisma 6 the query engine owned the pool and read its size from the
+ * connection string. Under the driver adapter the pool is **`pg`'s**, and `pg`
+ * has never heard of `connection_limit` — it is not a libpq parameter. Left
+ * alone it would be ignored in silence and every connection string in this
+ * project would quietly get `pg`'s default pool of 10.
+ *
+ * That is not a tuning detail here. Phase 4's concurrency tests (ADR-0011) are
+ * run under `?connection_limit=5` on purpose, because five is what a 2-vCPU CI
+ * runner gives Prisma and it is the constraint that caught the original
+ * advisory-lock design: a blocking `pg_advisory_xact_lock` holds its connection
+ * while it waits, so a dozen callers queueing on one key exhaust the pool and
+ * deadlock the suite. Those tests still pass against a pool of 10 — they simply
+ * stop proving anything. So the translation is the difference between a live
+ * regression test and a decorative one.
+ *
+ * ## The mapping
+ *
+ * | `DATABASE_URL` (Prisma) | `pg.Pool` | note |
+ * |---|---|---|
+ * | `connection_limit` | `max` | same meaning, same units |
+ * | `pool_timeout` (s) | `connectionTimeoutMillis` | wait for a usable connection |
+ * | `connect_timeout` (s) | `connectionTimeoutMillis` | see below |
+ *
+ * Prisma splits *waiting for a free slot* (`pool_timeout`) from *opening a
+ * socket* (`connect_timeout`); `pg` has one knob covering both. Taking the
+ * larger of the two is the only translation that cannot make a timeout stricter
+ * than it was, which would turn a slow connection into a spurious failure. Both
+ * are seconds in Prisma and milliseconds in `pg`. Prisma's `pool_timeout=0`
+ * means "wait forever", and so does `connectionTimeoutMillis: 0`.
+ *
+ * | `schema` | `options: -c search_path=…` | see {@link prismaAdapterFromUrl} |
+ * | `options` (libpq) | `options` | kept, with the search path appended |
+ *
+ * `schema` is the parameter that is easiest to lose. Prisma's engine used it
+ * twice: to qualify every generated query and to set the connection's
+ * `search_path`. `pg` ignores it, and the adapter only learns a schema from its
+ * own second constructor argument — so left in the URL it was dropped in
+ * silence, every client read `public`, and only the CLI (which still honours
+ * it) migrated the schema that was asked for. The search path set here is what
+ * keeps this module's *unqualified* raw SQL (`FROM "InventoryItem"`) on the
+ * same schema as the generated queries; the adapter option is the other half.
+ * A schema that is not a plain identifier is refused rather than dropped: the
+ * `options` string has no quoting rules that would carry it safely.
+ *
+ * The consumed parameters are stripped from the URL that reaches `pg`, so what
+ * it parses is a plain PostgreSQL connection string. Everything else —
+ * `sslmode`, `application_name` — is left exactly as written.
+ */
+export function poolConfigFromUrl(databaseUrl: string): {
+  connectionString: string;
+  max?: number;
+  connectionTimeoutMillis?: number;
+  options?: string;
+} {
+  let url: URL;
+  try {
+    url = new URL(databaseUrl);
+  } catch {
+    // Not our business to validate the URL — `pg` will report it far better
+    // than a guess here would.
+    return { connectionString: databaseUrl };
+  }
+
+  const schema = schemaFromUrl(databaseUrl);
+  // A URL may already carry libpq's `options=` (say `-c statement_timeout=…`).
+  // It has to be consumed too: pg re-parses `connectionString` after merging
+  // the config object and lets the URL's value win over a top-level one, so
+  // leaving it in the string would silently discard the search path below.
+  // One string, existing settings first, search path last so that it wins any
+  // accidental collision.
+  const existingOptions = url.searchParams.get('options');
+  const options = [existingOptions, schema === undefined ? null : `-c search_path="${schema}"`]
+    .filter((part): part is string => part !== null && part !== '')
+    .join(' ');
+
+  const seconds = (name: string): number | undefined => {
+    const raw = url.searchParams.get(name);
+    if (raw === null) return undefined;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+  };
+
+  const connectionLimit = seconds('connection_limit');
+  const timeouts = [seconds('pool_timeout'), seconds('connect_timeout')].filter(
+    (value): value is number => value !== undefined,
+  );
+
+  for (const consumed of [
+    'connection_limit',
+    'pool_timeout',
+    'connect_timeout',
+    'schema',
+    'options',
+  ]) {
+    url.searchParams.delete(consumed);
+  }
+
+  // `0` is Prisma's "no limit" sentinel on either knob, and pg's
+  // `connectionTimeoutMillis: 0` means the same. It has to win over a finite
+  // value on the other knob rather than lose to it as the smallest number:
+  // that is the max-of-two rule applied honestly, since "wait forever" is the
+  // larger of the two.
+  const connectionTimeoutMillis = timeouts.includes(0) ? 0 : Math.max(...timeouts) * 1_000;
+
+  return {
+    connectionString: url.toString(),
+    ...(connectionLimit !== undefined && connectionLimit > 0 ? { max: connectionLimit } : {}),
+    ...(timeouts.length > 0 ? { connectionTimeoutMillis } : {}),
+    ...(options === '' ? {} : { options }),
+  };
+}
+
+/**
+ * The `?schema=` a `DATABASE_URL` asks for, or `undefined` when it asks for
+ * none. Refuses anything that is not a plain identifier — see
+ * {@link poolConfigFromUrl} for why a loud refusal beats a silent drop.
+ */
+export function schemaFromUrl(databaseUrl: string): string | undefined {
+  let raw: string | null;
+  try {
+    raw = new URL(databaseUrl).searchParams.get('schema');
+  } catch {
+    return undefined;
+  }
+  if (raw === null) return undefined;
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(raw)) {
+    throw new Error(
+      `DATABASE_URL schema must be a plain identifier (letters, digits, underscore), got ${JSON.stringify(raw)}`,
+    );
+  }
+  return raw;
+}
+
+/**
+ * The driver adapter for a `DATABASE_URL`, with every parameter Prisma's engine
+ * used to read from it translated — the pool settings into `pg`'s, and the
+ * schema into the adapter's own option, which is the only way Prisma 7 learns
+ * which schema to qualify its queries with. Every client in this repository is
+ * built through here (the application, the seed, the tests' second
+ * connection) so that none of them can quietly differ from the CLI.
+ */
+export function prismaAdapterFromUrl(databaseUrl: string): PrismaPg {
+  const schema = schemaFromUrl(databaseUrl);
+  return new PrismaPg(
+    poolConfigFromUrl(databaseUrl),
+    schema === undefined ? undefined : { schema },
+  );
+}
+
 function createClient(): PrismaClient {
   const config = getConfig();
   return new PrismaClient({
-    datasources: { db: { url: config.DATABASE_URL } },
+    // Prisma 7 takes a driver adapter rather than a URL; the adapter owns the
+    // `pg` pool's lifecycle, which is why a `PoolConfig` is handed over rather
+    // than a `Pool` this module would then have to close.
+    adapter: prismaAdapterFromUrl(config.DATABASE_URL),
     log: config.APP_ENV === 'local' ? ['warn', 'error'] : ['error'],
   });
 }
@@ -146,13 +304,27 @@ function asTx(client: Prisma.TransactionClient): Tx {
 /**
  * Belt-and-braces for the type brand: refuse a root client at runtime too.
  *
- * Prisma's interactive-transaction proxy deliberately omits `$transaction` and
- * `$connect`, so their presence is a reliable "this is the singleton client"
- * signal — and catches anyone who reached for `as unknown as Tx`.
+ * Prisma's interactive-transaction proxy omits the connection-lifecycle methods,
+ * so their presence is a reliable "this is the singleton client" signal — and
+ * catches anyone who reached for `as unknown as Tx`.
+ *
+ * **`$transaction` used to be on that list and no longer is.** Prisma 6's proxy
+ * omitted it; Prisma 7's keeps it, so testing for it rejected every legitimate
+ * transaction handle. Measured on 7.10.0 inside a `$transaction` callback:
+ *
+ *     $transaction  root: function   tx: function
+ *     $connect      root: function   tx: undefined
+ *     $disconnect   root: function   tx: undefined
+ *     $on           root: function   tx: undefined
+ *     $extends      root: function   tx: undefined
+ *
+ * The guard is no weaker for the change — it still only ever passes something
+ * the root client would fail — and both methods checked are root-only on 6 and
+ * 7 alike, so it does not depend on which of them a future version keeps.
  */
 export function assertTransactionHandle(candidate: DbExecutor): asserts candidate is Tx {
   const suspect = candidate as Partial<PrismaClient>;
-  if (typeof suspect.$transaction === 'function' || typeof suspect.$connect === 'function') {
+  if (typeof suspect.$connect === 'function' || typeof suspect.$disconnect === 'function') {
     throw new Error(
       'Expected a transaction handle from withTransaction(), got the root Prisma client. ' +
         'A row lock or audited write taken outside a transaction is released immediately.',

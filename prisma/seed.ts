@@ -17,8 +17,20 @@
  */
 import { Prisma, PrismaClient } from '@prisma/client';
 import argon2 from 'argon2';
+import { prismaAdapterFromUrl } from '../src/modules/platform/db/index';
 
-const prisma = new PrismaClient();
+/**
+ * Prisma 7 clients take a driver adapter rather than a URL.
+ *
+ * Built the same way the application's client is, so a `?schema=` in the URL
+ * reaches this script too: the CLI that just ran `migrate deploy` honoured it,
+ * and a seed that quietly wrote to `public` instead would fill the wrong
+ * schema. The pool translation that comes with it has nothing to constrain on
+ * a one-shot script, and costs nothing.
+ */
+const prisma = new PrismaClient({
+  adapter: prismaAdapterFromUrl(process.env.DATABASE_URL ?? ''),
+});
 
 /** Shared dev password. Never used outside a local/CI database. */
 /** Dev-only demo shopper. Never a real credential — see the README. */

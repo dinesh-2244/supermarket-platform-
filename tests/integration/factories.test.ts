@@ -1,8 +1,8 @@
-import { PrismaClient } from '@prisma/client';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createOrder, createStoreWithProduct, createCustomer } from '../factories/index';
+import { newTestClient } from './prisma-client';
 
-const prisma = new PrismaClient();
+const prisma = newTestClient();
 
 afterAll(async () => {
   await prisma.$disconnect();

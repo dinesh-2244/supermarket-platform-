@@ -38,9 +38,15 @@ function migrateDiff(): string {
       'prisma',
       'migrate',
       'diff',
-      '--from-url',
-      process.env.DATABASE_URL ?? '',
-      '--to-schema-datamodel',
+      // Prisma 7 removed `--from-url`. `--from-config-datasource` reads the
+      // same URL from `prisma.config.ts`, which takes it from `DATABASE_URL` —
+      // so this still diffs the live database the suite just migrated, which is
+      // the whole point of the check. A shadow replay would only ever agree
+      // with the migrations that built it.
+      '--from-config-datasource',
+      // `--to-schema-datamodel` was removed in the same release; `--to-schema`
+      // is the replacement and takes the same path.
+      '--to-schema',
       'prisma/schema.prisma',
       '--script',
     ],

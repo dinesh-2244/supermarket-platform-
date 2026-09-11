@@ -1,4 +1,3 @@
-import { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   clearEventHandlersForTests,
@@ -20,6 +19,7 @@ import {
   reconcileStock,
 } from '@/modules/inventory';
 import { createStore, createStoreSettings } from '../factories/index';
+import { newTestClient } from './prisma-client';
 
 /**
  * P2-5 — the ledger invariant (§3/§7), against a real PostgreSQL.
@@ -317,7 +317,7 @@ describe('inventory — concurrent mutations serialise via FOR UPDATE', () => {
   it('does not lose an update when two adjustments race', async () => {
     // Two independent connections, started together. Without the row lock both
     // would read 100 and both write 90 — one decrement silently lost.
-    const other = new PrismaClient();
+    const other = newTestClient();
     try {
       await Promise.all([
         adjustStock(managerA, { storeId: storeA, productId, delta: -10 }),

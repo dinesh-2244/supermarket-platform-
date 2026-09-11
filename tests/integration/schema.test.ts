@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -79,7 +80,7 @@ let owned: string | null = null;
 /** Connected to the base database purely to issue CREATE/DROP; reads no rows. */
 let admin: PrismaClient | null = null;
 
-const prisma = new PrismaClient({ datasources: { db: { url: scratchUrl } } });
+const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: scratchUrl }) });
 
 /** The child processes write to the scratch database, never to the shared one. */
 const scratchEnv = { ...process.env, DATABASE_URL: scratchUrl };
@@ -125,7 +126,7 @@ beforeAll(async () => {
 
   try {
     if (providedUrl === '') {
-      admin = new PrismaClient({ datasources: { db: { url: baseUrl } } });
+      admin = new PrismaClient({ adapter: new PrismaPg({ connectionString: baseUrl }) });
       try {
         await admin.$executeRawUnsafe(`CREATE DATABASE "${scratchDatabase}"`);
       } catch (error) {

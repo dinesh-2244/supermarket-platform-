@@ -28,12 +28,20 @@ loadDotenv({ path: '.env', quiet: true });
  * the output, and it is the file Prisma 7 will want regardless (see the
  * stabilization report for why that upgrade is deferred).
  *
- * Deliberately minimal: only the two things the CLI cannot infer. The datasource
- * URL stays in `prisma/schema.prisma` for now, because moving it here is part of
- * the Prisma 7 driver-adapter change and not of this one.
+ * The datasource URL now lives here too. Prisma 7 refuses `url` in
+ * `schema.prisma` outright — the CLI (`generate`, `migrate`, `db execute`) reads
+ * it from this file, while the *client* no longer reads a URL at all and takes a
+ * driver adapter instead. The two paths are separate on purpose: the CLI still
+ * connects the way it always did, and only the application's own connections go
+ * through `pg`.
  */
 export default defineConfig({
   schema: path.join('prisma', 'schema.prisma'),
+  // Spread rather than assigned: `exactOptionalPropertyTypes` rejects an
+  // explicit `undefined` here, and an absent URL is the CLI's error to report.
+  ...(process.env.DATABASE_URL === undefined
+    ? {}
+    : { datasource: { url: process.env.DATABASE_URL } }),
   migrations: {
     seed: 'tsx prisma/seed.ts',
   },

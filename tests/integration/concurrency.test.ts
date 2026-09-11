@@ -1,4 +1,3 @@
-import { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { getPrisma, type Principal } from '@/modules/platform';
 import { createCategory, createProduct, updateCategory } from '@/modules/catalog';
@@ -8,6 +7,7 @@ import { runStockImport } from '@/modules/inventory';
 import { adjustStock } from '@/modules/inventory';
 import { setPrice as setPriceAgain } from '@/modules/pricing';
 import { createStore, createStoreSettings } from '../factories/index';
+import { newTestClient } from './prisma-client';
 
 /**
  * The corrective round's concurrency repros (R2, R4, R6).
@@ -128,7 +128,7 @@ describe('R2 — a concurrent import must not write a stale absolute stock', () 
    * reporting 110.
    */
   it('recomputes a set-mode diff from the locked balance, not the planned one', async () => {
-    const holder = new PrismaClient();
+    const holder = newTestClient();
     try {
       let importResult: Awaited<ReturnType<typeof runStockImport>> | undefined;
       let importing: Promise<void> | undefined;
@@ -195,7 +195,7 @@ describe('R2 — a concurrent import must not write a stale absolute stock', () 
    * rebuilt from the balance this transaction locked.
    */
   it('reports an overtaken row from the locked balance, not the planned one', async () => {
-    const holder = new PrismaClient();
+    const holder = newTestClient();
     try {
       let importResult: Awaited<ReturnType<typeof runStockImport>> | undefined;
       let importing: Promise<void> | undefined;
@@ -335,7 +335,7 @@ describe('R4 — concurrent price edits must record the real previous price', ()
     const listing = await getListing(admin, storeA, productA);
     await prisma.priceChange.deleteMany({ where: { storeProductId: listing!.id } });
 
-    const holder = new PrismaClient();
+    const holder = newTestClient();
     try {
       const writers: Promise<unknown>[] = [];
 
@@ -395,7 +395,7 @@ describe('R4 — the *first* price of a product must chain too', () => {
     });
     extraProductIds.push(fresh.id);
 
-    const holder = new PrismaClient();
+    const holder = newTestClient();
     try {
       const writers: Promise<unknown>[] = [];
 

@@ -55,6 +55,10 @@ ENV NODE_ENV=production \
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node package.json ./
 COPY --chown=node:node prisma ./prisma
+# Prisma 7 reads the datasource URL from `prisma.config.ts`, not from
+# `schema.prisma` — without this file `migrate deploy` stops before it connects:
+# "The datasource.url property is required in your Prisma config file".
+COPY --chown=node:node prisma.config.ts ./
 
 # Migrations do not need the query engine, but generating the client here keeps
 # `prisma migrate status` and `migrate resolve` usable from the same image.
