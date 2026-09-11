@@ -67,4 +67,34 @@ describe('driver-adapter pool translation', () => {
       await limited.$disconnect();
     }
   }, 30_000);
+
+  it('waits past a finite connect_timeout when pool_timeout=0 asks for "forever"', async () => {
+    // `0` is Prisma's "no limit" sentinel. Combined with a finite
+    // `connect_timeout` it used to lose the max-of-two comparison and cut the
+    // pool wait short. The witness is pg's own queue: with one connection held,
+    // a second statement must still be queued after the finite value has
+    // elapsed, and must then succeed when the holder lets go.
+    const url = new URL(process.env.DATABASE_URL ?? '');
+    url.searchParams.set('connection_limit', '1');
+    url.searchParams.set('pool_timeout', '0');
+    url.searchParams.set('connect_timeout', '1');
+
+    const single = newTestClient(url.toString());
+    try {
+      await single.$queryRawUnsafe('SELECT 1'); // warm, so both statements below queue on one pool
+      const started = Date.now();
+      // A PrismaPromise is lazy: it runs only once something calls `.then` on
+      // it. Merely constructing the holder would leave the connection free
+      // and the second statement through in ~100ms, proving nothing.
+      const holder = Promise.resolve(single.$queryRawUnsafe('SELECT pg_sleep(1.6)::text AS slept'));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      // The assertion that fails if a finite value overrides the zero: pg
+      // rejects this after ~1s with "timeout exceeded when trying to connect".
+      await expect(single.$queryRawUnsafe('SELECT 2 AS two')).resolves.toBeDefined();
+      expect(Date.now() - started).toBeGreaterThan(1_000);
+      await holder;
+    } finally {
+      await single.$disconnect();
+    }
+  }, 30_000);
 });

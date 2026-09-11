@@ -51,6 +51,26 @@ describe('poolConfigFromUrl', () => {
   it('passes "wait forever" through rather than turning it into a default', () => {
     // Prisma's pool_timeout=0 and pg's connectionTimeoutMillis: 0 agree here.
     expect(poolConfigFromUrl(`${BASE}?pool_timeout=0`).connectionTimeoutMillis).toBe(0);
+    expect(poolConfigFromUrl(`${BASE}?connect_timeout=0`).connectionTimeoutMillis).toBe(0);
+  });
+
+  it('lets an explicit zero dominate a finite value on the other knob', () => {
+    // `0` is Prisma's "no limit" sentinel, not the smallest number. Under the
+    // max-of-two rule it must win, in either order: pg has one knob for both
+    // waits, and the only translation that never tightens an explicit
+    // "wait forever" is "wait forever".
+    expect(
+      poolConfigFromUrl(`${BASE}?pool_timeout=0&connect_timeout=1`).connectionTimeoutMillis,
+    ).toBe(0);
+    expect(
+      poolConfigFromUrl(`${BASE}?connect_timeout=0&pool_timeout=1`).connectionTimeoutMillis,
+    ).toBe(0);
+    expect(
+      poolConfigFromUrl(`${BASE}?pool_timeout=1&connect_timeout=0`).connectionTimeoutMillis,
+    ).toBe(0);
+    expect(
+      poolConfigFromUrl(`${BASE}?pool_timeout=0&connect_timeout=0`).connectionTimeoutMillis,
+    ).toBe(0);
   });
 
   it('omits what was not asked for, leaving pg on its own defaults', () => {

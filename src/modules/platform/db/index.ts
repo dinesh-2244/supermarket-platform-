@@ -94,10 +94,17 @@ export function poolConfigFromUrl(databaseUrl: string): {
     url.searchParams.delete(consumed);
   }
 
+  // `0` is Prisma's "no limit" sentinel on either knob, and pg's
+  // `connectionTimeoutMillis: 0` means the same. It has to win over a finite
+  // value on the other knob rather than lose to it as the smallest number:
+  // that is the max-of-two rule applied honestly, since "wait forever" is the
+  // larger of the two.
+  const connectionTimeoutMillis = timeouts.includes(0) ? 0 : Math.max(...timeouts) * 1_000;
+
   return {
     connectionString: url.toString(),
     ...(connectionLimit !== undefined && connectionLimit > 0 ? { max: connectionLimit } : {}),
-    ...(timeouts.length > 0 ? { connectionTimeoutMillis: Math.max(...timeouts) * 1_000 } : {}),
+    ...(timeouts.length > 0 ? { connectionTimeoutMillis } : {}),
   };
 }
 
