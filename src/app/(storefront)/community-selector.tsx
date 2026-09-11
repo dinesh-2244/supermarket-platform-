@@ -117,16 +117,11 @@ function CommunityCard({
                 <ActionForm
                   action={chooseAreaAction}
                   submitLabel="Deliver here"
+                  submitButtonClassName="text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:underline min-h-[44px] py-1 shrink-0"
                   className="flex w-full items-center justify-between"
                 >
                   <input type="hidden" name="areaId" value={area.areaId} />
                   <span className="font-medium text-slate-700">{area.areaName}</span>
-                  <button
-                    type="submit"
-                    className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:underline"
-                  >
-                    Deliver here
-                  </button>
                 </ActionForm>
               </li>
             ))}

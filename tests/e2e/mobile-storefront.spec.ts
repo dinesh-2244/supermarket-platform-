@@ -44,6 +44,23 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     // Verify zero horizontal scroll on mobile viewport
     await assertNoHorizontalScroll(page);
 
+    // M2 Verification: Expand serviceable sectors / blocks details in community cards
+    // and verify every service-area row contains EXACTLY ONE 'Deliver here' button
+    const areasDetails = page.locator('details.group\\/areas');
+    const detailsCount = await areasDetails.count();
+    for (let i = 0; i < detailsCount; i++) {
+      const details = areasDetails.nth(i);
+      await details.locator('summary').click();
+      const areaItems = details.locator('ul li');
+      const itemCount = await areaItems.count();
+      expect(itemCount).toBeGreaterThan(0);
+      for (let j = 0; j < itemCount; j++) {
+        const item = areaItems.nth(j);
+        const deliverButtons = item.getByRole('button', { name: /deliver here/i });
+        await expect(deliverButtons).toHaveCount(1);
+      }
+    }
+
     // Select Store 1 community
     const shopS1Btn = page.getByRole('button', { name: /shop store 1/i });
     await expect(shopS1Btn).toBeVisible();
@@ -83,13 +100,28 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     // Product link and name
     await expect(firstCard.locator('a[href^="/p/"]').first()).toBeVisible();
 
-    // ADD button presence
-    const addBtn = firstCard.getByRole('button', { name: /add \+/i });
+    // ADD button presence (accessible name from aria-label)
+    const addBtn = firstCard.getByRole('button', { name: /add .* to basket/i });
     await expect(addBtn).toBeVisible();
 
     // Verify tap target height
     const addBox = await addBtn.boundingBox();
     expect(addBox?.height).toBeGreaterThanOrEqual(44);
+
+    // M4: Click ADD +, wait for stepper to appear, and assert both +/- buttons are >= 44x44px
+    await addBtn.click();
+    const decBtn = firstCard.getByRole('button', { name: /^decrease quantity/i });
+    const incBtn = firstCard.getByRole('button', { name: /^increase quantity/i });
+    await expect(decBtn).toBeVisible();
+    await expect(incBtn).toBeVisible();
+
+    const decBox = await decBtn.boundingBox();
+    expect(decBox?.width).toBeGreaterThanOrEqual(44);
+    expect(decBox?.height).toBeGreaterThanOrEqual(44);
+
+    const incBox = await incBtn.boundingBox();
+    expect(incBox?.width).toBeGreaterThanOrEqual(44);
+    expect(incBox?.height).toBeGreaterThanOrEqual(44);
 
     await assertNoHorizontalScroll(page);
   });
@@ -127,15 +159,30 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     await addForm.getByRole('button', { name: 'Add to basket' }).click();
     await expect(addForm.getByRole('status')).toContainText(/in your basket/i);
 
-    // Verify D7: Floating mobile cart drawer appears when items in basket
+    // Verify D7 & M5: Floating mobile cart drawer appears unconditionally when items in basket
     const mobileCartBar = page.locator('aside[aria-label="Floating basket summary"]');
-    if (await mobileCartBar.isVisible()) {
-      await expect(mobileCartBar.getByRole('link', { name: /view basket/i })).toBeVisible();
+    await expect(mobileCartBar).toBeVisible();
+    await expect(mobileCartBar.getByRole('link', { name: /view basket/i })).toBeVisible();
+    await expect(mobileCartBar).toContainText(/scheduled slot delivery/i);
+
+    // Verify M5: Cart bar does not overlap final actionable page content (footer) when scrolled to bottom
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    const footerLink = page.locator('footer a').last();
+    await expect(footerLink).toBeVisible();
+    const footerLinkBox = await footerLink.boundingBox();
+    const barBox = await mobileCartBar.boundingBox();
+    expect(footerLinkBox).not.toBeNull();
+    expect(barBox).not.toBeNull();
+    if (footerLinkBox && barBox) {
+      expect(footerLinkBox.y + footerLinkBox.height).toBeLessThanOrEqual(barBox.y);
     }
 
     // Go to checkout
     await page.goto('/checkout');
     await expect(page.getByRole('heading', { name: 'Checkout' })).toBeVisible();
+
+    // M5: Assert cart bar is suppressed on checkout route where it is redundant
+    await expect(page.locator('aside[aria-label="Floating basket summary"]')).toHaveCount(0);
 
     // D6: Verify gated community callout
     await expect(page.getByText(/delivering to community/i)).toBeVisible();
@@ -152,5 +199,40 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     await expect(page.getByRole('radio', { name: /cash on delivery/i })).toBeChecked();
 
     await assertNoHorizontalScroll(page);
+  });
+
+  test('M6: Inline card actions surface server error messages via aria-live', async ({
+    page,
+    context,
+  }) => {
+    await page.goto('/store/select');
+    await page.getByRole('button', { name: /shop store 1/i }).click();
+    await expect(page).toHaveURL(/\/$|\/\?/);
+
+    // Navigate to a category browse page with product cards
+    await page.goto('/c/staples');
+    const firstCard = page.locator('article').first();
+    await expect(firstCard).toBeVisible();
+
+    // Add item to basket
+    const addBtn = firstCard.getByRole('button', { name: /add .* to basket/i });
+    await expect(addBtn).toBeVisible();
+    await addBtn.click();
+
+    // Wait for stepper to appear
+    const incBtn = firstCard.getByRole('button', { name: /^increase quantity/i });
+    await expect(incBtn).toBeVisible();
+
+    // Clear cart token cookie to simulate server-side invalidated / cleared basket
+    // while keeping storeContext active (so the category page remains valid)
+    await context.clearCookies({ name: 'cartToken' });
+
+    // Tap increase button on stepper
+    await incBtn.click();
+
+    // Verify error message is surfaced to the shopper via role="alert"
+    const alert = firstCard.getByRole('alert');
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText(/your basket is empty/i);
   });
 });

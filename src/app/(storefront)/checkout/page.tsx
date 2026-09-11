@@ -64,7 +64,7 @@ export default async function CheckoutPage(): Promise<React.ReactElement> {
   const belowMinimum = !totals.meetsMinimum;
   const estimatedTotal = totals.subtotalPaise + totals.deliveryFeePaise;
   const blocked = blockingIssues(cart.lines);
-  const communityName = communityNameForStore(store.id, store.name);
+  const communityName = communityNameForStore(store);
 
   // Scoped to the signed-in customer by listAddresses
   const addresses = customer === null ? [] : await listAddresses(principal);

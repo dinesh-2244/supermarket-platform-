@@ -41,7 +41,7 @@ export default async function ShopPage({
     getCartQuantities(),
   ]);
 
-  const communityName = communityNameForStore(store.id, store.name);
+  const communityName = communityNameForStore(store);
 
   return (
     <div className="space-y-6">

@@ -1,5 +1,48 @@
-import { listServiceableAreas, resolveServiceability, type StorefrontArea } from '@/modules/stores';
-import { rupees } from './ui';
+import {
+  getStore,
+  listServiceableAreas,
+  resolveServiceability,
+  type StorefrontArea,
+  type StoreRecord,
+} from '@/modules/stores';
+
+function formatRupees(paise: number): string {
+  const sign = paise < 0 ? '-' : '';
+  const abs = Math.abs(paise);
+  return `${sign}₹${String(Math.floor(abs / 100))}.${String(abs % 100).padStart(2, '0')}`;
+}
+
+export interface CommunityConfig {
+  readonly id: string;
+  readonly storeCode: string;
+  readonly name: string;
+  readonly shortName: string;
+  readonly subtitle: string;
+  readonly hubName: string;
+}
+
+/**
+ * Single authoritative mapping from store code/identifier to customer-facing community metadata.
+ * Sourced purely from configuration. Independent of area names or sort order.
+ */
+export const STORE_COMMUNITIES: readonly CommunityConfig[] = [
+  {
+    id: 'store-1',
+    storeCode: 'S1',
+    name: 'Store 1 Community',
+    shortName: 'Store 1',
+    subtitle: 'Store 1 · Scheduled Slot Delivery',
+    hubName: 'Store 1 Hub',
+  },
+  {
+    id: 'store-2',
+    storeCode: 'S2',
+    name: 'Store 2 Community',
+    shortName: 'Store 2',
+    subtitle: 'Store 2 · Scheduled Slot Delivery',
+    hubName: 'Store 2 Hub',
+  },
+] as const;
 
 export interface CommunityCardData {
   readonly id: string;
@@ -14,14 +57,10 @@ export interface CommunityCardData {
 }
 
 /**
- * Maps the platform's two stores to the two community choices (D2).
+ * Resolves the community card configuration for each store.
  *
- * Config-driven neutral placeholders:
- * 1. Store 1 Community (served by Store 1)
- * 2. Store 2 Community (served by Store 2)
- *
- * Authoritative store settings (min order, delivery fee, open/paused)
- * are resolved dynamically via resolveServiceability rather than hardcoded.
+ * Uses explicit store code / ID mapping from STORE_COMMUNITIES.
+ * Zero reliance on area names (e.g. Jayanagar/Indiranagar) or database query ordering.
  */
 export async function getCommunityCards(): Promise<readonly CommunityCardData[]> {
   const areas = await listServiceableAreas();
@@ -34,83 +73,131 @@ export async function getCommunityCards(): Promise<readonly CommunityCardData[]>
     storeGroups.set(area.storeId, list);
   }
 
-  let s1Areas: StorefrontArea[] = [];
-  let s2Areas: StorefrontArea[] = [];
-  let store1Id: string | undefined;
-  let store2Id: string | undefined;
+  // Fetch Store records to map storeId to authoritative store.code
+  const storeIds = Array.from(storeGroups.keys());
+  const storeMap = new Map<string, StoreRecord>();
 
-  for (const [storeId, group] of storeGroups.entries()) {
-    if (group.some((a) => a.areaName.toLowerCase().includes('jayanagar'))) {
-      s1Areas = group;
-      store1Id = storeId;
-    } else if (group.some((a) => a.areaName.toLowerCase().includes('indiranagar'))) {
-      s2Areas = group;
-      store2Id = storeId;
+  await Promise.all(
+    storeIds.map(async (storeId) => {
+      try {
+        const store = await getStore({ kind: 'customer', customerId: null, storeId }, storeId);
+        storeMap.set(storeId, store);
+      } catch {
+        // Fallback gracefully if permission or fetch fails
+      }
+    }),
+  );
+
+  const cards: CommunityCardData[] = [];
+
+  for (const config of STORE_COMMUNITIES) {
+    // Find storeId matching config.storeCode authoritatively
+    let matchedStoreId: string | undefined;
+    for (const [storeId, store] of storeMap.entries()) {
+      if (store.code.toLowerCase() === config.storeCode.toLowerCase()) {
+        matchedStoreId = storeId;
+        break;
+      }
     }
+
+    // Deterministic fallback if store codes are not S1/S2 (e.g. custom environment)
+    if (!matchedStoreId) {
+      const idx = STORE_COMMUNITIES.indexOf(config);
+      matchedStoreId = storeIds[idx];
+    }
+
+    if (!matchedStoreId) continue;
+
+    const storeAreas = storeGroups.get(matchedStoreId) ?? [];
+    const primaryArea = storeAreas[0];
+
+    const serviceability = primaryArea?.areaId
+      ? await resolveServiceability({ areaId: primaryArea.areaId })
+      : null;
+
+    const deliveryNote = serviceability?.servable
+      ? `Scheduled Slots · Fresh Daily · Min Order ${formatRupees(serviceability.minOrderPaise)}`
+      : 'Scheduled Slots · Fresh Daily';
+
+    cards.push({
+      id: config.id,
+      name: config.name,
+      shortName: config.shortName,
+      subtitle: config.subtitle,
+      storeId: matchedStoreId,
+      primaryAreaId: primaryArea?.areaId ?? '',
+      isAcceptingOrders: primaryArea?.isAcceptingOrders ?? true,
+      deliveryNote,
+      areas: storeAreas,
+    });
   }
 
-  // Fallback if area names are customized or different in other environments
-  if (s1Areas.length === 0 || s2Areas.length === 0) {
-    const storeIds = Array.from(storeGroups.keys());
-    store1Id = store1Id ?? storeIds[0] ?? '';
-    store2Id = store2Id ?? storeIds[1] ?? '';
-    s1Areas = s1Areas.length > 0 ? s1Areas : (storeGroups.get(store1Id) ?? []);
-    s2Areas = s2Areas.length > 0 ? s2Areas : (storeGroups.get(store2Id) ?? []);
-  }
+  return cards;
+}
 
-  // Preferred primary area for each community
-  const s1Primary = s1Areas.find((a) => a.areaName.includes('4th Block')) ?? s1Areas[0];
-  const s2Primary = s2Areas.find((a) => a.areaName.includes('1st Stage')) ?? s2Areas[0];
+const DEFAULT_COMMUNITY: CommunityConfig = {
+  id: 'store-1',
+  storeCode: 'S1',
+  name: 'Store 1 Community',
+  shortName: 'Store 1',
+  subtitle: 'Store 1 · Scheduled Slot Delivery',
+  hubName: 'Store 1 Hub',
+};
 
-  // Resolve authoritative store settings dynamically from StoreSettings via serviceability
-  const [s1Settings, s2Settings] = await Promise.all([
-    s1Primary?.areaId ? resolveServiceability({ areaId: s1Primary.areaId }) : null,
-    s2Primary?.areaId ? resolveServiceability({ areaId: s2Primary.areaId }) : null,
-  ]);
+/**
+ * Single authoritative helper to get community metadata for any store.
+ */
+export function getCommunityConfigForStore(
+  store?: { id?: string | null; code?: string | null; name?: string | null } | null,
+): CommunityConfig {
+  if (store == null) return STORE_COMMUNITIES[0] ?? DEFAULT_COMMUNITY;
+  const storeCode = store.code?.toLowerCase();
+  const storeId = store.id?.toLowerCase();
+  const storeName = store.name?.toLowerCase();
 
-  const s1DeliveryNote = s1Settings?.servable
-    ? `Scheduled Slots · Fresh Daily · Min Order ${rupees(s1Settings.minOrderPaise)}`
-    : 'Scheduled Slots · Fresh Daily';
-  const s2DeliveryNote = s2Settings?.servable
-    ? `Scheduled Slots · Fresh Daily · Min Order ${rupees(s2Settings.minOrderPaise)}`
-    : 'Scheduled Slots · Fresh Daily';
+  const matched = STORE_COMMUNITIES.find((c) => {
+    if (storeCode !== undefined && c.storeCode.toLowerCase() === storeCode) {
+      return true;
+    }
+    if (storeId !== undefined && c.id.toLowerCase() === storeId) {
+      return true;
+    }
+    if (storeName?.includes(c.shortName.toLowerCase()) === true) {
+      return true;
+    }
+    return false;
+  });
 
-  const c1: CommunityCardData = {
-    id: 'store-1',
-    name: 'Store 1 Community',
-    shortName: 'Store 1',
-    subtitle: 'Store 1 · Scheduled Slot Delivery',
-    storeId: store1Id ?? '',
-    primaryAreaId: s1Primary?.areaId ?? '',
-    isAcceptingOrders: s1Primary?.isAcceptingOrders ?? true,
-    deliveryNote: s1DeliveryNote,
-    areas: s1Areas,
+  if (matched !== undefined) return matched;
+  return {
+    id: store.id ?? 'store-default',
+    storeCode: store.code ?? '',
+    name: store.name ?? 'Store Community',
+    shortName: store.code ?? 'Store',
+    subtitle: `${store.name ?? 'Store'} · Scheduled Slot Delivery`,
+    hubName: `${store.name ?? 'Store'} Hub`,
   };
-
-  const c2: CommunityCardData = {
-    id: 'store-2',
-    name: 'Store 2 Community',
-    shortName: 'Store 2',
-    subtitle: 'Store 2 · Scheduled Slot Delivery',
-    storeId: store2Id ?? '',
-    primaryAreaId: s2Primary?.areaId ?? '',
-    isAcceptingOrders: s2Primary?.isAcceptingOrders ?? true,
-    deliveryNote: s2DeliveryNote,
-    areas: s2Areas,
-  };
-
-  return [c1, c2];
 }
 
 /**
- * Translates an internal store entity name into the customer-facing community name.
+ * Translates an internal store record or id into the customer-facing community name.
+ * Uses the single STORE_COMMUNITIES mapping table.
  */
-export function communityNameForStore(storeId?: string | null, storeName?: string | null): string {
-  if (storeName?.includes('Jayanagar') || storeName?.includes('S1')) {
-    return 'Store 1 Community';
+export function communityNameForStore(
+  storeOrId?: string | { id?: string | null; code?: string | null; name?: string | null } | null,
+  storeName?: string | null,
+): string {
+  if (storeOrId == null) return 'Store Community';
+  if (typeof storeOrId === 'object') {
+    return getCommunityConfigForStore(storeOrId).name;
   }
-  if (storeName?.includes('Indiranagar') || storeName?.includes('S2')) {
-    return 'Store 2 Community';
-  }
-  return storeName ?? 'Store Community';
+  const lowerName = storeName?.toLowerCase();
+  const config = STORE_COMMUNITIES.find((c) => {
+    if (c.id === storeOrId || c.storeCode === storeOrId) return true;
+    if (lowerName?.includes(c.shortName.toLowerCase()) === true) {
+      return true;
+    }
+    return false;
+  });
+  return config?.name ?? storeName ?? 'Store Community';
 }

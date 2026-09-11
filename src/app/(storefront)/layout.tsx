@@ -8,7 +8,7 @@ import {
   storefrontPrincipal,
 } from '@/storefront';
 import { clearAreaAction } from './actions';
-import { communityNameForStore } from './communities';
+import { communityNameForStore, STORE_COMMUNITIES } from './communities';
 import { MobileCartBar } from './mobile-cart-bar';
 
 /**
@@ -33,7 +33,7 @@ export default async function StorefrontLayout({
   const basketCount = await cartItemCount(await currentCartToken());
   const customer = await currentCustomer();
 
-  const communityName = communityNameForStore(store?.id, store?.name);
+  const communityName = communityNameForStore(store);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col antialiased">
@@ -174,12 +174,25 @@ export default async function StorefrontLayout({
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-5 sm:py-7">
+      <main
+        className={`flex-1 mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-5 sm:py-7 ${
+          basketCount > 0 ? 'pb-28 sm:pb-28' : ''
+        }`}
+      >
         {children}
       </main>
 
       {/* Footer */}
-      <footer className="mt-auto border-t border-slate-200 bg-white">
+      <footer
+        className={`mt-auto border-t border-slate-200 bg-white ${
+          basketCount > 0 ? 'pb-28 sm:pb-28' : ''
+        }`}
+        style={
+          basketCount > 0
+            ? { paddingBottom: 'calc(6.5rem + env(safe-area-inset-bottom, 0px))' }
+            : undefined
+        }
+      >
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
           <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
             <div>
@@ -202,16 +215,13 @@ export default async function StorefrontLayout({
                 Communities Served
               </h3>
               <ul className="mt-3 space-y-2 text-xs text-slate-600">
-                <li>
-                  <Link href="/store/select" className="hover:text-emerald-800">
-                    Store 1 Community
-                  </Link>
-                </li>
-                <li>
-                  <Link href="/store/select" className="hover:text-emerald-800">
-                    Store 2 Community
-                  </Link>
-                </li>
+                {STORE_COMMUNITIES.map((community) => (
+                  <li key={community.id}>
+                    <Link href="/store/select" className="hover:text-emerald-800">
+                      {community.name}
+                    </Link>
+                  </li>
+                ))}
                 <li>
                   <Link
                     href="/unserviceable"
