@@ -76,7 +76,7 @@ test('an unserviceable switch takes the previous shop away, and gives the basket
   // Inert, not usable. Without a context, the basket leads back to the picker,
   // and the homepage offers the community selector without any prices.
   await page.goto('/cart');
-  await expect(page).toHaveURL(/\/locality$/);
+  await expect(page).toHaveURL(/\/store\/select$/);
   await page.goto('/');
   await expect(page.locator('article')).toHaveCount(0);
 

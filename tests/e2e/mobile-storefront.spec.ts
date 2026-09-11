@@ -235,4 +235,75 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     await expect(alert).toBeVisible();
     await expect(alert).toContainText(/your basket is empty/i);
   });
+
+  test('Basket page redesign: mobile layout, image thumbnails, touch targets and /store/select redirect', async ({
+    page,
+    context,
+  }) => {
+    // 1. Unselected visitor visiting /cart is redirected to /store/select
+    await context.clearCookies();
+    await page.goto('/cart');
+    await expect(page).toHaveURL(/\/store\/select$/);
+
+    // 2. Select Store 1 Community
+    await page.getByRole('button', { name: /shop store 1/i }).click();
+    await expect(page).toHaveURL(/\/$|\/\?/);
+
+    // 3. Visit empty basket
+    await page.goto('/cart');
+    await expect(page.getByText(/your basket is empty/i)).toBeVisible();
+    const startShoppingLink = page.getByRole('link', { name: 'Start shopping' });
+    await expect(startShoppingLink).toBeVisible();
+    const startBox = await startShoppingLink.boundingBox();
+    expect(startBox?.height).toBeGreaterThanOrEqual(44);
+
+    // 4. Add an item from catalogue
+    await page.goto('/c/staples');
+    const firstCard = page.locator('article').first();
+    await expect(firstCard).toBeVisible();
+    const addBtn = firstCard.getByRole('button', { name: /add .* to basket/i });
+    await addBtn.click();
+    await expect(firstCard.getByRole('button', { name: /^increase quantity/i })).toBeVisible();
+
+    // 5. Navigate to /cart
+    await page.goto('/cart');
+    await expect(page).toHaveURL(/\/cart$/);
+    await expect(page.getByRole('heading', { name: 'Your basket' })).toBeVisible();
+    await expect(page.getByRole('main').getByText('Store 1 Community').first()).toBeVisible();
+
+    // Verify cart row elements
+    const cartRow = page.locator('li').first();
+    await expect(cartRow).toBeVisible();
+
+    // Verify product thumbnail is present
+    await expect(cartRow.locator('img, svg')).toBeVisible();
+
+    // Verify quantity and remove controls meet >=44px touch targets
+    const updateBtn = cartRow
+      .locator('form')
+      .filter({ hasText: 'Update' })
+      .getByRole('button', { name: 'Update' });
+    await expect(updateBtn).toBeVisible();
+    const updateBox = await updateBtn.boundingBox();
+    expect(updateBox?.height).toBeGreaterThanOrEqual(44);
+    expect(updateBox?.width).toBeGreaterThanOrEqual(44);
+
+    const removeBtn = cartRow
+      .locator('form')
+      .filter({ hasText: 'Remove' })
+      .getByRole('button', { name: 'Remove' });
+    await expect(removeBtn).toBeVisible();
+    const removeBox = await removeBtn.boundingBox();
+    expect(removeBox?.height).toBeGreaterThanOrEqual(44);
+    expect(removeBox?.width).toBeGreaterThanOrEqual(44);
+
+    // Verify Proceed to checkout link meets >=44px touch target
+    const checkoutLink = page.getByRole('link', { name: 'Proceed to checkout' });
+    await expect(checkoutLink).toBeVisible();
+    const checkoutBox = await checkoutLink.boundingBox();
+    expect(checkoutBox?.height).toBeGreaterThanOrEqual(44);
+
+    // Verify zero horizontal scroll on mobile viewport
+    await assertNoHorizontalScroll(page);
+  });
 });
