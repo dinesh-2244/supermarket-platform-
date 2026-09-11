@@ -100,12 +100,6 @@ export async function getCommunityCards(): Promise<readonly CommunityCardData[]>
       }
     }
 
-    // Deterministic fallback if store codes are not S1/S2 (e.g. custom environment)
-    if (!matchedStoreId) {
-      const idx = STORE_COMMUNITIES.indexOf(config);
-      matchedStoreId = storeIds[idx];
-    }
-
     if (!matchedStoreId) continue;
 
     const storeAreas = storeGroups.get(matchedStoreId) ?? [];

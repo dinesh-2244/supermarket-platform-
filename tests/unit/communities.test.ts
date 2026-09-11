@@ -1,7 +1,21 @@
-import { describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
+
+const { listServiceableAreas, getStore, resolveServiceability } = vi.hoisted(() => ({
+  listServiceableAreas: vi.fn(),
+  getStore: vi.fn(),
+  resolveServiceability: vi.fn(),
+}));
+
+vi.mock('@/modules/stores', () => ({
+  listServiceableAreas,
+  getStore,
+  resolveServiceability,
+}));
+
 import {
   STORE_COMMUNITIES,
   communityNameForStore,
+  getCommunityCards,
   getCommunityConfigForStore,
 } from '../../src/app/(storefront)/communities';
 
@@ -10,6 +24,10 @@ import {
  * config-driven, and completely independent of area names or sort order (M3).
  */
 describe('Storefront Communities mapping stability (M3)', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
   test('STORE_COMMUNITIES provides single authoritative mapping keyed on storeCode', () => {
     expect(STORE_COMMUNITIES).toHaveLength(2);
     expect(STORE_COMMUNITIES[0]).toMatchObject({
@@ -43,74 +61,143 @@ describe('Storefront Communities mapping stability (M3)', () => {
     expect(communityNameForStore(renamedStore2)).toBe('Store 2 Community');
   });
 
-  test('area renaming and alphabetical reordering do NOT affect store mapping', () => {
-    // Simulate area candidates where Store 2's areas come first alphabetically
-    // and area names have zero legacy keywords ("Jayanagar" / "Indiranagar")
-    const mockAreas = [
+  test('getCommunityCards resolves store IDs strictly by store.code regardless of area sort order', async () => {
+    // Supply areas where Store 2's areas come first alphabetically
+    listServiceableAreas.mockResolvedValue([
       {
         areaId: 'area-alpha',
-        areaName: 'Aardvark Heights (Arbitrary Name)',
+        areaName: 'Aardvark Heights (Store 2 Area)',
         storeId: 'store-2-uuid',
         pincode: '560001',
         isAcceptingOrders: true,
       },
       {
         areaId: 'area-beta',
-        areaName: 'Beta Sector',
+        areaName: 'Beta Sector (Store 2 Area)',
         storeId: 'store-2-uuid',
         pincode: '560001',
         isAcceptingOrders: true,
       },
       {
         areaId: 'area-zebra',
-        areaName: 'Zebra Enclave (Alphabetically Last)',
+        areaName: 'Zebra Enclave (Store 1 Area)',
         storeId: 'store-1-uuid',
         pincode: '560099',
         isAcceptingOrders: true,
       },
-    ];
+    ]);
 
-    // Grouping by storeId
-    const storeGroups = new Map<string, typeof mockAreas>();
-    for (const a of mockAreas) {
-      const list = storeGroups.get(a.storeId) ?? [];
-      list.push(a);
-      storeGroups.set(a.storeId, list);
-    }
-
-    // Mapping keyed on store.code
-    const storeRecords = [
-      { id: 'store-1-uuid', code: 'S1', name: 'Custom Store 1' },
-      { id: 'store-2-uuid', code: 'S2', name: 'Custom Store 2' },
-    ];
-
-    // Match each config to its store
-    const mapped = STORE_COMMUNITIES.map((config) => {
-      const matchedStore = storeRecords.find(
-        (s) => s.code.toLowerCase() === config.storeCode.toLowerCase(),
-      );
-      return {
-        configName: config.name,
-        storeId: matchedStore?.id,
-        areas: storeGroups.get(matchedStore?.id ?? '') ?? [],
-      };
+    getStore.mockImplementation((_principal: unknown, storeId: string) => {
+      if (storeId === 'store-1-uuid') {
+        return Promise.resolve({ id: 'store-1-uuid', code: 'S1', name: 'Store One Custom' });
+      }
+      if (storeId === 'store-2-uuid') {
+        return Promise.resolve({ id: 'store-2-uuid', code: 'S2', name: 'Store Two Custom' });
+      }
+      return Promise.reject(new Error(`Unexpected storeId: ${storeId}`));
     });
 
-    const first = mapped[0];
-    const second = mapped[1];
-    expect(first).toBeDefined();
-    expect(second).toBeDefined();
+    resolveServiceability.mockResolvedValue({
+      servable: true,
+      minOrderPaise: 50000,
+    });
 
-    if (first && second) {
-      // Store 1 is mapped to store-1-uuid despite its areas being last in list
-      expect(first.configName).toBe('Store 1 Community');
-      expect(first.storeId).toBe('store-1-uuid');
-      expect(first.areas[0]?.areaName).toBe('Zebra Enclave (Alphabetically Last)');
+    const cards = await getCommunityCards();
 
-      // Store 2 is mapped to store-2-uuid despite its areas being first in list
-      expect(second.configName).toBe('Store 2 Community');
-      expect(second.storeId).toBe('store-2-uuid');
-      expect(second.areas[0]?.areaName).toBe('Aardvark Heights (Arbitrary Name)');
-    }
+    expect(cards).toHaveLength(2);
+
+    // Store 1 community is mapped strictly to store-1-uuid (S1), despite its areas being last
+    expect(cards[0]).toMatchObject({
+      id: 'store-1',
+      name: 'Store 1 Community',
+      shortName: 'Store 1',
+      storeId: 'store-1-uuid',
+      primaryAreaId: 'area-zebra',
+    });
+
+    // Store 2 community is mapped strictly to store-2-uuid (S2), despite its areas being first
+    expect(cards[1]).toMatchObject({
+      id: 'store-2',
+      name: 'Store 2 Community',
+      shortName: 'Store 2',
+      storeId: 'store-2-uuid',
+      primaryAreaId: 'area-alpha',
+    });
+  });
+
+  test('getCommunityCards fails closed when getStore fails for one store (never duplicates or swaps storeId)', async () => {
+    // Areas supplied Store 2 first, then Store 1
+    listServiceableAreas.mockResolvedValue([
+      {
+        areaId: 'area-alpha',
+        areaName: 'Aardvark Heights (Store 2 Area)',
+        storeId: 'store-2-uuid',
+        pincode: '560001',
+        isAcceptingOrders: true,
+      },
+      {
+        areaId: 'area-zebra',
+        areaName: 'Zebra Enclave (Store 1 Area)',
+        storeId: 'store-1-uuid',
+        pincode: '560099',
+        isAcceptingOrders: true,
+      },
+    ]);
+
+    // Store 1 getStore fails, while Store 2 succeeds
+    getStore.mockImplementation((_principal: unknown, storeId: string) => {
+      if (storeId === 'store-1-uuid') {
+        return Promise.reject(new Error('Database / network error fetching Store 1'));
+      }
+      if (storeId === 'store-2-uuid') {
+        return Promise.resolve({ id: 'store-2-uuid', code: 'S2', name: 'Store Two Custom' });
+      }
+      return Promise.reject(new Error(`Unexpected storeId: ${storeId}`));
+    });
+
+    resolveServiceability.mockResolvedValue({
+      servable: true,
+      minOrderPaise: 50000,
+    });
+
+    const cards = await getCommunityCards();
+
+    // Must fail closed: only the verified store is returned
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({
+      id: 'store-2',
+      name: 'Store 2 Community',
+      shortName: 'Store 2',
+      storeId: 'store-2-uuid',
+    });
+
+    // Explicitly verify Store 2's ID was NOT assigned to Store 1's community
+    const store1Card = cards.find((c) => c.id === 'store-1');
+    expect(store1Card).toBeUndefined();
+
+    // Explicitly verify no duplicate store IDs exist
+    const storeIds = cards.map((c) => c.storeId);
+    expect(new Set(storeIds).size).toBe(storeIds.length);
+  });
+
+  test('getCommunityCards fails closed if store codes do not match configured codes', async () => {
+    listServiceableAreas.mockResolvedValue([
+      {
+        areaId: 'area-1',
+        areaName: 'Area 1',
+        storeId: 'store-x-uuid',
+        pincode: '560001',
+        isAcceptingOrders: true,
+      },
+    ]);
+
+    getStore.mockResolvedValue({
+      id: 'store-x-uuid',
+      code: 'UNKNOWN_CODE',
+      name: 'Unknown Store',
+    });
+
+    const cards = await getCommunityCards();
+    expect(cards).toHaveLength(0);
   });
 });
