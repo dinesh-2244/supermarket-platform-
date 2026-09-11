@@ -6,19 +6,16 @@ import { searchShop } from '../catalogue';
 import { pageNumber } from '../paging';
 import { Pager, ProductGrid } from '../product-card';
 import { Card, Empty, PageHeading } from '../ui';
+import { getCartQuantities } from '../cart-quantities';
 
 export const metadata: Metadata = {
-  title: 'Search',
-  description: 'Search the shop that delivers to your area.',
+  title: 'Search Groceries | Munder Fresh',
+  description:
+    'Search fresh groceries, daily staples, dairy, and household essentials in your community.',
 };
 
 /**
- * Search (D3).
- *
- * Scoped to the store the visitor is bound to, and ranked by the Phase 2
- * trigram service — which is what lets "basmti" find Basmati Rice. The query is
- * a parameter all the way down, never interpolated, so `%`, `_` and quotes are
- * things to search *for*.
+ * Search (D3, D5).
  */
 export default async function SearchPage({
   searchParams,
@@ -26,7 +23,7 @@ export default async function SearchPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }): Promise<React.ReactElement> {
   const context = await currentStoreContext();
-  if (context === null) redirect('/locality');
+  if (context === null) redirect('/store/select');
 
   const params = await searchParams;
   const raw = params.q;
@@ -34,26 +31,36 @@ export default async function SearchPage({
   const page = pageNumber(params.page);
 
   const trimmed = query.trim();
-  const results = trimmed === '' ? null : await searchShop(context, trimmed, { page });
+  const [results, cartQuantities] = await Promise.all([
+    trimmed === '' ? null : searchShop(context, trimmed, { page }),
+    getCartQuantities(),
+  ]);
 
   return (
-    <>
-      <PageHeading title="Search" subtitle="Looking through the shop that delivers to you." />
+    <div className="space-y-6">
+      <PageHeading
+        title="Search Catalogue"
+        subtitle="Searching products available for delivery to your community."
+      />
 
       <Card>
         <form method="get" className="flex flex-wrap items-end gap-2">
           <label className="grow text-xs text-slate-600">
-            <span className="mb-1 block">What are you looking for?</span>
+            <span className="mb-1 block font-medium">What are you looking for?</span>
             <input
               name="q"
               type="search"
               defaultValue={query}
               maxLength={MAX_SEARCH_QUERY_LENGTH}
-              placeholder="rice, atta, coffee…"
-              className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+              placeholder="e.g. Atta, Sona Masoori, Milk, Tomato, Oil..."
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:border-emerald-600 focus:outline-none min-h-[44px]"
+              autoFocus
             />
           </label>
-          <button type="submit" className="rounded bg-emerald-700 px-3 py-1.5 text-sm text-white">
+          <button
+            type="submit"
+            className="rounded-xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-emerald-800 transition min-h-[44px]"
+          >
             Search
           </button>
         </form>
@@ -67,11 +74,12 @@ export default async function SearchPage({
         <Card title={`${String(results.total)} result(s) for “${trimmed}”`}>
           {results.items.length === 0 ? (
             <Empty>
-              Nothing matched “{trimmed}” at your shop. Try a shorter word, or a brand name.
+              Nothing matched “{trimmed}” at your shop. Try a shorter word, or check our category
+              aisles.
             </Empty>
           ) : (
             <>
-              <ProductGrid items={results.items} />
+              <ProductGrid items={results.items} cartQuantities={cartQuantities} />
               <Pager
                 page={results.page}
                 pageCount={results.pageCount}
@@ -81,6 +89,6 @@ export default async function SearchPage({
           )}
         </Card>
       )}
-    </>
+    </div>
   );
 }

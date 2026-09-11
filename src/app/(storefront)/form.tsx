@@ -17,12 +17,14 @@ export function ActionForm({
   submitLabel,
   className,
   pendingLabel,
+  submitButtonClassName,
 }: {
   action: (state: string | undefined, form: FormData) => Promise<string>;
   children?: React.ReactNode;
   submitLabel: string;
   className?: string;
   pendingLabel?: string;
+  submitButtonClassName?: string;
 }): React.ReactElement {
   const [message, formAction, pending] = useActionState(action, undefined);
 
@@ -33,7 +35,10 @@ export function ActionForm({
       <button
         type="submit"
         disabled={pending}
-        className="rounded bg-emerald-700 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+        className={
+          submitButtonClassName ??
+          'rounded bg-emerald-700 px-3 py-1.5 text-sm text-white disabled:opacity-50'
+        }
       >
         {pending ? (pendingLabel ?? 'Working…') : submitLabel}
       </button>

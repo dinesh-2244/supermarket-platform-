@@ -3,25 +3,18 @@ import { listServiceableAreas, type StorefrontArea } from '@/modules/stores';
 import { chooseAreaAction } from '../actions';
 import { ActionForm } from '../form';
 import { Card, Empty, PageHeading } from '../ui';
+import { CommunitySelector } from '../community-selector';
 
 export const metadata: Metadata = {
-  title: 'Choose your delivery area',
-  description: 'Pick the area you want groceries delivered to.',
+  title: 'Choose your delivery area | Munder Fresh',
+  description: 'Pick the community or area you want groceries delivered to.',
 };
 
 /**
- * The locality picker — the first thing a visitor without a store context sees
- * (D1, arch §9/§15).
+ * The locality picker / store selector (D1, D2).
  *
- * It lists the **curated** delivery areas rather than asking for a free-text
- * address, because that is what `resolveServiceability` is built to answer and
- * because a shopper picking from a list cannot mistype themselves out of the
- * zone. The optional pincode box filters the list; it is a *hint*, never the
- * decision — the same posture the resolver itself takes.
- *
- * The store each area belongs to is deliberately not shown. Which of the two
- * shops serves a street is an operational fact, not a choice the shopper makes,
- * and offering it as one would invite them to pick the wrong one.
+ * Provides a 2-card community selector for the primary communities,
+ * while retaining the curated area list and optional pincode filter.
  */
 export default async function LocalityPage({
   searchParams,
@@ -34,18 +27,24 @@ export default async function LocalityPage({
 
   const areas = await listServiceableAreas();
   const filtered = pincode === '' ? areas : areas.filter((area) => area.pincode === pincode);
-  // A pincode nobody serves must not look like "we have no areas at all".
   const shown = filtered.length > 0 ? filtered : areas;
   const filterMissed = pincode !== '' && filtered.length === 0;
 
   return (
-    <>
+    <div className="space-y-8">
       <PageHeading
         title="Where should we deliver?"
-        subtitle="Pick your area and we will show you the shop that serves it, with its prices and stock."
+        subtitle="Select your community or find your block below for fresh scheduled slot grocery delivery."
       />
 
-      <Card>
+      {/* Primary 2-Card Community Selector (D2) */}
+      <CommunitySelector
+        title="Primary Gated Communities"
+        subtitle="Select your residential community for dedicated scheduled slot delivery."
+        showAreaSublist={false}
+      />
+
+      <Card title="Or choose your specific block / sector">
         <form method="get" className="mb-4 flex flex-wrap items-end gap-2">
           <label className="text-xs text-slate-600">
             <span className="mb-1 block">Filter by pincode (optional)</span>
@@ -54,17 +53,20 @@ export default async function LocalityPage({
               inputMode="numeric"
               maxLength={6}
               defaultValue={pincode}
-              placeholder="500001"
-              className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm sm:w-40"
+              placeholder="560011"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm sm:w-44 focus:border-emerald-600 focus:outline-none"
             />
           </label>
-          <button type="submit" className="rounded border border-slate-300 px-3 py-1.5 text-sm">
+          <button
+            type="submit"
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
             Filter
           </button>
         </form>
 
         {filterMissed ? (
-          <p className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
             We do not deliver to {pincode} yet — here is everywhere we do.
           </p>
         ) : null}
@@ -82,35 +84,37 @@ export default async function LocalityPage({
         )}
       </Card>
 
-      <p className="text-sm text-slate-600">
+      <p className="text-center text-sm text-slate-600">
         Not on the list?{' '}
-        <a href="/unserviceable" className="text-emerald-800 underline">
+        <a
+          href="/unserviceable"
+          className="font-semibold text-emerald-800 underline hover:text-emerald-900"
+        >
           Tell us where you are
         </a>{' '}
-        and we will let you know when we reach you.
+        and we will let you know when we expand to your community.
       </p>
-    </>
+    </div>
   );
 }
 
-/**
- * A store that has paused orders resolves as `store-closed`, not as servable —
- * so its areas cannot become a context and are shown as unavailable rather than
- * as a button that would bounce the shopper to the out-of-zone page.
- */
 function AreaChoice({ area }: { area: StorefrontArea }): React.ReactElement {
   const label = (
     <span className="text-sm">
-      <span className="font-medium">{area.areaName}</span>
-      {area.pincode === null ? null : <span className="ml-2 text-slate-500">{area.pincode}</span>}
+      <span className="font-medium text-slate-900">{area.areaName}</span>
+      {area.pincode === null ? null : (
+        <span className="ml-2 text-xs text-slate-500 font-mono">({area.pincode})</span>
+      )}
     </span>
   );
 
   if (!area.isAcceptingOrders) {
     return (
-      <div className="flex w-full flex-wrap items-center justify-between gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2">
+      <div className="flex w-full flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5">
         {label}
-        <span className="text-xs text-amber-800">Paused — not taking orders right now</span>
+        <span className="text-xs font-medium text-amber-800">
+          Paused — not taking orders right now
+        </span>
       </div>
     );
   }
@@ -119,7 +123,7 @@ function AreaChoice({ area }: { area: StorefrontArea }): React.ReactElement {
     <ActionForm
       action={chooseAreaAction}
       submitLabel="Deliver here"
-      className="flex w-full flex-wrap items-center justify-between gap-2 rounded border border-slate-200 px-3 py-2"
+      className="flex w-full flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 transition hover:border-emerald-500 hover:bg-emerald-50/20"
     >
       <input type="hidden" name="areaId" value={area.areaId} />
       {label}

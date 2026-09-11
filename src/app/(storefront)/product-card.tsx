@@ -1,41 +1,129 @@
 import Link from 'next/link';
 import type { Availability } from '@/modules/inventory';
 import type { ShopItem } from './catalogue';
+import { ProductCardActions } from './product-card-actions';
 import { rupees } from './ui';
 
 /**
- * The one card every listing surface uses — home, category browse and search.
+ * Retail grocery quick-shopping card (D3).
  *
- * Shared deliberately: price and availability are the two things a shopper
- * compares between pages, and three near-identical cards is how one of them
- * quietly starts rounding differently or forgetting to disable "add" when a
- * shelf is empty.
+ * Implements Blinkit / BigBasket / JioMart style usability:
+ * - Clear product image & visual container
+ * - Discount badge ("XX% OFF")
+ * - 2-line clamped title, brand & pack size
+ * - Dual pricing (selling price + strikethrough MRP)
+ * - Stock urgency / status
+ * - 1-Click ADD button with inline quantity stepper (- 1 +)
+ * - Minimum 44px touch targets for mobile accessibility
  */
-export function ProductCard({ item }: { item: ShopItem }): React.ReactElement {
+export function ProductCard({
+  item,
+  qtyInCart = 0,
+}: {
+  item: ShopItem;
+  qtyInCart?: number;
+}): React.ReactElement {
   const { product, availability } = item;
   const discounted = item.mrpPaise > item.sellingPricePaise;
+  const discountPct = discounted
+    ? Math.round(((item.mrpPaise - item.sellingPricePaise) / item.mrpPaise) * 100)
+    : 0;
+  const isOutOfStock = availability.availability === 'OUT_OF_STOCK';
 
   return (
-    <article className="flex h-full flex-col rounded border border-slate-200 bg-white p-3">
-      <Link href={`/p/${product.slug}`} className="text-sm font-medium hover:underline">
-        {product.name}
-      </Link>
-      <p className="mt-0.5 text-xs text-slate-500">
-        {product.brand === null ? null : <span>{product.brand} · </span>}
-        {product.packSize}
-      </p>
+    <article className="group flex h-full flex-col rounded-2xl border border-slate-200/90 bg-white p-3 shadow-xs transition hover:border-slate-300 hover:shadow-md">
+      {/* Image & Badges Container */}
+      <div className="relative mb-2.5 flex h-36 sm:h-40 w-full items-center justify-center overflow-hidden rounded-xl bg-slate-50">
+        <Link
+          href={`/p/${product.slug}`}
+          className="flex h-full w-full items-center justify-center p-2"
+        >
+          <span className="sr-only">{product.name}</span>
+          {item.imageUrl ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={item.imageUrl}
+              alt=""
+              className="h-full w-full object-contain transition duration-200 group-hover:scale-105"
+              loading="lazy"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-slate-300">
+              <svg
+                className="h-12 w-12 text-slate-300"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
+                />
+              </svg>
+            </div>
+          )}
+        </Link>
 
-      <p className="mt-2 text-sm">
-        <span className="font-semibold">{rupees(item.sellingPricePaise)}</span>
-        {discounted ? (
-          <span className="ml-2 text-xs text-slate-500 line-through">{rupees(item.mrpPaise)}</span>
+        {/* Discount Badge */}
+        {discountPct > 0 ? (
+          <span className="absolute top-2 left-2 rounded-md bg-blue-600 px-1.5 py-0.5 text-[10px] font-extrabold text-white shadow-xs">
+            {discountPct}% OFF
+          </span>
         ) : null}
-      </p>
 
-      <div className="mt-auto pt-2">
-        <AvailabilityLabel
-          availability={availability.availability}
-          remaining={availability.remaining}
+        {/* Low Stock Urgency Pill */}
+        {availability.availability === 'LOW' ? (
+          <span className="absolute bottom-2 left-2 rounded-md bg-amber-500/90 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-xs">
+            Only {String(availability.remaining ?? 0)} left
+          </span>
+        ) : null}
+      </div>
+
+      {/* Product Title & Brand */}
+      <div className="flex-1">
+        <Link
+          href={`/p/${product.slug}`}
+          className="line-clamp-2 text-xs sm:text-sm font-semibold text-slate-900 group-hover:text-emerald-800 transition leading-snug min-h-[2.5rem]"
+        >
+          {product.name}
+        </Link>
+        <p className="mt-0.5 text-[11px] text-slate-500">
+          {product.brand === null ? null : <span>{product.brand} · </span>}
+          <span className="font-medium text-slate-600">{product.packSize}</span>
+        </p>
+      </div>
+
+      {/* Pricing & Stock Section */}
+      <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-baseline justify-between gap-1">
+        <div>
+          <span className="text-sm sm:text-base font-extrabold text-slate-900">
+            {rupees(item.sellingPricePaise)}
+          </span>
+          {discounted ? (
+            <span className="ml-1.5 text-xs text-slate-400 line-through">
+              {rupees(item.mrpPaise)}
+            </span>
+          ) : null}
+        </div>
+
+        <div>
+          <AvailabilityLabel
+            availability={availability.availability}
+            remaining={availability.remaining}
+          />
+        </div>
+      </div>
+
+      {/* 1-Click ADD / Quantity Stepper Action (D3) */}
+      <div className="mt-3">
+        <ProductCardActions
+          productId={product.id}
+          productName={product.name}
+          qtyInCart={qtyInCart}
+          isOutOfStock={isOutOfStock}
         />
       </div>
     </article>
@@ -43,11 +131,7 @@ export function ProductCard({ item }: { item: ShopItem }): React.ReactElement {
 }
 
 /**
- * Stock, as a band.
- *
- * The exact number appears only when it is low, where it is urgency the shopper
- * needs; above that they are told "in stock" and nothing more. See
- * `LOW_STOCK_DISPLAY_THRESHOLD` for why a public page does not publish counts.
+ * Stock label as a band (D3).
  */
 export function AvailabilityLabel({
   availability,
@@ -57,22 +141,30 @@ export function AvailabilityLabel({
   remaining: number | null;
 }): React.ReactElement {
   if (availability === 'OUT_OF_STOCK') {
-    return <span className="text-xs font-medium text-slate-500">Out of stock</span>;
+    return <span className="text-[11px] font-medium text-slate-400">Out of stock</span>;
   }
   if (availability === 'LOW') {
     return (
-      <span className="text-xs font-medium text-amber-700">Only {String(remaining ?? 0)} left</span>
+      <span className="text-[11px] font-semibold text-amber-700">
+        Only {String(remaining ?? 0)} left
+      </span>
     );
   }
-  return <span className="text-xs font-medium text-emerald-700">In stock</span>;
+  return <span className="text-[11px] font-semibold text-emerald-700">In stock</span>;
 }
 
-export function ProductGrid({ items }: { items: readonly ShopItem[] }): React.ReactElement {
+export function ProductGrid({
+  items,
+  cartQuantities,
+}: {
+  items: readonly ShopItem[];
+  cartQuantities?: ReadonlyMap<string, number>;
+}): React.ReactElement {
   return (
     <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
       {items.map((item) => (
         <li key={item.product.id} className="h-full">
-          <ProductCard item={item} />
+          <ProductCard item={item} qtyInCart={cartQuantities?.get(item.product.id) ?? 0} />
         </li>
       ))}
     </ul>
@@ -91,19 +183,25 @@ export function Pager({
 }): React.ReactElement | null {
   if (pageCount <= 1) return null;
   return (
-    <nav className="mt-4 flex items-center justify-between text-sm" aria-label="Pagination">
+    <nav className="mt-6 flex items-center justify-between text-sm" aria-label="Pagination">
       {page > 1 ? (
-        <Link href={hrefFor(page - 1)} className="text-emerald-800 underline">
+        <Link
+          href={hrefFor(page - 1)}
+          className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 min-h-[44px]"
+        >
           ← Previous
         </Link>
       ) : (
         <span />
       )}
-      <span className="text-slate-500">
+      <span className="text-xs text-slate-500 font-medium">
         Page {String(page)} of {String(pageCount)}
       </span>
       {page < pageCount ? (
-        <Link href={hrefFor(page + 1)} className="text-emerald-800 underline">
+        <Link
+          href={hrefFor(page + 1)}
+          className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 min-h-[44px]"
+        >
           Next →
         </Link>
       ) : (

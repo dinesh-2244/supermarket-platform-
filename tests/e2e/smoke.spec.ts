@@ -10,7 +10,9 @@ import { expect, test } from '@playwright/test';
 test('the app loads', async ({ page }) => {
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: /where should we deliver/i })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: /fresh groceries delivered in|where should we deliver/i }),
+  ).toBeVisible();
 });
 
 test('the health endpoint reports a migrated database', async ({ request }) => {

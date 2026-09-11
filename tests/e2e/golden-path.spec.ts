@@ -33,10 +33,9 @@ async function pickArea(page: Page, areaName: string): Promise<void> {
 }
 
 test('the whole of Phase 3, without ever being asked to sign in', async ({ page }) => {
-  // 1. Arrive knowing nothing. The picker comes first — there is no default
-  //    store, because every price on the site belongs to one specific shop.
+  // 1. Arrive knowing nothing. The real homepage with community selector comes first.
   await page.goto('/');
-  await expect(page).toHaveURL(/\/locality$/);
+  await expect(page.getByRole('heading', { name: /fresh groceries delivered in/i })).toBeVisible();
 
   // 2. Say where you live. A store is bound, and named.
   await pickArea(page, 'Jayanagar 4th Block');

@@ -25,7 +25,36 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'mobile-iphone-se',
+      use: { ...devices['iPhone SE (3rd gen)'], defaultBrowserType: 'chromium' },
+      testMatch: /mobile-storefront\.spec\.ts/,
+    },
+    {
+      name: 'mobile-iphone-14-pro',
+      use: { ...devices['iPhone 14 Pro'], defaultBrowserType: 'chromium' },
+      testMatch: /mobile-storefront\.spec\.ts/,
+    },
+    {
+      name: 'mobile-android-compact',
+      use: {
+        ...devices['Pixel 7'],
+        viewport: { width: 360, height: 800 },
+        defaultBrowserType: 'chromium',
+      },
+      testMatch: /mobile-storefront\.spec\.ts/,
+    },
+    {
+      name: 'tablet-ipad-mini',
+      use: { ...devices['iPad Mini'], defaultBrowserType: 'chromium' },
+      testMatch: /mobile-storefront\.spec\.ts/,
+    },
+  ],
   // Reuse an already-running server locally; always start a fresh one in CI.
   ...(process.env.E2E_BASE_URL
     ? {}

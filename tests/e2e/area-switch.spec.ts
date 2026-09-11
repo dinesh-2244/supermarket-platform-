@@ -73,13 +73,12 @@ test('an unserviceable switch takes the previous shop away, and gives the basket
   await expect(page.getByText('₹')).toHaveCount(0);
   expect(await storeContextCookie(page)).toBeUndefined();
 
-  // Inert, not usable. Every storefront page needs a context, so with none they
-  // all lead back to the picker — including the basket that still holds the
-  // shopper's items, which is what used to open the old shop's cart.
-  for (const path of ['/', '/cart']) {
-    await page.goto(path);
-    await expect(page, path).toHaveURL(/\/locality$/);
-  }
+  // Inert, not usable. Without a context, the basket leads back to the picker,
+  // and the homepage offers the community selector without any prices.
+  await page.goto('/cart');
+  await expect(page).toHaveURL(/\/locality$/);
+  await page.goto('/');
+  await expect(page.locator('article')).toHaveCount(0);
 
   // D5: losing the context is a cookie-level event, and nothing deleted the
   // cart. The same basket comes back when a real area is chosen again.
