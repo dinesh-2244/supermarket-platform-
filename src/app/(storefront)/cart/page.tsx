@@ -117,7 +117,7 @@ export default async function CartPage(): Promise<React.ReactElement> {
         <div>
           <Link
             href="/shop"
-            className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-800 hover:text-emerald-900 transition mb-2"
+            className="inline-flex min-h-[44px] items-center gap-1.5 py-2 text-xs font-semibold text-emerald-800 hover:text-emerald-900 transition mb-2"
           >
             ← Continue shopping
           </Link>
@@ -126,10 +126,16 @@ export default async function CartPage(): Promise<React.ReactElement> {
             subtitle="Prices and availability are checked against the shop every time you look."
           />
         </div>
-        <div className="inline-flex items-center gap-2 rounded-full border border-emerald-600/20 bg-emerald-50/80 px-3.5 py-1.5 text-xs font-medium text-emerald-900">
-          <span className="h-2 w-2 rounded-full bg-emerald-600 animate-pulse" />
-          <span>{community.name}</span>
-        </div>
+        <Link
+          href="/store/select"
+          aria-label={community.name}
+          title="Change delivery area"
+          className="inline-flex min-h-[44px] items-center gap-2 rounded-full border border-emerald-600/20 bg-emerald-50/80 px-4 py-2 text-xs font-medium text-emerald-900 shadow-xs hover:bg-emerald-100 hover:border-emerald-600/40 transition active:scale-95"
+        >
+          <span className="h-2 w-2 rounded-full bg-emerald-600 animate-pulse" aria-hidden="true" />
+          <span className="font-semibold">{community.name}</span>
+          <span className="text-emerald-700 text-[11px]">· Change area →</span>
+        </Link>
       </div>
 
       {moved === null ? null : <MoveNotice notice={moved} />}

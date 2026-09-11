@@ -257,26 +257,38 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     const startBox = await startShoppingLink.boundingBox();
     expect(startBox?.height).toBeGreaterThanOrEqual(44);
 
-    // 4. Add an item from catalogue
+    // 4. Add a product with a known seeded image (Ragi Flour)
     await page.goto('/c/staples');
-    const firstCard = page.locator('article').first();
-    await expect(firstCard).toBeVisible();
-    const addBtn = firstCard.getByRole('button', { name: /add .* to basket/i });
+    const ragiCard = page.locator('article').filter({ hasText: 'Ragi Flour' });
+    await expect(ragiCard).toBeVisible();
+    const addBtn = ragiCard.getByRole('button', { name: /add .* to basket/i });
     await addBtn.click();
-    await expect(firstCard.getByRole('button', { name: /^increase quantity/i })).toBeVisible();
+    await expect(ragiCard.getByRole('button', { name: /^increase quantity/i })).toBeVisible();
 
     // 5. Navigate to /cart
     await page.goto('/cart');
     await expect(page).toHaveURL(/\/cart$/);
     await expect(page.getByRole('heading', { name: 'Your basket' })).toBeVisible();
-    await expect(page.getByRole('main').getByText('Store 1 Community').first()).toBeVisible();
 
-    // Verify cart row elements
-    const cartRow = page.locator('li').first();
+    // M1: Verify active community badge is a real Link to /store/select with >=44px touch target
+    const communityBadge = page.getByRole('main').getByRole('link', { name: 'Store 1 Community' });
+    await expect(communityBadge).toBeVisible();
+    await expect(communityBadge).toHaveAttribute('href', '/store/select');
+    const badgeBox = await communityBadge.boundingBox();
+    expect(badgeBox?.height).toBeGreaterThanOrEqual(44);
+
+    // M2: Verify Continue shopping link meets >=44px touch target
+    const continueShoppingLink = page.getByRole('link', { name: /continue shopping/i });
+    await expect(continueShoppingLink).toBeVisible();
+    const continueBox = await continueShoppingLink.boundingBox();
+    expect(continueBox?.height).toBeGreaterThanOrEqual(44);
+
+    // S1: Verify cart row product thumbnail renders actual <img> with expected seeded src
+    const cartRow = page.locator('li').filter({ hasText: 'Ragi Flour' });
     await expect(cartRow).toBeVisible();
-
-    // Verify product thumbnail is present
-    await expect(cartRow.locator('img, svg')).toBeVisible();
+    const thumbImg = cartRow.locator('img');
+    await expect(thumbImg).toBeVisible();
+    await expect(thumbImg).toHaveAttribute('src', '/seed/products/ragi-flour.svg');
 
     // Verify quantity and remove controls meet >=44px touch targets
     const updateBtn = cartRow
@@ -305,5 +317,9 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
 
     // Verify zero horizontal scroll on mobile viewport
     await assertNoHorizontalScroll(page);
+
+    // M1: Verify clicking the active community badge navigates to /store/select
+    await communityBadge.click();
+    await expect(page).toHaveURL(/\/store\/select$/);
   });
 });
