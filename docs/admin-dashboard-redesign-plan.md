@@ -136,6 +136,37 @@ hard requirement the way it was for the customer storefront — this is staff so
 funnel. Playwright E2E projects should cover at least one tablet viewport per redesigned screen, same
 device-emulation pattern PAM already used for the storefront (`v0.5.0-storefront` PR #32).
 
+### AD12 — POS integration (reserved, not designed or built yet)
+
+**Do not implement live POS integration or any vendor-specific screen now.** ADR-0007 is unchanged by
+this plan: the POS product hasn't been selected, and no vendor-specific adapter gets built until it is
+selected, its official documentation is reviewed, its supported endpoints/fields are confirmed, and its
+auth/rate limits are understood. This deliverable reserves the information-architecture *slot* — a "POS
+Integration" nav section/area — so AD1–AD11 don't have to be redone later, and does not design screens
+against a vendor or a backend capability that doesn't exist.
+
+**What stays exactly as it is today, in this redesign:** the current `MANUAL`-mode UI keeps working
+unchanged —
+- manual POS bill entry (the `BILLED_IN_POS` step, via `ManualPosBillingGateway`)
+- CSV/manual inventory reconciliation (`/admin/inventory/import`, `NoopInventoryFeed`'s fallback path)
+
+These two get the same visual/IA polish as every other AD1–AD11 screen (they're existing, shipped
+functionality being re-presented, same as the rest of this plan) — they are not being replaced or
+gated behind a future adapter.
+
+**When a POS vendor is eventually selected:** a **separate plan** is authored at that point, covering
+only the capabilities the selected vendor's official documentation actually confirms — this plan does
+not pre-design against an unknown vendor. That future plan is expected to cover, to the extent the
+vendor supports it: connection/configuration status, SKU mapping (`PosSkuMap` management UI),
+inventory sync/reconciliation, billing sync (where supported), sync history, unmatched products, and
+sync errors. None of that is designed or scoped here — this deliverable is the reserved slot, not the
+plan.
+
+**Hard requirement, permanent, not just for the transition:** `StoreSettings.posMode = MANUAL` must
+remain fully usable even after an `ADAPTER` mode ships for a store. Per ADR-0007, the manual path is
+the permanent fallback, not a stopgap — a store can run on `MANUAL` forever, and the admin UI must never
+assume every store is on the same `posMode`.
+
 ## Hard boundary (reviewable invariant) — same class as the storefront redesign
 
 Presentation layer only. Zero change to:
@@ -160,7 +191,9 @@ for "it's just a report."
 3. AD1–AD9 are a stacked PR series, same pattern as the storefront redesign (PR #32): one branch,
    reviewable increments, OSCAR reviews for regressions/behaviour before each merges (or one review pass
    over the full series — god decides based on size once PAM scopes the PR breakdown).
-4. AD10 (fulfillment) waits on `docs/phase-5-plan.md`.
+4. AD10 (fulfillment) waits on `docs/phase-5-plan.md`. AD12 (POS integration) waits on a POS vendor
+   being selected and a separate, dedicated POS-integration plan reviewing that vendor's actual
+   capabilities — not on this plan or PAM's build.
 5. Tag `v0.6.0-admin-dashboard` (or similar) on acceptance.
 
 ## OSCAR — independent review scope
