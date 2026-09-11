@@ -60,14 +60,28 @@ const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
  * are seconds in Prisma and milliseconds in `pg`. Prisma's `pool_timeout=0`
  * means "wait forever", and so does `connectionTimeoutMillis: 0`.
  *
+ * | `schema` | `options: -c search_path=…` | see {@link prismaAdapterFromUrl} |
+ *
+ * `schema` is the parameter that is easiest to lose. Prisma's engine used it
+ * twice: to qualify every generated query and to set the connection's
+ * `search_path`. `pg` ignores it, and the adapter only learns a schema from its
+ * own second constructor argument — so left in the URL it was dropped in
+ * silence, every client read `public`, and only the CLI (which still honours
+ * it) migrated the schema that was asked for. The search path set here is what
+ * keeps this module's *unqualified* raw SQL (`FROM "InventoryItem"`) on the
+ * same schema as the generated queries; the adapter option is the other half.
+ * A schema that is not a plain identifier is refused rather than dropped: the
+ * `options` string has no quoting rules that would carry it safely.
+ *
  * The consumed parameters are stripped from the URL that reaches `pg`, so what
  * it parses is a plain PostgreSQL connection string. Everything else —
- * `sslmode`, `schema`, `application_name` — is left exactly as written.
+ * `sslmode`, `application_name` — is left exactly as written.
  */
 export function poolConfigFromUrl(databaseUrl: string): {
   connectionString: string;
   max?: number;
   connectionTimeoutMillis?: number;
+  options?: string;
 } {
   let url: URL;
   try {
@@ -77,6 +91,8 @@ export function poolConfigFromUrl(databaseUrl: string): {
     // than a guess here would.
     return { connectionString: databaseUrl };
   }
+
+  const schema = schemaFromUrl(databaseUrl);
 
   const seconds = (name: string): number | undefined => {
     const raw = url.searchParams.get(name);
@@ -90,7 +106,7 @@ export function poolConfigFromUrl(databaseUrl: string): {
     (value): value is number => value !== undefined,
   );
 
-  for (const consumed of ['connection_limit', 'pool_timeout', 'connect_timeout']) {
+  for (const consumed of ['connection_limit', 'pool_timeout', 'connect_timeout', 'schema']) {
     url.searchParams.delete(consumed);
   }
 
@@ -105,7 +121,45 @@ export function poolConfigFromUrl(databaseUrl: string): {
     connectionString: url.toString(),
     ...(connectionLimit !== undefined && connectionLimit > 0 ? { max: connectionLimit } : {}),
     ...(timeouts.length > 0 ? { connectionTimeoutMillis } : {}),
+    ...(schema !== undefined ? { options: `-c search_path="${schema}"` } : {}),
   };
+}
+
+/**
+ * The `?schema=` a `DATABASE_URL` asks for, or `undefined` when it asks for
+ * none. Refuses anything that is not a plain identifier — see
+ * {@link poolConfigFromUrl} for why a loud refusal beats a silent drop.
+ */
+export function schemaFromUrl(databaseUrl: string): string | undefined {
+  let raw: string | null;
+  try {
+    raw = new URL(databaseUrl).searchParams.get('schema');
+  } catch {
+    return undefined;
+  }
+  if (raw === null) return undefined;
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(raw)) {
+    throw new Error(
+      `DATABASE_URL schema must be a plain identifier (letters, digits, underscore), got ${JSON.stringify(raw)}`,
+    );
+  }
+  return raw;
+}
+
+/**
+ * The driver adapter for a `DATABASE_URL`, with every parameter Prisma's engine
+ * used to read from it translated — the pool settings into `pg`'s, and the
+ * schema into the adapter's own option, which is the only way Prisma 7 learns
+ * which schema to qualify its queries with. Every client in this repository is
+ * built through here (the application, the seed, the tests' second
+ * connection) so that none of them can quietly differ from the CLI.
+ */
+export function prismaAdapterFromUrl(databaseUrl: string): PrismaPg {
+  const schema = schemaFromUrl(databaseUrl);
+  return new PrismaPg(
+    poolConfigFromUrl(databaseUrl),
+    schema === undefined ? undefined : { schema },
+  );
 }
 
 function createClient(): PrismaClient {
@@ -114,7 +168,7 @@ function createClient(): PrismaClient {
     // Prisma 7 takes a driver adapter rather than a URL; the adapter owns the
     // `pg` pool's lifecycle, which is why a `PoolConfig` is handed over rather
     // than a `Pool` this module would then have to close.
-    adapter: new PrismaPg(poolConfigFromUrl(config.DATABASE_URL)),
+    adapter: prismaAdapterFromUrl(config.DATABASE_URL),
     log: config.APP_ENV === 'local' ? ['warn', 'error'] : ['error'],
   });
 }
