@@ -290,6 +290,73 @@ export async function orderForTracking(trackingToken: string): Promise<TrackedOr
   };
 }
 
+/** One row of a shopper's order history: enough to recognise it and link to its tracking page. */
+export interface CustomerOrderSummary {
+  readonly orderNumber: string;
+  /** Opens `/order-status/[trackingToken]`. It is the shopper's own order, so handing it over is not a leak. */
+  readonly trackingToken: string;
+  readonly status: OrderStatus;
+  readonly statusLabel: string;
+  readonly placedAt: Date;
+  readonly slotStart: Date;
+  readonly slotEnd: Date;
+  /** Pre-rendered in the **shop's** timezone, as on the tracking page. */
+  readonly slotLabel: string;
+  readonly storeName: string;
+  readonly storeTimeZone: string;
+  readonly estimatedTotalPaise: number;
+}
+
+/** The most a single history read will return; the page can ask for fewer. */
+const CUSTOMER_ORDERS_LIMIT = 50;
+
+/**
+ * The signed-in shopper, or a refusal.
+ *
+ * A staff `user` principal is refused as firmly as a guest or the system: the
+ * back office has no account area, and an order history is the shopper's own
+ * (ADR-0010). The same wording as `customers` uses, because it is the same rule.
+ */
+function requireCustomer(principal: Principal): string {
+  if (principal.kind !== 'customer' || principal.customerId === null) {
+    throw new NotFoundError('You need to be signed in to do that', {});
+  }
+  return principal.customerId;
+}
+
+/**
+ * The signed-in shopper's own orders, newest first, for `/account/orders`.
+ *
+ * The customer id comes off the **principal**, never from an argument: there is
+ * no way to call this for somebody else, and the repository scopes the query by
+ * that id on top. Read-only, like {@link orderForTracking}, and it carries the
+ * tracking token so the page can link to the full order rather than repeat it.
+ */
+export async function ordersForCustomer(
+  principal: Principal,
+  opts: { limit?: number } = {},
+): Promise<CustomerOrderSummary[]> {
+  const customerId = requireCustomer(principal);
+  const limit = Math.min(
+    Math.max(Math.trunc(opts.limit ?? CUSTOMER_ORDERS_LIMIT), 1),
+    CUSTOMER_ORDERS_LIMIT,
+  );
+  const rows = await repo.listForCustomer(getPrisma(), customerId, { limit });
+  return rows.map((row) => ({
+    orderNumber: row.orderNumber,
+    trackingToken: row.trackingToken,
+    status: row.status,
+    statusLabel: STATUS_LABEL[row.status],
+    placedAt: row.placedAt,
+    slotStart: row.deliverySlotStart,
+    slotEnd: row.deliverySlotEnd,
+    slotLabel: formatSlot(row.deliverySlotStart, row.deliverySlotEnd, row.store.timezone),
+    storeName: row.store.name,
+    storeTimeZone: row.store.timezone,
+    estimatedTotalPaise: row.estimatedTotalPaise,
+  }));
+}
+
 export interface NewOrderInput {
   readonly storeCode: string;
   readonly customerId: string;
