@@ -1,6 +1,13 @@
 import Link from 'next/link';
 import { requirePrincipal } from '@/auth';
-import { adminHref, formatDateTime, orderQueue, overview, resolveStoreId } from '@/modules/admin';
+import {
+  ACTIONABLE_ORDER_STATUSES,
+  adminHref,
+  formatDateTime,
+  orderCounts,
+  overview,
+  resolveStoreId,
+} from '@/modules/admin';
 import { hasTotpEnrolled } from '@/modules/identity';
 import { changePasswordAction } from './actions';
 import { ActionForm, Field } from './form';
@@ -23,9 +30,12 @@ export default async function OverviewPage({
   const view = storeId === data.storeId ? data : await overview(principal, storeId);
 
   // Fetch actionable orders for the active store (AD1 / AD9 authoritative read path)
-  const orders =
-    view.storeId !== null ? await orderQueue(principal, view.storeId).catch(() => null) : null;
-  const actionableOrderCount = orders?.rows.length ?? 0;
+  const counts =
+    view.storeId !== null ? await orderCounts(principal, view.storeId).catch(() => null) : null;
+  const actionableOrderCount =
+    counts !== null
+      ? ACTIONABLE_ORDER_STATUSES.reduce((sum, s) => sum + (counts.byStatus[s] ?? 0), 0)
+      : 0;
 
   const activeStore = view.stores.find((s) => s.id === view.storeId) ?? view.stores[0];
 
@@ -108,7 +118,7 @@ export default async function OverviewPage({
 
         <StatCard
           label="Operating stores"
-          value={view.stores.filter((s) => s.isActive).length}
+          value={view.storeCounts.active}
           subtitle="Active community fulfillment hubs"
           href={adminHref('/admin/stores', view.storeId)}
           icon={

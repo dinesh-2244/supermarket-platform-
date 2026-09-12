@@ -170,3 +170,39 @@ describe('navigationFor role access and information architecture (R2 / M4 regres
     ]);
   });
 });
+
+describe('Admin Reports and Overview real aggregates integrity (M1 regression guard)', () => {
+  const reportsFile = path.resolve(__dirname, '../../src/app/(admin)/admin/reports/page.tsx');
+  const overviewFile = path.resolve(__dirname, '../../src/app/(admin)/admin/page.tsx');
+
+  const reportsContent = fs.readFileSync(reportsFile, 'utf-8');
+  const overviewContent = fs.readFileSync(overviewFile, 'utf-8');
+
+  it('verifies reports/page.tsx calls orderCounts and does NOT call orderQueue', () => {
+    expect(reportsContent).toContain('orderCounts');
+    expect(reportsContent).not.toContain('orderQueue');
+  });
+
+  it('verifies reports/page.tsx derives totals and price variances from exact counts', () => {
+    expect(reportsContent).toContain('value={counts.total}');
+    expect(reportsContent).toContain('value={counts.priceVarianceFlagged}');
+    expect(reportsContent).toContain('counts.total > 0');
+  });
+
+  it('verifies reports/page.tsx iterates ORDER_STATUSES against counts.byStatus', () => {
+    expect(reportsContent).toContain('ORDER_STATUSES.map');
+    expect(reportsContent).toContain('counts.byStatus[status]');
+    expect(reportsContent).toContain('counts.flaggedByStatus[status]');
+  });
+
+  it('verifies overview/page.tsx uses storeCounts.active instead of counting store rows', () => {
+    expect(overviewContent).toContain('view.storeCounts.active');
+    expect(overviewContent).not.toContain('view.stores.filter');
+    expect(overviewContent).not.toContain('view.stores.length');
+  });
+
+  it('verifies overview/page.tsx derives actionable order count from orderCounts', () => {
+    expect(overviewContent).toContain('orderCounts(principal, view.storeId)');
+    expect(overviewContent).toContain('ACTIONABLE_ORDER_STATUSES.reduce');
+  });
+});

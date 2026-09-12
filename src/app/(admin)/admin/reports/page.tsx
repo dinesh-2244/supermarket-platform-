@@ -4,11 +4,11 @@ import { listStores } from '@/modules/stores';
 import {
   ACTIONABLE_ORDER_STATUSES,
   adminHref,
-  orderQueue,
+  orderCounts,
   overview,
   resolveStoreId,
 } from '@/modules/admin';
-import type { OrderStatus } from '@/modules/orders';
+import { ORDER_STATUSES } from '@/modules/orders';
 import { Card, Empty, OrderStatusBadge, PageHeading, StatCard, StoreSwitcher, Table } from '../ui';
 
 export const dynamic = 'force-dynamic';
@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic';
  *
  * Guardrail compliance:
  * Every number displayed traces directly to authoritative backend read paths
- * (modules/admin: overview, orderQueue). No fabricated aggregates or client-side
+ * (modules/admin: overview, orderCounts). No fabricated aggregates or client-side
  * cross-store rollups.
  */
 export default async function ReportsPage({
@@ -47,23 +47,20 @@ export default async function ReportsPage({
     );
   }
 
-  const [data, queue] = await Promise.all([
+  const [data, counts] = await Promise.all([
     overview(principal, storeId),
-    orderQueue(principal, storeId, { all: true }),
+    orderCounts(principal, storeId),
   ]);
 
   const activeStore = stores.find((s) => s.id === storeId) ?? stores[0];
 
-  // Group orders by status using existing QueueRow data
-  const statusCounts = new Map<OrderStatus, number>();
-  let flaggedVarianceCount = 0;
-
-  for (const row of queue.rows) {
-    statusCounts.set(row.status, (statusCounts.get(row.status) ?? 0) + 1);
-    if (row.priceVarianceFlagged) flaggedVarianceCount++;
-  }
-
-  const statusList = Array.from(statusCounts.entries()).sort((a, b) => b[1] - a[1]);
+  const statusList = ORDER_STATUSES.map((status) => ({
+    status,
+    count: counts.byStatus[status],
+    flagged: counts.flaggedByStatus[status],
+  }))
+    .filter((entry) => entry.count > 0)
+    .sort((a, b) => b.count - a.count);
 
   return (
     <div className="space-y-6">
@@ -85,7 +82,7 @@ export default async function ReportsPage({
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Total store orders"
-          value={queue.rows.length}
+          value={counts.total}
           subtitle="All recorded orders in store history"
           href={adminHref('/admin/orders?all=1', storeId)}
           icon={
@@ -102,10 +99,10 @@ export default async function ReportsPage({
 
         <StatCard
           label="Price variances"
-          value={flaggedVarianceCount}
+          value={counts.priceVarianceFlagged}
           subtitle="Orders requiring manager/customer check"
           href={adminHref('/admin/orders', storeId)}
-          urgency={flaggedVarianceCount > 0 ? 'amber' : 'default'}
+          urgency={counts.priceVarianceFlagged > 0 ? 'amber' : 'default'}
           icon={
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
@@ -167,12 +164,13 @@ export default async function ReportsPage({
           </Link>
         }
       >
-        {statusList.length === 0 ? (
+        {counts.total === 0 ? (
           <Empty title="No order activity">This store has not recorded any orders yet.</Empty>
         ) : (
           <Table head={['Order status', 'Orders count', 'Share of total', 'Pipeline role']}>
-            {statusList.map(([status, count]) => {
-              const percentage = ((count / queue.rows.length) * 100).toFixed(1);
+            {statusList.map(({ status, count, flagged }) => {
+              const percentage =
+                counts.total > 0 ? ((count / counts.total) * 100).toFixed(1) : '0.0';
               const isActionable = ACTIONABLE_ORDER_STATUSES.includes(status);
               const isTerminal = !isActionable;
               return (
@@ -180,7 +178,14 @@ export default async function ReportsPage({
                   <td className="py-3 px-4">
                     <OrderStatusBadge status={status} />
                   </td>
-                  <td className="py-3 px-4 font-black text-slate-900 text-base">{count}</td>
+                  <td className="py-3 px-4 font-black text-slate-900 text-base">
+                    {count}
+                    {flagged > 0 ? (
+                      <span className="ml-2 inline-flex items-center rounded-md bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                        {flagged} flagged
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="py-3 px-4 text-xs font-medium text-slate-600">
                     <div className="flex items-center gap-2">
                       <div className="w-24 h-2 rounded-full bg-slate-100 overflow-hidden">

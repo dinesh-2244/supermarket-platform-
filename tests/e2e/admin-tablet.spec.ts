@@ -1,4 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
+import { getPrisma } from '@/modules/platform';
+import type { OrderStatus } from '@/modules/orders';
 
 /**
  * Tablet and Mobile Staff Ergonomics Acceptance Suite (AD11).
@@ -513,5 +515,80 @@ test.describe.serial('Admin Dashboard Tablet Usability & IA Redesign (AD1–AD12
     await signInWith(page, SEED_ADMIN);
     const superLabels = await getNavLabels();
     expect(superLabels).toEqual(SUPER_EXPECTED);
+  });
+
+  test('M1: Reports displays true order aggregates exceeding 200-row queue cap and overview displays active store counts', async ({
+    page,
+  }) => {
+    await signInAdmin(page);
+
+    const prisma = getPrisma();
+    const store = await prisma.store.findFirstOrThrow({ where: { code: 'S2' } });
+    const customer = await prisma.customer.findFirstOrThrow();
+
+    // Seed >200 orders (205 orders) directly into store S2 to reproduce Oscar's M1 condition
+    const stamp = `m1-${Date.now().toString(36)}`;
+    const getStatus = (i: number): OrderStatus => {
+      if (i < 200) return 'PLACED';
+      if (i < 203) return 'DELIVERED';
+      return 'CANCELLED_BY_STORE';
+    };
+    const ordersData = Array.from({ length: 205 }, (_, i) => ({
+      orderNumber: `M1-${stamp}-${String(i + 1).padStart(4, '0')}`,
+      trackingToken: `tok-${stamp}-${i + 1}`,
+      customerId: customer.id,
+      storeId: store.id,
+      status: getStatus(i),
+      priceVarianceFlagged: i === 0 || i === 1,
+      contactNameSnapshot: 'M1 Reporter',
+      contactPhoneSnapshot: '9888877777',
+      deliveryAddressSnapshotJson: { locality: 'Koramangala' },
+      deliverySlotStart: new Date('2026-12-05T10:00:00Z'),
+      deliverySlotEnd: new Date('2026-12-05T11:00:00Z'),
+      paymentMethod: 'COD' as const,
+      subtotalPaise: 5000,
+      deliveryFeePaise: 1000,
+      estimatedTotalPaise: 6000,
+    }));
+
+    await prisma.order.createMany({ data: ordersData });
+
+    try {
+      // 1. Reports page displays true aggregate total (>200) instead of capped 200-row queue
+      await page.goto(`/admin/reports?store=${store.id}`);
+      await expect(
+        page.getByRole('heading', { name: 'Reports & KPIs', exact: true }),
+      ).toBeVisible();
+
+      const expectedTotal = await prisma.order.count({ where: { storeId: store.id } });
+      expect(expectedTotal).toBeGreaterThanOrEqual(205);
+
+      const totalOrdersCard = page.getByRole('link', { name: /Total store orders/ });
+      await expect(totalOrdersCard).toBeVisible();
+      await expect(totalOrdersCard).toContainText(String(expectedTotal));
+
+      // 2. Price variances card shows exact flagged count
+      const expectedVariance = await prisma.order.count({
+        where: { storeId: store.id, priceVarianceFlagged: true },
+      });
+      const varianceCard = page.getByRole('link', { name: /Price variances/ });
+      await expect(varianceCard).toBeVisible();
+      await expect(varianceCard).toContainText(String(expectedVariance));
+
+      // 3. Pipeline breakdown displays status rows with percentage of real total
+      await expect(page.getByText('Order pipeline breakdown')).toBeVisible();
+      await expect(page.getByText('PLACED', { exact: true })).toBeVisible();
+
+      // 4. Overview page displays active store counts from storeCounts
+      await page.goto('/admin');
+      const activeStoresCount = await prisma.store.count({ where: { isActive: true } });
+      const operatingStoresCard = page.getByRole('link', { name: /Operating stores/ });
+      await expect(operatingStoresCard).toBeVisible();
+      await expect(operatingStoresCard).toContainText(String(activeStoresCount));
+    } finally {
+      await prisma.order.deleteMany({
+        where: { trackingToken: { startsWith: `tok-${stamp}` } },
+      });
+    }
   });
 });
