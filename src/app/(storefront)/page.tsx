@@ -4,7 +4,7 @@ import { getStore, getStorefrontSettings } from '@/modules/stores';
 import { currentStoreContext, storefrontPrincipal } from '@/storefront';
 import { shopCategories, shopPage } from './catalogue';
 import { pageNumber } from './paging';
-import { Pager, ProductGrid } from './product-card';
+import { ProductGrid } from './product-card';
 import { rupees, Card, Empty } from './ui';
 import { CommunitySelector } from './community-selector';
 import { CategoryTiles } from './category-tiles';
@@ -99,6 +99,37 @@ export default async function StorefrontHome({
             </p>
           </div>
         </section>
+
+        {/* About Munder Fresh Preview (Requirement 3b) */}
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="max-w-xl">
+            <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
+              About Our Model
+            </span>
+            <h2 className="mt-1 text-xl sm:text-2xl font-black text-slate-900">
+              Hyperlocal Grocery Built for Residential Communities
+            </h2>
+            <p className="mt-2 text-xs sm:text-sm text-slate-600 leading-relaxed">
+              We operate dedicated mini-hubs for partner residential societies. Learn how our
+              two-community model delivers scheduled morning and evening slots with zero surprise
+              markups.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Link
+              href="/about"
+              className="inline-flex items-center rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-800 hover:bg-slate-100 transition min-h-[44px]"
+            >
+              Learn More About Us →
+            </Link>
+            <Link
+              href="/store/select"
+              className="inline-flex items-center rounded-xl bg-emerald-700 px-4 py-2.5 text-xs font-semibold text-white hover:bg-emerald-800 transition min-h-[44px]"
+            >
+              Select Community →
+            </Link>
+          </div>
+        </section>
       </div>
     );
   }
@@ -138,12 +169,20 @@ export default async function StorefrontHome({
           </p>
         </div>
 
-        <Link
-          href="/store/select"
-          className="inline-flex items-center rounded-xl border border-emerald-600 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 shadow-xs hover:bg-emerald-50 min-h-[44px]"
-        >
-          Change Community
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/shop"
+            className="inline-flex items-center rounded-xl bg-emerald-700 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-800 transition min-h-[44px]"
+          >
+            Browse Full Shop →
+          </Link>
+          <Link
+            href="/store/select"
+            className="inline-flex items-center rounded-xl border border-emerald-600 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 shadow-xs hover:bg-emerald-50 min-h-[44px]"
+          >
+            Change Community
+          </Link>
+        </div>
       </section>
 
       {settings.isAcceptingOrders ? null : (
@@ -191,21 +230,56 @@ export default async function StorefrontHome({
       {/* Category Visual Tiles (D4) */}
       <CategoryTiles categories={categories} />
 
-      {/* Retail Catalog Section (D3) */}
+      {/* Curated Retail Highlights Shelf (Requirement 3b) */}
       <Card title={`Featured Products (${String(shop.total)} product(s))`}>
         {shop.items.length === 0 ? (
           <Empty>This shop has nothing listed yet.</Empty>
         ) : (
           <>
-            <ProductGrid items={shop.items} cartQuantities={cartQuantities} />
-            <Pager
-              page={shop.page}
-              pageCount={shop.pageCount}
-              hrefFor={(next) => `/?page=${String(next)}`}
-            />
+            <ProductGrid items={shop.items.slice(0, 8)} cartQuantities={cartQuantities} />
+            <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl bg-slate-50 border border-slate-200/80 p-5">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Explore the Full Catalogue</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Browse all {String(shop.total)} products across categories with search, filters,
+                  and complete listings in our Shop.
+                </p>
+              </div>
+              <Link
+                href="/shop"
+                className="inline-flex items-center justify-center rounded-xl bg-emerald-700 px-5 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-emerald-800 transition min-h-[44px] shrink-0"
+              >
+                Open Full Shop Catalogue →
+              </Link>
+            </div>
           </>
         )}
       </Card>
+
+      {/* Hyperlocal Operations & About Callout (Requirement 3b) */}
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="max-w-xl">
+            <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
+              The Munder Fresh Promise
+            </span>
+            <h2 className="mt-1 text-xl sm:text-2xl font-black text-slate-900">
+              Why Hyperlocal Residential Delivery?
+            </h2>
+            <p className="mt-2 text-xs sm:text-sm text-slate-600 leading-relaxed">
+              We partner directly with residential societies to fulfill orders from dedicated local
+              hubs. Scheduled slots mean predictable arrivals, and live store inventory ensures zero
+              unannounced substitutions.
+            </p>
+          </div>
+          <Link
+            href="/about"
+            className="inline-flex items-center rounded-xl border border-slate-300 bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-100 transition min-h-[44px] shrink-0"
+          >
+            Learn More About Us →
+          </Link>
+        </div>
+      </section>
     </div>
   );
 }

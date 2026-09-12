@@ -270,9 +270,10 @@ test.describe.serial('storefront', () => {
     await expect(addForm.getByRole('status')).toContainText(/in your basket/i);
 
     await page.goto('/cart');
-    const qtyForm = page.locator('form').filter({ hasText: 'Update' }).first();
-    await qtyForm.getByLabel('Qty').fill('3');
-    await qtyForm.getByRole('button', { name: 'Update' }).click();
+    const increaseBtn = page.getByRole('button', { name: /increase quantity/i }).first();
+    await increaseBtn.click();
+    await expect(page.getByText(/subtotal \(2 item\(s\)\)/i)).toBeVisible();
+    await increaseBtn.click();
     await expect(page.getByText(/subtotal \(3 item\(s\)\)/i)).toBeVisible();
 
     await page
