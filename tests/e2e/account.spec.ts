@@ -281,13 +281,15 @@ test.describe.serial('customer accounts', () => {
     await expect(page.getByText(/1 saved address/i)).toBeVisible();
   });
 
-  test('order history is an honest empty state, not a missing page', async ({ page }) => {
+  test('order history explains current limitation and directs to tracking link', async ({
+    page,
+  }) => {
     await signIn(page);
     await page.getByRole('link', { name: 'Your orders' }).click();
 
     await expect(page).toHaveURL(/\/account\/orders$/);
-    await expect(page.getByText(/no orders yet/i)).toBeVisible();
-    await expect(page.getByText(/ordering arrives in the next release/i)).toBeVisible();
+    await expect(page.getByText(/account order history is not available yet/i)).toBeVisible();
+    await expect(page.getByText(/private tracking link/i)).toBeVisible();
   });
 
   test('the account area is closed to anyone without a session', async ({ page }) => {

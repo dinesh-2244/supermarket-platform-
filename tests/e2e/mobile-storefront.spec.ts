@@ -322,4 +322,166 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     await communityBadge.click();
     await expect(page).toHaveURL(/\/store\/select$/);
   });
+
+  test('Customer account area redesign: optional-account framing, >=44px touch targets & zero horizontal scroll', async ({
+    page,
+    context,
+  }) => {
+    // 1. Visit /account/sign-in
+    await context.clearCookies();
+    await page.goto('/account/sign-in');
+    const main = page.getByRole('main');
+    await expect(main.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+    await expect(main.getByText(/an account is optional/i).first()).toBeVisible();
+    await assertNoHorizontalScroll(page);
+
+    // Assert >=44px touch targets on sign-in
+    const signInElements = [
+      main.getByLabel('Email'),
+      main.getByLabel('Password', { exact: true }),
+      main.getByRole('button', { name: 'Sign in' }),
+      main.getByRole('link', { name: 'Create one' }),
+      main.getByRole('link', { name: /continue shopping as guest/i }),
+    ];
+    for (const el of signInElements) {
+      await expect(el).toBeVisible();
+      const box = await el.boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+    }
+
+    // 2. Visit /account/sign-up
+    await page.goto('/account/sign-up');
+    await expect(main.getByRole('heading', { name: 'Create an account' })).toBeVisible();
+    await expect(main.getByText(/optional/i).first()).toBeVisible();
+    await assertNoHorizontalScroll(page);
+
+    // Assert >=44px touch targets on sign-up
+    const signUpElements = [
+      main.getByLabel('Name'),
+      main.getByLabel('Email'),
+      main.getByLabel('Mobile number'),
+      main.getByLabel(/^Password/),
+      main.getByRole('button', { name: 'Create account' }),
+      main.getByRole('link', { name: 'Sign in' }),
+      main.getByRole('link', { name: /continue shopping as guest/i }),
+    ];
+    for (const el of signUpElements) {
+      await expect(el).toBeVisible();
+      const box = await el.boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+    }
+
+    // 3. Sign in using the seeded demo shopper
+    await page.goto('/account/sign-in');
+    await main.getByLabel('Email').fill('shopper@munderfresh.local');
+    await main.getByLabel('Password', { exact: true }).fill('ShopperPass1');
+    await main.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page).toHaveURL(/\/account$/);
+    await assertNoHorizontalScroll(page);
+
+    // 4. Verify /account (Account dashboard)
+    await expect(main.getByRole('heading', { name: /demo shopper|your account/i })).toBeVisible();
+    await expect(main.getByText('Shopper account')).toBeVisible();
+    await expect(main.getByText('Verified Shopper')).not.toBeVisible();
+
+    const accountNav = main.getByRole('navigation', { name: 'Account' });
+    await expect(accountNav).toBeVisible();
+    await expect(accountNav.getByRole('link', { name: 'Overview' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await expect(accountNav.getByRole('link', { name: 'Your addresses' })).not.toHaveAttribute(
+      'aria-current',
+    );
+    await expect(accountNav.getByRole('link', { name: 'Your orders' })).not.toHaveAttribute(
+      'aria-current',
+    );
+
+    const accountElements = [
+      main.getByRole('link', { name: 'Your addresses' }),
+      main.getByRole('link', { name: 'Your orders' }),
+      main.getByRole('link', { name: /manage saved addresses/i }),
+      main.getByRole('link', { name: /view past orders/i }),
+      main.getByLabel('Name'),
+      main.getByLabel('Mobile number'),
+      main.locator('form').filter({ hasText: 'Save' }).getByRole('button', { name: 'Save' }),
+      main.getByLabel('Current password'),
+      main.getByLabel(/^New password/),
+      main.getByRole('button', { name: 'Change password' }),
+      main.getByRole('button', { name: 'Sign out' }),
+    ];
+    for (const el of accountElements) {
+      await expect(el).toBeVisible();
+      const box = await el.boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+    }
+
+    // 5. Navigate to /account/addresses
+    await main.getByRole('link', { name: 'Your addresses' }).click();
+    await expect(page).toHaveURL(/\/account\/addresses$/);
+    await expect(main.getByRole('heading', { name: 'Your addresses' })).toBeVisible();
+    await assertNoHorizontalScroll(page);
+
+    const addressesNav = main.getByRole('navigation', { name: 'Account' });
+    await expect(addressesNav).toBeVisible();
+    await expect(addressesNav.getByRole('link', { name: 'Your addresses' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await expect(addressesNav.getByRole('link', { name: 'Overview' })).not.toHaveAttribute(
+      'aria-current',
+    );
+    await expect(addressesNav.getByRole('link', { name: 'Your orders' })).not.toHaveAttribute(
+      'aria-current',
+    );
+
+    const addForm = main.locator('form').filter({ hasText: 'Save address' });
+    const addressElements = [
+      main.getByRole('link', { name: /back to account/i }),
+      main.getByRole('link', { name: 'Overview' }),
+      main.getByRole('link', { name: 'Your orders' }),
+      addForm.getByLabel('Label (Home, Work…)'),
+      addForm.getByLabel('Address line'),
+      addForm.getByLabel('Second line (optional)'),
+      addForm.getByLabel('Landmark (optional)'),
+      addForm.getByLabel('Delivery area'),
+      addForm.getByLabel('Pincode (optional)'),
+      addForm.locator('label').filter({ hasText: /deliver here by default/i }),
+      addForm.getByRole('button', { name: 'Save address' }),
+    ];
+    for (const el of addressElements) {
+      await expect(el).toBeVisible();
+      const box = await el.boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+    }
+
+    // 6. Navigate to /account/orders
+    await main.getByRole('link', { name: 'Your orders' }).click();
+    await expect(page).toHaveURL(/\/account\/orders$/);
+    await expect(main.getByRole('heading', { name: 'Your orders' })).toBeVisible();
+    await expect(main.getByText(/account order history is not available yet/i)).toBeVisible();
+    await expect(main.getByText(/private tracking link/i)).toBeVisible();
+    await expect(main.getByRole('link', { name: /fill a basket/i })).not.toBeVisible();
+    await assertNoHorizontalScroll(page);
+
+    const ordersNav = main.getByRole('navigation', { name: 'Account' });
+    await expect(ordersNav).toBeVisible();
+    await expect(ordersNav.getByRole('link', { name: 'Your orders' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await expect(ordersNav.getByRole('link', { name: 'Overview' })).not.toHaveAttribute(
+      'aria-current',
+    );
+    await expect(ordersNav.getByRole('link', { name: 'Your addresses' })).not.toHaveAttribute(
+      'aria-current',
+    );
+
+    const allOrderLinks = await main.getByRole('link').all();
+    for (const link of allOrderLinks) {
+      await expect(link).toBeVisible();
+      const box = await link.boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+    }
+  });
 });
