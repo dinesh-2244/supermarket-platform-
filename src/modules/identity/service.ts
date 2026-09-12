@@ -136,7 +136,9 @@ async function verifyPassword(email: string, password: string): Promise<Authenti
  * while the window would still accept it (RFC 6238 §5.2) — so a code seen in
  * flight cannot be replayed for the rest of its thirty seconds. The record is
  * a conditional write, so two sign-ins racing with the same code cannot both
- * win. A replay is refused with the same undifferentiated `null`.
+ * win — and it names the secret the code was checked against, so a request
+ * that reaches its claim after that factor was withdrawn (or replaced) is
+ * refused too. A replay is refused with the same undifferentiated `null`.
  *
  * `lastLoginAt` is stamped here rather than in {@link verifyPassword}: it
  * records a sign-in, not every time someone retypes their password.
@@ -154,7 +156,7 @@ export async function verifyCredentials(
   if (secret !== null) {
     const counter = await matchTotpCode(secret, totpCode, now);
     if (counter === null) return null;
-    if (!(await repo.claimTotpCounter(user.id, counter))) return null;
+    if (!(await repo.claimTotpCounter(user.id, secret, counter))) return null;
   }
 
   await repo.touchLastLogin(user.id);
@@ -597,12 +599,16 @@ export async function disableTotp(
   }
 
   await withTransaction(async (tx) => {
-    // A replayed code cannot withdraw the factor either. The claim is inside
-    // the transaction so a refusal rolls the audit row back with it.
-    if (!(await repo.claimTotpCounter(principal.userId, counter, tx))) {
+    // A replayed code cannot withdraw the factor either, and a withdrawal
+    // queued behind another one of the same factor finds it already gone.
+    // Both checks are inside the transaction so a refusal rolls the audit row
+    // back with it.
+    if (!(await repo.claimTotpCounter(principal.userId, secret, counter, tx))) {
       throw new ValidationError('That code has already been used', {});
     }
-    await repo.clearTwoFactorSecret(tx, principal.userId);
+    if (!(await repo.clearTwoFactorSecret(tx, principal.userId, secret))) {
+      throw new ConflictError('That second factor has already been withdrawn', {});
+    }
     await writeAuditLog(tx, {
       principal,
       action: 'update',

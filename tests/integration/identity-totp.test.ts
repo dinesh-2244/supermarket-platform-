@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { getPrisma, type Principal } from '@/modules/platform';
+import { getPrisma, withTransaction, type Principal } from '@/modules/platform';
 import {
   beginTotpEnrolment,
   changeOwnPassword,
@@ -9,8 +9,10 @@ import {
   hasTotpEnrolled,
   verifyCredentials,
 } from '@/modules/identity';
-import { TOTP_PERIOD_SECONDS, totpCodeAt } from '@/modules/identity/domain/totp';
+import { counterFor, TOTP_PERIOD_SECONDS, totpCodeAt } from '@/modules/identity/domain/totp';
+import { claimTotpCounter, clearTwoFactorSecret } from '@/modules/identity/repo';
 import { createStore } from '../factories/index';
+import { newTestClient } from './prisma-client';
 
 /**
  * P2 — optional TOTP, against a real database.
@@ -323,6 +325,143 @@ describe('identity — a code is accepted once, and never again inside its step'
         afterwards,
       ),
     ).not.toBeNull();
+  });
+});
+
+describe('identity — H1: a claim is bound to the factor it was checked against', () => {
+  // OSCAR's H1. Withdrawal used to wipe the step record with the secret, and a
+  // claim did not say which secret it had verified. Two things followed: a
+  // sign-in queued behind a withdrawal saw a blank record and claimed the same
+  // code again; and a request that verified factor A could claim after A was
+  // withdrawn and B enrolled. These sequence the requests on the row lock so
+  // the interleaving is the one that matters, not whichever won a race.
+  let staff: { id: string; email: string; principal: Principal };
+  let secret: string;
+  let now: number;
+  const step = TOTP_PERIOD_SECONDS * 1000;
+  const holder = newTestClient();
+
+  afterAll(async () => {
+    await holder.$disconnect();
+  });
+
+  beforeEach(async () => {
+    staff = await newStaff('h1');
+    now = Date.now();
+    secret = (await beginTotpEnrolment(staff.principal)).secret;
+    const enrolledAt = now - 3 * step;
+    await confirmTotpEnrolment(
+      staff.principal,
+      { secret, code: await totpCodeAt(secret, enrolledAt), password: PASSWORD },
+      enrolledAt,
+    );
+  });
+
+  /**
+   * Hold the account's row lock from a connection of our own, run `first` and
+   * then `second` so both queue on it in that order, then let go. PostgreSQL
+   * grants a tuple lock to its waiters in arrival order, which is what makes
+   * "the withdrawal commits, and *then* the sign-in's update is re-checked"
+   * the sequence under test rather than a hope.
+   */
+  async function sequenced<A, B>(
+    first: () => Promise<A>,
+    second: () => Promise<B>,
+  ): Promise<[PromiseSettledResult<A>, PromiseSettledResult<B>]> {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    const lock = holder.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${staff.id} FOR UPDATE`;
+      await released;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const a = first();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const b = second();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    release();
+    const [ra, rb] = await Promise.allSettled([a, b]);
+    await lock;
+    return [ra, rb];
+  }
+
+  it('lets a withdrawal and a sign-in with the same code through exactly once — withdrawal first', async () => {
+    const code = await totpCodeAt(secret, now);
+    const [withdrawal, signIn] = await sequenced(
+      () => disableTotp(staff.principal, { code, password: PASSWORD }, now),
+      () => verifyCredentials(staff.email, PASSWORD, code, now),
+    );
+    expect(withdrawal.status).toBe('fulfilled');
+    expect(signIn.status).toBe('fulfilled');
+    // The withdrawal used the code; the re-checked sign-in must not use it again.
+    expect((signIn as PromiseFulfilledResult<unknown>).value).toBeNull();
+    expect(await storedSecret(staff.id)).toBeNull();
+    // The step record outlives the factor: blanking it is what let the
+    // re-checked sign-in see an empty record.
+    const row = await prisma.user.findUniqueOrThrow({
+      where: { id: staff.id },
+      select: { twoFactorLastCounter: true },
+    });
+    expect(row.twoFactorLastCounter).toBe(counterFor(now));
+  });
+
+  it('lets a withdrawal and a sign-in with the same code through exactly once — sign-in first', async () => {
+    const code = await totpCodeAt(secret, now);
+    const [signIn, withdrawal] = await sequenced(
+      () => verifyCredentials(staff.email, PASSWORD, code, now),
+      () => disableTotp(staff.principal, { code, password: PASSWORD }, now),
+    );
+    expect(signIn.status).toBe('fulfilled');
+    expect((signIn as PromiseFulfilledResult<unknown>).value).not.toBeNull();
+    expect(withdrawal.status).toBe('rejected');
+    expect(await storedSecret(staff.id)).toBe(secret);
+  });
+
+  it('lets exactly one of two simultaneous withdrawals with the same code succeed', async () => {
+    const code = await totpCodeAt(secret, now);
+    const [one, two] = await sequenced(
+      () => disableTotp(staff.principal, { code, password: PASSWORD }, now),
+      () => disableTotp(staff.principal, { code, password: PASSWORD }, now),
+    );
+    expect(one.status).toBe('fulfilled');
+    expect(two.status).toBe('rejected');
+    expect(await storedSecret(staff.id)).toBeNull();
+    // One withdrawal, one audit row — the loser's transaction rolled back.
+    const audits = await prisma.auditLog.count({
+      where: { entityType: 'User', entityId: staff.id, action: 'update' },
+    });
+    expect(audits).toBe(2); // the enrolment's, and the one withdrawal's
+  });
+
+  it('will not withdraw a factor other than the one it was told about', async () => {
+    const ok = await withTransaction((tx) => clearTwoFactorSecret(tx, staff.id, 'not-the-secret'));
+    expect(ok).toBe(false);
+    expect(await storedSecret(staff.id)).toBe(secret);
+  });
+
+  it('refuses a claim from a factor that has since been withdrawn and replaced', async () => {
+    // A request verified factor A's next-step code, then stalled. Meanwhile
+    // A is withdrawn and B enrolled. Its claim must fail: it names A, and
+    // the account no longer holds A — whatever the counters say.
+    const staleCounter = counterFor(now) + 1;
+    await disableTotp(
+      staff.principal,
+      { code: await totpCodeAt(secret, now), password: PASSWORD },
+      now,
+    );
+    const next = (await beginTotpEnrolment(staff.principal)).secret;
+    await confirmTotpEnrolment(
+      staff.principal,
+      { secret: next, code: await totpCodeAt(next, now), password: PASSWORD },
+      now,
+    );
+    expect(await claimTotpCounter(staff.id, secret, staleCounter)).toBe(false);
+    // And B's own record was not advanced by the attempt.
+    const row = await prisma.user.findUniqueOrThrow({
+      where: { id: staff.id },
+      select: { twoFactorLastCounter: true },
+    });
+    expect(row.twoFactorLastCounter).toBe(counterFor(now));
   });
 });
 
