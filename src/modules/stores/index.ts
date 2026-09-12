@@ -23,6 +23,7 @@ export {
   moduleDescriptor,
   resolveServiceability,
   slotGridFor,
+  storeCounts,
   updateArea,
   updatePosMode,
   updateSettings,
@@ -34,6 +35,7 @@ export {
   type StorefrontArea,
   type StorefrontSettings,
   type SlotGrid,
+  type StoreCounts,
   type StoreRecord,
   type ZoneRecord,
 } from './service';

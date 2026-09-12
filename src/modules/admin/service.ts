@@ -9,13 +9,15 @@
  */
 import { allowedStoreIds, assertAuthorized, type Principal } from '../platform/index';
 import { listCategories, listProducts, type ProductRecord } from '../catalog/index';
-import { listStores, type StoreRecord } from '../stores/index';
+import { listStores, storeCounts, type StoreCounts, type StoreRecord } from '../stores/index';
 import { discountBp, listListings, type StoreProductRecord } from '../pricing/index';
 import { listLowStock, listStock, type InventoryRecord } from '../inventory/index';
 import {
+  orderCountsForStore,
   queueForStore,
   staffOrder,
   type OrderStatus,
+  type OrderCounts,
   type QueueRow,
   type StaffOrderRow,
 } from '../orders/index';
@@ -23,6 +25,7 @@ import { descriptor, type ModuleDescriptor } from './domain/index';
 import * as repo from './repo';
 
 export type { AuditEntryRecord, AuditQuery } from './repo';
+export type { OrderCounts } from '../orders/index';
 
 /** What this module owns and is allowed to depend on (§4). */
 export function moduleDescriptor(): ModuleDescriptor {
@@ -117,6 +120,15 @@ export async function orderQueue(
   return { storeId, rows, showingAll };
 }
 
+/**
+ * Exact order totals for the reports screen — by status and by price-variance
+ * state — from a `COUNT`, not from counting `orderQueue` rows, which is a page
+ * capped at 200 and reported the cap as the total (OSCAR M1, PR #43).
+ */
+export async function orderCounts(principal: Principal, storeId: string): Promise<OrderCounts> {
+  return orderCountsForStore(principal, storeId);
+}
+
 /** One order for the detail screen, or `null` if it is not this staff's to see. */
 export async function orderDetail(
   principal: Principal,
@@ -127,6 +139,8 @@ export async function orderDetail(
 
 export interface Overview {
   readonly stores: readonly StoreRecord[];
+  /** `isActive`-aware, so the landing screen does not present a deactivated shop as operating. */
+  readonly storeCounts: StoreCounts;
   readonly storeId: string | null;
   readonly productCount: number;
   readonly categoryCount: number;
@@ -136,7 +150,7 @@ export interface Overview {
 
 /** The landing screen. */
 export async function overview(principal: Principal, storeId: string | null): Promise<Overview> {
-  const stores = await listStores(principal);
+  const [stores, counts] = await Promise.all([listStores(principal), storeCounts(principal)]);
   const selected = storeId ?? stores[0]?.id ?? null;
 
   const [products, categories] = await Promise.all([
@@ -153,6 +167,7 @@ export async function overview(principal: Principal, storeId: string | null): Pr
 
   return {
     stores,
+    storeCounts: counts,
     storeId: selected,
     productCount: products.length,
     categoryCount: categories.length,
