@@ -39,8 +39,8 @@ export default async function AccountPage(): Promise<React.ReactElement> {
               <h1 className="text-xl sm:text-2xl font-black text-slate-900 truncate">
                 {customer.name ?? 'Your account'}
               </h1>
-              <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
-                Verified Shopper
+              <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
+                Shopper account
               </span>
             </div>
             <p className="mt-1 text-sm text-slate-600 truncate">

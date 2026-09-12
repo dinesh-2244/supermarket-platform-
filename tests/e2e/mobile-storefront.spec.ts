@@ -381,6 +381,22 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
 
     // 4. Verify /account (Account dashboard)
     await expect(main.getByRole('heading', { name: /demo shopper|your account/i })).toBeVisible();
+    await expect(main.getByText('Shopper account')).toBeVisible();
+    await expect(main.getByText('Verified Shopper')).not.toBeVisible();
+
+    const accountNav = main.getByRole('navigation', { name: 'Account' });
+    await expect(accountNav).toBeVisible();
+    await expect(accountNav.getByRole('link', { name: 'Overview' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await expect(accountNav.getByRole('link', { name: 'Your addresses' })).not.toHaveAttribute(
+      'aria-current',
+    );
+    await expect(accountNav.getByRole('link', { name: 'Your orders' })).not.toHaveAttribute(
+      'aria-current',
+    );
+
     const accountElements = [
       main.getByRole('link', { name: 'Your addresses' }),
       main.getByRole('link', { name: 'Your orders' }),
@@ -406,6 +422,19 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     await expect(main.getByRole('heading', { name: 'Your addresses' })).toBeVisible();
     await assertNoHorizontalScroll(page);
 
+    const addressesNav = main.getByRole('navigation', { name: 'Account' });
+    await expect(addressesNav).toBeVisible();
+    await expect(addressesNav.getByRole('link', { name: 'Your addresses' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await expect(addressesNav.getByRole('link', { name: 'Overview' })).not.toHaveAttribute(
+      'aria-current',
+    );
+    await expect(addressesNav.getByRole('link', { name: 'Your orders' })).not.toHaveAttribute(
+      'aria-current',
+    );
+
     const addForm = main.locator('form').filter({ hasText: 'Save address' });
     const addressElements = [
       main.getByRole('link', { name: /back to account/i }),
@@ -430,18 +459,28 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     await main.getByRole('link', { name: 'Your orders' }).click();
     await expect(page).toHaveURL(/\/account\/orders$/);
     await expect(main.getByRole('heading', { name: 'Your orders' })).toBeVisible();
-    await expect(main.getByText(/no orders yet/i)).toBeVisible();
+    await expect(main.getByText(/account order history is not available yet/i)).toBeVisible();
+    await expect(main.getByText(/private tracking link/i)).toBeVisible();
+    await expect(main.getByRole('link', { name: /fill a basket/i })).not.toBeVisible();
     await assertNoHorizontalScroll(page);
 
-    const orderElements = [
-      main.getByRole('link', { name: /back to account/i }),
-      main.getByRole('link', { name: 'Overview' }),
-      main.getByRole('link', { name: 'Your addresses' }),
-      main.getByRole('link', { name: 'Start shopping' }),
-    ];
-    for (const el of orderElements) {
-      await expect(el).toBeVisible();
-      const box = await el.boundingBox();
+    const ordersNav = main.getByRole('navigation', { name: 'Account' });
+    await expect(ordersNav).toBeVisible();
+    await expect(ordersNav.getByRole('link', { name: 'Your orders' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await expect(ordersNav.getByRole('link', { name: 'Overview' })).not.toHaveAttribute(
+      'aria-current',
+    );
+    await expect(ordersNav.getByRole('link', { name: 'Your addresses' })).not.toHaveAttribute(
+      'aria-current',
+    );
+
+    const allOrderLinks = await main.getByRole('link').all();
+    for (const link of allOrderLinks) {
+      await expect(link).toBeVisible();
+      const box = await link.boundingBox();
       expect(box?.height).toBeGreaterThanOrEqual(44);
     }
   });

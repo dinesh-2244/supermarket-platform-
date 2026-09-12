@@ -76,4 +76,26 @@ describe('Storefront copy integrity (M1 regression guard)', () => {
       }
     }
   });
+
+  test('no storefront file contains unbacked "Verified Shopper" claims', () => {
+    for (const file of storefrontFiles) {
+      const content = fs.readFileSync(file, 'utf-8');
+      const relative = path.relative(process.cwd(), file);
+      expect(
+        content.includes('Verified Shopper'),
+        `Found unbacked "Verified Shopper" claim in ${relative}`,
+      ).toBe(false);
+    }
+  });
+
+  test('no storefront file contains false "Ordering arrives in the next release" claims', () => {
+    for (const file of storefrontFiles) {
+      const content = fs.readFileSync(file, 'utf-8');
+      const relative = path.relative(process.cwd(), file);
+      expect(
+        content.includes('Ordering arrives in the next release'),
+        `Found false release timing claim in ${relative}`,
+      ).toBe(false);
+    }
+  });
 });

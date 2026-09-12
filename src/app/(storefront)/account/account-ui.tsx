@@ -60,13 +60,14 @@ export function AccountNavTabs({
   ] as const;
 
   return (
-    <nav className="flex flex-wrap gap-2 border-b border-slate-200 pb-3 mb-6">
+    <nav aria-label="Account" className="flex flex-wrap gap-2 border-b border-slate-200 pb-3 mb-6">
       {tabs.map((tab) => {
         const isActive = tab.id === active;
         return (
           <Link
             key={tab.id}
             href={tab.href}
+            aria-current={isActive ? 'page' : undefined}
             className={`inline-flex min-h-[44px] items-center justify-center rounded-xl px-4 py-2 text-xs sm:text-sm font-semibold transition ${
               isActive
                 ? 'bg-emerald-700 text-white shadow-xs'

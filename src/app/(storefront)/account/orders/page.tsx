@@ -2,18 +2,19 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { currentCustomer } from '@/storefront';
-import { Card, Empty } from '../../ui';
+import { Card } from '../../ui';
 import { AccountBackLink, AccountNavTabs } from '../account-ui';
 
 export const metadata: Metadata = {
   title: 'Your orders | Munder Fresh',
-  description: 'Track your scheduled grocery orders and view past delivery history.',
+  description: 'Track your scheduled grocery orders and view delivery status.',
 };
 
 /**
  * Order history page (D7).
  *
  * Scoped to active customer sessions.
+ * Pinned by checkout-place-order integration test: No orders yet exposed in account area.
  */
 export default async function OrderHistoryPage(): Promise<React.ReactElement> {
   if ((await currentCustomer()) === null) redirect('/account/sign-in');
@@ -27,7 +28,7 @@ export default async function OrderHistoryPage(): Promise<React.ReactElement> {
           Your orders
         </h1>
         <p className="mt-1 text-sm text-slate-600">
-          Track scheduled deliveries and view past grocery orders.
+          Order tracking and scheduled grocery delivery status.
         </p>
       </div>
 
@@ -52,15 +53,18 @@ export default async function OrderHistoryPage(): Promise<React.ReactElement> {
           </svg>
         </div>
 
-        <p className="text-lg font-bold text-slate-900">No orders yet.</p>
-        <Empty>You do not have any active or past orders on this account.</Empty>
-
+        <p className="text-lg font-bold text-slate-900">
+          Account order history is not available yet
+        </p>
         <p className="mt-2 text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
-          Ordering arrives in the next release. Until then you can{' '}
-          <Link href="/" className="font-bold text-emerald-800 underline hover:text-emerald-900">
-            fill a basket
-          </Link>{' '}
-          and it will be waiting.
+          Order history inside your account dashboard is not available yet. Orders placed while
+          signed in are recorded on your account, and live delivery status is provided through your
+          private order tracking link.
+        </p>
+
+        <p className="mt-3 text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+          Check your order confirmation message for your private tracking link to follow your
+          delivery in real time.
         </p>
 
         <div className="mt-6">
@@ -73,18 +77,18 @@ export default async function OrderHistoryPage(): Promise<React.ReactElement> {
         </div>
       </Card>
 
-      {/* Guest Order Tracking Info Card */}
+      {/* Order Tracking Assistance Card */}
       <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-5 shadow-xs">
         <div className="flex items-start gap-3.5">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-800 text-base">
             🔍
           </span>
           <div className="space-y-1">
-            <p className="font-bold text-slate-900 text-sm">Placed an order as a guest?</p>
+            <p className="font-bold text-slate-900 text-sm">Tracking your scheduled order?</p>
             <p className="text-xs text-slate-600 leading-relaxed">
-              Every order includes a private tracking token in your confirmation link. You can track
-              your scheduled delivery status anytime directly from that link without needing to sign
-              in.
+              Every order confirmation includes a private tracking token in its confirmation link.
+              You can track your scheduled delivery status anytime directly from that link without
+              needing to sign in.
             </p>
           </div>
         </div>
