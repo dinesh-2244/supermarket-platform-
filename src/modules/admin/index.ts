@@ -25,6 +25,7 @@ export {
 } from './service';
 
 export {
+  adminHref,
   formatDateTime,
   formatDelta,
   formatPaise,

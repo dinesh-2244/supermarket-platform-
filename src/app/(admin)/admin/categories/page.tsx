@@ -6,7 +6,7 @@ import { Card, Empty, PageHeading, Table } from '../ui';
 
 export const dynamic = 'force-dynamic';
 
-/** The catalogue master is global, so this screen is `SUPER_ADMIN` only. */
+/** The catalogue master is global, so this screen is `SUPER_ADMIN` only (AD6). */
 export default async function CategoriesPage(): Promise<React.ReactElement> {
   const principal = await requirePrincipal();
   const categories = await listCategories(principal);
@@ -18,42 +18,60 @@ export default async function CategoriesPage(): Promise<React.ReactElement> {
   ];
 
   return (
-    <>
+    <div className="space-y-6">
       <PageHeading
         title="Categories"
         subtitle="One shared tree. A parent change that would close a loop is refused."
       />
 
-      <Card title="Add a category">
-        <ActionForm action={createCategoryAction} submitLabel="Add category">
-          <Field label="Name" name="name" required />
-          <Select label="Parent" name="parentId" options={parentOptions} width="w-52" />
+      <Card title="Add a category" subtitle="Create a new top-level category or subcategory.">
+        <ActionForm
+          action={createCategoryAction}
+          submitLabel="Add category"
+          className="flex flex-wrap items-end gap-3"
+        >
+          <Field label="Name" name="name" required width="w-52" />
+          <Select label="Parent" name="parentId" options={parentOptions} width="w-60" />
         </ActionForm>
       </Card>
 
-      <Card title={`${String(categories.length)} categor${categories.length === 1 ? 'y' : 'ies'}`}>
+      <Card
+        title={`${String(categories.length)} categor${categories.length === 1 ? 'y' : 'ies'}`}
+        subtitle="Hierarchy of departments and sections."
+      >
         {categories.length === 0 ? (
-          <Empty>No categories yet.</Empty>
+          <Empty title="No categories created">No categories have been added yet.</Empty>
         ) : (
           <Table head={['Name', 'Slug', 'Move / activate']}>
             {categories.map((category) => (
-              <tr key={category.id} className="border-b border-slate-100">
-                <td className="py-2 pr-3">
-                  <span style={{ paddingLeft: `${String(depthOf(category.id, nodes) * 16)}px` }}>
+              <tr key={category.id} className="hover:bg-slate-50/60 transition">
+                <td className="py-3 px-4 font-semibold text-slate-900">
+                  <span
+                    style={{ paddingLeft: `${String(depthOf(category.id, nodes) * 20)}px` }}
+                    className="inline-block"
+                  >
                     {category.name}
-                    {category.isActive ? '' : ' (inactive)'}
+                    {category.isActive ? null : (
+                      <span className="ml-2 inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">
+                        inactive
+                      </span>
+                    )}
                   </span>
                 </td>
-                <td className="py-2 pr-3 font-mono text-xs">{category.slug}</td>
-                <td className="py-2 pr-3">
-                  <ActionForm action={updateCategoryAction} submitLabel="Save">
+                <td className="py-3 px-4 font-mono text-xs text-slate-500">{category.slug}</td>
+                <td className="py-3 px-4">
+                  <ActionForm
+                    action={updateCategoryAction}
+                    submitLabel="Save"
+                    className="flex flex-wrap items-center gap-3"
+                  >
                     <Hidden name="categoryId" value={category.id} />
                     <Select
                       label=""
                       name="parentId"
                       options={parentOptions.filter((option) => option.value !== category.id)}
                       defaultValue={category.parentId ?? ''}
-                      width="w-44"
+                      width="w-52"
                     />
                     <Check label="Active" name="isActive" defaultChecked={category.isActive} />
                   </ActionForm>
@@ -63,6 +81,6 @@ export default async function CategoriesPage(): Promise<React.ReactElement> {
           </Table>
         )}
       </Card>
-    </>
+    </div>
   );
 }

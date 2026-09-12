@@ -104,7 +104,7 @@ async function selectFixtureStore(admin: Page, product: Fixture = FIXTURE): Prom
   expect(href, 'the S2 switcher link').not.toBeNull();
 
   await admin.goto(href ?? '');
-  await expect(admin.getByRole('link', { name: /^S2 · / })).toHaveClass(/bg-slate-900/);
+  await expect(admin.getByRole('link', { name: /^S2 · / })).toHaveAttribute('aria-current', 'page');
   await expect(listingRow(admin, product).first()).toBeVisible();
 }
 

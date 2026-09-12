@@ -52,7 +52,7 @@ export default defineConfig({
     {
       name: 'tablet-ipad-mini',
       use: { ...devices['iPad Mini'], defaultBrowserType: 'chromium' },
-      testMatch: /mobile-storefront\.spec\.ts/,
+      testMatch: /(mobile-storefront|admin-tablet)\.spec\.ts/,
     },
   ],
   // Reuse an already-running server locally; always start a fresh one in CI.

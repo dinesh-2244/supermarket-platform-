@@ -15,22 +15,27 @@ export function ActionForm({
   children,
   submitLabel,
   className,
+  submitButtonClassName,
 }: {
   action: (state: string | undefined, form: FormData) => Promise<string>;
   children: React.ReactNode;
   submitLabel: string;
   className?: string;
+  submitButtonClassName?: string;
 }): React.ReactElement {
   const [message, formAction, pending] = useActionState(action, undefined);
 
   return (
-    <form action={formAction} className={className ?? 'flex flex-wrap items-end gap-2'}>
+    <form action={formAction} className={className ?? 'flex flex-wrap items-end gap-3'}>
       <Notice message={message} />
       {children}
       <button
         type="submit"
         disabled={pending}
-        className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+        className={
+          submitButtonClassName ??
+          'inline-flex min-h-[44px] items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white shadow-xs hover:bg-slate-800 active:scale-[0.99] transition disabled:opacity-50'
+        }
       >
         {pending ? 'Working…' : submitLabel}
       </button>
@@ -56,15 +61,15 @@ export function Field({
   width?: string;
 }): React.ReactElement {
   return (
-    <label className="text-xs text-slate-600">
-      <span className="mb-1 block">{label}</span>
+    <label className="text-xs font-semibold text-slate-700">
+      <span className="mb-1.5 block">{label}</span>
       <input
         name={name}
         type={type}
         defaultValue={defaultValue}
         required={required}
         placeholder={placeholder}
-        className={`${width} rounded border border-slate-300 px-2 py-1 text-sm text-slate-900`}
+        className={`${width} min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-2xs focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 focus:outline-none transition placeholder:text-slate-400`}
       />
     </label>
   );
@@ -84,12 +89,12 @@ export function Select({
   width?: string;
 }): React.ReactElement {
   return (
-    <label className="text-xs text-slate-600">
-      <span className="mb-1 block">{label}</span>
+    <label className="text-xs font-semibold text-slate-700">
+      <span className="mb-1.5 block">{label}</span>
       <select
         name={name}
         defaultValue={defaultValue}
-        className={`${width} rounded border border-slate-300 px-2 py-1 text-sm text-slate-900`}
+        className={`${width} min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-2xs focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 focus:outline-none transition`}
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -111,9 +116,14 @@ export function Check({
   defaultChecked?: boolean;
 }): React.ReactElement {
   return (
-    <label className="flex items-center gap-1 pb-1 text-xs text-slate-600">
-      <input name={name} type="checkbox" defaultChecked={defaultChecked} />
-      {label}
+    <label className="inline-flex min-h-[44px] items-center gap-2 text-xs sm:text-sm font-medium text-slate-700 cursor-pointer select-none">
+      <input
+        name={name}
+        type="checkbox"
+        defaultChecked={defaultChecked}
+        className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+      />
+      <span>{label}</span>
     </label>
   );
 }
