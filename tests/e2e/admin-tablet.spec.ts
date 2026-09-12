@@ -397,6 +397,23 @@ test.describe.serial('Admin Dashboard Tablet Usability & IA Redesign (AD1–AD12
     );
     await page.getByRole('link', { name: 'Open orders queue →' }).click();
     await expect(page).toHaveURL(new RegExp(`/admin/orders\\?store=${s2Id}`));
+
+    // Click-through non-nav link 7 (R3/M2): Audit log -> filter form preserves store
+    await openNavIfNeeded();
+    await nav.getByRole('link', { name: 'Audit log', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/admin/audit\\?store=${s2Id}`));
+    await expect(page.getByRole('heading', { name: 'Audit log', exact: true })).toBeVisible();
+
+    await page.getByLabel('Entity type').fill('Order');
+    await page.getByRole('button', { name: 'Filter' }).click();
+    await expect(page).toHaveURL(new RegExp(`/admin/audit\\?.*store=${s2Id}`));
+    await expect(page).toHaveURL(/entityType=Order/);
+
+    // Clear filter link clears entityType while retaining store
+    const clearLink = page.getByRole('link', { name: 'clear' });
+    await expect(clearLink).toBeVisible();
+    await clearLink.click();
+    await expect(page).toHaveURL(`/admin/audit?store=${s2Id}`);
   });
 
   test('M4: Exact role-gated navigation links per navigationFor()', async ({ page }) => {

@@ -1,5 +1,6 @@
+import Link from 'next/link';
 import { requirePrincipal } from '@/auth';
-import { auditEntries, formatDateTime } from '@/modules/admin';
+import { adminHref, auditEntries, formatDateTime } from '@/modules/admin';
 import { Card, Empty, PageHeading, Table } from '../ui';
 
 export const dynamic = 'force-dynamic';
@@ -15,6 +16,7 @@ export default async function AuditPage({
 }): Promise<React.ReactElement> {
   const principal = await requirePrincipal();
   const params = await searchParams;
+  const storeId = typeof params.store === 'string' ? params.store : null;
   const entityType = typeof params.entityType === 'string' ? params.entityType.trim() : '';
   const actorId = typeof params.actor === 'string' ? params.actor.trim() : '';
 
@@ -30,6 +32,7 @@ export default async function AuditPage({
 
       <Card title="Filter" subtitle="Locate mutation events by entity type or staff actor ID.">
         <form method="get" className="flex flex-wrap items-end gap-3">
+          {storeId !== null ? <input type="hidden" name="store" value={storeId} /> : null}
           <label className="text-xs font-semibold text-slate-700">
             <span className="mb-1.5 block">Entity type</span>
             <input
@@ -54,6 +57,14 @@ export default async function AuditPage({
           >
             Filter
           </button>
+          {entityType !== '' || actorId !== '' ? (
+            <Link
+              href={adminHref('/admin/audit', storeId)}
+              className="inline-flex min-h-[44px] items-center text-xs font-semibold text-slate-500 underline hover:text-slate-900 px-2"
+            >
+              clear
+            </Link>
+          ) : null}
         </form>
       </Card>
 
