@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { requirePrincipal } from '@/auth';
 import { listStores } from '@/modules/stores';
 import { listProducts } from '@/modules/catalog';
@@ -9,6 +10,10 @@ import { Card, Empty, PageHeading, StoreSwitcher, Table } from '../ui';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Back-office listings & pricing management (AD6).
+ * Per-store independent pricing, MRP discounts, listed toggles, and append-only price history.
+ */
 export default async function ListingsPage({
   searchParams,
 }: {
@@ -25,46 +30,52 @@ export default async function ListingsPage({
 
   if (storeId === null) {
     return (
-      <>
+      <div className="space-y-6">
         <PageHeading title="Listings & prices" />
-        <Empty>You are not assigned to a store.</Empty>
-      </>
+        <Empty title="No Store Assigned">You are not assigned to a store.</Empty>
+      </div>
     );
   }
 
   const rows = await listingRows(principal, storeId);
 
-  // Products in the shared master that this store has no listing for yet. Until
-  // now a newly created product could never be given its first price here, which
-  // meant the catalogue and the store could not be connected through the UI at
-  // all.
   const listed = new Set(rows.map((row) => row.listing.productId));
   const unlisted = (await listProducts(principal, { limit: 500 })).filter(
     (product) => !listed.has(product.id),
   );
 
-  // The append-only history for whichever listing was opened.
   const openId = typeof params.history === 'string' ? params.history : null;
   const history = openId === null ? [] : await listPriceHistory(principal, openId, 20);
 
   return (
-    <>
+    <div className="space-y-6">
       <PageHeading
         title="Listings & prices"
         subtitle="Per store, independent. Every change writes a PriceChange row in the same transaction."
       />
+
       <StoreSwitcher stores={stores} storeId={storeId} basePath="/admin/listings" />
 
-      <Card title="Add a product to this store">
+      {/* Add Product to Store */}
+      <Card
+        title="Add a product to this store"
+        subtitle="Assign an initial selling price to a master product to enable it in this store."
+      >
         {unlisted.length === 0 ? (
-          <Empty>Every active product already has a price here.</Empty>
+          <Empty title="All products listed">
+            Every active product in the catalog already has a price in this store.
+          </Empty>
         ) : (
-          <ActionForm action={setPriceAction} submitLabel="Set first price">
+          <ActionForm
+            action={setPriceAction}
+            submitLabel="Set first price"
+            className="flex flex-wrap items-end gap-3"
+          >
             <Hidden name="storeId" value={storeId} />
             <Select
               label="Product"
               name="productId"
-              width="w-64"
+              width="w-72"
               options={unlisted.map((product) => ({
                 value: product.id,
                 label: `${product.sku} · ${product.name}`,
@@ -72,42 +83,68 @@ export default async function ListingsPage({
             />
             <Field label="MRP (paise)" name="mrpPaise" type="number" width="w-28" />
             <Field label="Selling (paise)" name="sellingPricePaise" type="number" width="w-28" />
-            <Field label="Reason" name="reason" width="w-32" />
+            <Field label="Reason" name="reason" width="w-36" placeholder="Initial store listing" />
           </ActionForm>
         )}
       </Card>
 
-      <Card title={`${String(rows.length)} listing(s)`}>
+      {/* Store Listings Table */}
+      <Card
+        title={`${String(rows.length)} listing(s)`}
+        subtitle="Catalog items available for customer purchase in this store."
+      >
         {rows.length === 0 ? (
-          <Empty>Nothing is priced for this store yet.</Empty>
+          <Empty title="No products priced">Nothing is priced for this store yet.</Empty>
         ) : (
           <Table head={['SKU', 'Product', 'MRP', 'Selling', 'Discount', 'Listed', 'Edit price']}>
             {rows.map(({ listing, product, discountBp: discount }) => (
-              <tr key={listing.id} className="border-b border-slate-100 align-top">
-                <td className="py-2 pr-3 font-mono text-xs">{product?.sku ?? '—'}</td>
-                <td className="py-2 pr-3">
-                  {product?.name ?? listing.productId}
-                  <a
-                    className="ml-2 text-xs text-slate-500 underline"
+              <tr key={listing.id} className="hover:bg-slate-50/60 transition align-top">
+                <td className="py-3 px-4 font-mono text-xs font-bold text-slate-700">
+                  {product?.sku ?? '—'}
+                </td>
+                <td className="py-3 px-4">
+                  <div className="font-bold text-slate-900">
+                    {product?.name ?? listing.productId}
+                  </div>
+                  <Link
+                    className="inline-flex min-h-[44px] items-center text-xs font-semibold text-emerald-800 underline hover:text-emerald-950"
                     href={`/admin/listings?store=${storeId}&history=${listing.id}`}
                   >
-                    history
-                  </a>
+                    View price history &rarr;
+                  </Link>
                 </td>
-                <td className="py-2 pr-3">{formatPaise(listing.mrpPaise)}</td>
-                <td className="py-2 pr-3 font-semibold">
+                <td className="py-3 px-4 text-xs font-medium text-slate-500">
+                  {formatPaise(listing.mrpPaise)}
+                </td>
+                <td className="py-3 px-4 font-black text-slate-900">
                   {formatPaise(listing.sellingPricePaise)}
                 </td>
-                <td className="py-2 pr-3">{(discount / 100).toFixed(1)}%</td>
-                <td className="py-2 pr-3">
-                  <ActionForm action={setListedAction} submitLabel="Save">
+                <td className="py-3 px-4">
+                  {discount > 0 ? (
+                    <span className="inline-flex items-center rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-900">
+                      {(discount / 100).toFixed(0)}% OFF
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-400">0%</span>
+                  )}
+                </td>
+                <td className="py-3 px-4">
+                  <ActionForm
+                    action={setListedAction}
+                    submitLabel="Save"
+                    className="flex items-center gap-2"
+                  >
                     <Hidden name="storeId" value={storeId} />
                     <Hidden name="productId" value={listing.productId} />
                     <Check label="Listed" name="isListed" defaultChecked={listing.isListed} />
                   </ActionForm>
                 </td>
-                <td className="py-2 pr-3">
-                  <ActionForm action={setPriceAction} submitLabel="Set price">
+                <td className="py-3 px-4">
+                  <ActionForm
+                    action={setPriceAction}
+                    submitLabel="Set price"
+                    className="flex flex-wrap items-end gap-2"
+                  >
                     <Hidden name="storeId" value={storeId} />
                     <Hidden name="productId" value={listing.productId} />
                     <Field
@@ -133,29 +170,39 @@ export default async function ListingsPage({
         )}
       </Card>
 
+      {/* Price History Drawer/Card */}
       {openId === null ? null : (
-        <Card title="Price history">
+        <Card
+          title="Price history"
+          subtitle="Audit trail of previous price adjustments for this item."
+        >
           {history.length === 0 ? (
-            <Empty>No changes recorded.</Empty>
+            <Empty title="No prior changes">No price changes recorded yet.</Empty>
           ) : (
-            <Table head={['When', 'Selling', 'MRP', 'Reason']}>
+            <Table head={['When', 'Selling price shift', 'MRP shift', 'Reason']}>
               {history.map((change) => (
-                <tr key={change.id} className="border-b border-slate-100">
-                  <td className="py-2 pr-3 text-slate-500">{formatDateTime(change.createdAt)}</td>
-                  <td className="py-2 pr-3">
-                    {formatPaise(change.oldSellingPricePaise)} →{' '}
-                    {formatPaise(change.newSellingPricePaise)}
+                <tr key={change.id} className="hover:bg-slate-50/60 transition">
+                  <td className="py-3 px-4 text-xs font-medium text-slate-500">
+                    {formatDateTime(change.createdAt)}
                   </td>
-                  <td className="py-2 pr-3">
-                    {formatPaise(change.oldMrpPaise)} → {formatPaise(change.newMrpPaise)}
+                  <td className="py-3 px-4 font-semibold text-slate-900">
+                    {formatPaise(change.oldSellingPricePaise)} &rarr;{' '}
+                    <span className="font-bold text-emerald-800">
+                      {formatPaise(change.newSellingPricePaise)}
+                    </span>
                   </td>
-                  <td className="py-2 pr-3">{change.reason ?? '—'}</td>
+                  <td className="py-3 px-4 text-xs text-slate-600">
+                    {formatPaise(change.oldMrpPaise)} &rarr; {formatPaise(change.newMrpPaise)}
+                  </td>
+                  <td className="py-3 px-4 text-xs font-medium text-slate-600">
+                    {change.reason ?? '—'}
+                  </td>
                 </tr>
               ))}
             </Table>
           )}
         </Card>
       )}
-    </>
+    </div>
   );
 }
