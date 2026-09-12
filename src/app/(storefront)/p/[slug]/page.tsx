@@ -186,7 +186,6 @@ export default async function ProductDetailPage({
                 </>
               ) : null}
             </div>
-            <p className="mt-1 text-[11px] text-slate-400 font-medium">(Inclusive of all taxes)</p>
 
             {/* Stock Availability */}
             <div className="mt-4">
@@ -264,9 +263,9 @@ export default async function ProductDetailPage({
             </div>
           </div>
 
-          {/* Service Guarantees Banner */}
-          <div className="mt-6 rounded-2xl border border-slate-200/80 bg-emerald-50/40 p-4">
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 text-xs text-emerald-950 font-medium">
+          {/* Service Trust Banner */}
+          <div className="mt-6 rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4">
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 text-xs text-slate-700 font-medium">
               <div className="flex items-center gap-2">
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
                   ✓
@@ -277,7 +276,7 @@ export default async function ProductDetailPage({
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
                   ✓
                 </span>
-                <span>Store-fresh quality guarantee</span>
+                <span>Live store pricing & availability</span>
               </div>
             </div>
           </div>
