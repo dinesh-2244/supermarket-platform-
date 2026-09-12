@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { captureInterestAction } from '../actions';
 import { ActionForm, Field } from '../form';
-import { Card, PageHeading } from '../ui';
+import { PageHeading } from '../ui';
 
 export const metadata: Metadata = {
   title: 'We do not deliver here yet',
@@ -37,27 +37,60 @@ export default async function UnserviceablePage({
   const explanation = REASONS[reason] ?? 'We do not deliver to your area yet.';
 
   return (
-    <>
-      <PageHeading title="We are not in your area yet" subtitle={explanation} />
+    <div className="mx-auto max-w-2xl space-y-6 py-2 sm:py-6">
+      <div className="flex flex-col items-center text-center">
+        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50 border border-amber-200/80 text-amber-700 shadow-xs">
+          <svg
+            className="h-8 w-8"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.75}
+              d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+            />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.75}
+              d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+            />
+          </svg>
+        </div>
+        <PageHeading title="We are not in your area yet" subtitle={explanation} />
+      </div>
 
-      <Card title="Tell us where you are">
-        <p className="mb-3 text-sm text-slate-600">
+      <div className="rounded-3xl border border-slate-200/90 bg-white p-6 sm:p-8 shadow-xs">
+        <h2 className="text-base font-bold text-slate-900 sm:text-lg">Tell us where you are</h2>
+        <p className="mt-1.5 mb-5 text-xs sm:text-sm text-slate-600 leading-relaxed">
           We open new areas based on where people ask for us. Leave your pincode or the name of your
           locality — nothing else, and no account needed.
         </p>
-        <ActionForm action={captureInterestAction} submitLabel="Let us know">
+        <ActionForm
+          action={captureInterestAction}
+          submitLabel="Let us know"
+          className="space-y-4"
+          submitButtonClassName="inline-flex min-h-[44px] w-full sm:w-auto items-center justify-center rounded-xl bg-emerald-700 px-6 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-800 transition disabled:opacity-50"
+        >
           <Field label="Pincode" name="pincode" maxLength={6} placeholder="500001" />
           <Field label="Locality" name="locality" maxLength={120} placeholder="Banjara Hills" />
         </ActionForm>
-      </Card>
+      </div>
 
-      <p className="text-sm text-slate-600">
+      <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 text-center text-sm text-slate-600">
         Already in one of our areas?{' '}
-        <Link href="/locality" className="text-emerald-800 underline">
+        <Link
+          href="/store/select"
+          className="inline-flex min-h-[44px] items-center font-bold text-emerald-800 underline hover:text-emerald-900"
+        >
           Choose it here
         </Link>
         .
-      </p>
-    </>
+      </div>
+    </div>
   );
 }

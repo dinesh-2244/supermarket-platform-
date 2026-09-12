@@ -567,4 +567,105 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     ).toBeVisible();
     await assertNoHorizontalScroll(page);
   });
+
+  test('Order confirmation, tracking & unserviceable pages: visual layout, >=44px touch targets & zero horizontal scroll', async ({
+    page,
+  }) => {
+    // 1. Test /unserviceable page
+    await page.goto('/unserviceable?reason=out-of-zone');
+    await expect(page.getByRole('heading', { name: /not in your area yet/i })).toBeVisible();
+    await expect(page.getByText(/just outside our delivery zones/i)).toBeVisible();
+    await expect(page.getByText('₹')).toHaveCount(0);
+
+    // Verify touch targets on unserviceable page
+    const interestForm = page.locator('form').filter({ hasText: 'Let us know' });
+    const pincodeInput = interestForm.getByLabel('Pincode');
+    const localityInput = interestForm.getByLabel('Locality');
+    const submitBtn = interestForm.getByRole('button', { name: 'Let us know' });
+    const chooseAreaLink = page.getByRole('main').getByRole('link', { name: /choose it here/i });
+
+    await expect(pincodeInput).toBeVisible();
+    await expect(localityInput).toBeVisible();
+    await expect(submitBtn).toBeVisible();
+    await expect(chooseAreaLink).toBeVisible();
+
+    const pincodeBox = await pincodeInput.boundingBox();
+    const localityBox = await localityInput.boundingBox();
+    const submitBtnBox = await submitBtn.boundingBox();
+    const chooseAreaBox = await chooseAreaLink.boundingBox();
+
+    expect(pincodeBox?.height).toBeGreaterThanOrEqual(44);
+    expect(localityBox?.height).toBeGreaterThanOrEqual(44);
+    expect(submitBtnBox?.height).toBeGreaterThanOrEqual(44);
+    expect(chooseAreaBox?.height).toBeGreaterThanOrEqual(44);
+
+    // Verify link href points to /store/select
+    expect(await chooseAreaLink.getAttribute('href')).toBe('/store/select');
+
+    await assertNoHorizontalScroll(page);
+
+    // 2. Place an order to test /order-placed and /order-status
+    await page.goto('/store/select');
+    await page.getByRole('button', { name: /shop store 1/i }).click();
+    await expect(page).toHaveURL(/\/$|\/\?/);
+
+    // Add Whole Wheat Atta (clears ₹250 minimum order threshold with a single unit)
+    await page.goto('/p/whole-wheat-atta-5kg');
+    const addForm = page.locator('form').filter({ hasText: 'Add to basket' });
+    await addForm.getByRole('button', { name: 'Add to basket' }).click();
+    await expect(addForm.getByRole('status')).toContainText(/in your basket/i);
+
+    // Go to checkout and place order
+    await page.goto('/checkout');
+    await page.getByLabel('Your name').fill('Mobile Confirmation Tester');
+    await page.getByLabel('Phone number').fill('9812300099');
+    await page.getByRole('main').getByLabel('Address line 1').fill('123 Mobile Way');
+    await page.getByRole('button', { name: 'Place order' }).click();
+
+    // 3. Verify /order-placed/[trackingToken] page
+    await expect(page).toHaveURL(/\/order-placed\/t_[0-9A-Z]{20}$/);
+    const mainPlaced = page.getByRole('main');
+    await expect(mainPlaced.getByRole('heading', { name: /your order is placed/i })).toBeVisible();
+    await expect(mainPlaced.getByText(/order number/i)).toBeVisible();
+    await expect(mainPlaced.getByText(/^S\d-\d{6}-[0-9A-Z]{5}$/)).toBeVisible();
+
+    // Verify touch targets on order-placed page
+    const trackOrderLink = mainPlaced.getByRole('link', { name: /track this order/i });
+    const keepShoppingLinkPlaced = mainPlaced.getByRole('link', { name: /keep shopping/i });
+    await expect(trackOrderLink).toBeVisible();
+    await expect(keepShoppingLinkPlaced).toBeVisible();
+
+    const trackBox = await trackOrderLink.boundingBox();
+    const keepPlacedBox = await keepShoppingLinkPlaced.boundingBox();
+    expect(trackBox?.height).toBeGreaterThanOrEqual(44);
+    expect(keepPlacedBox?.height).toBeGreaterThanOrEqual(44);
+
+    await assertNoHorizontalScroll(page);
+
+    // 4. Click track this order and verify /order-status/[trackingToken] page
+    await trackOrderLink.click();
+    await expect(page).toHaveURL(/\/order-status\/t_[0-9A-Z]{20}$/);
+
+    const mainStatus = page.getByRole('main');
+    await expect(
+      mainStatus.getByRole('heading', { name: /^Order S\d-\d{6}-[0-9A-Z]{5}$/ }),
+    ).toBeVisible();
+    await expect(mainStatus.getByRole('status')).toHaveText('Order placed');
+    await expect(mainStatus.getByRole('heading', { name: 'Progress' })).toBeVisible();
+    await expect(mainStatus.getByRole('heading', { name: 'What you ordered' })).toBeVisible();
+
+    // Invariant: zero buttons and zero forms in main
+    await expect(mainStatus.getByRole('button')).toHaveCount(0);
+    await expect(mainStatus.locator('form')).toHaveCount(0);
+    // Invariant: shopper phone number not leaked
+    await expect(mainStatus.getByText('9812300099')).toHaveCount(0);
+
+    // Verify touch target on keep shopping link
+    const keepShoppingLinkStatus = mainStatus.getByRole('link', { name: /keep shopping/i });
+    await expect(keepShoppingLinkStatus).toBeVisible();
+    const keepStatusBox = await keepShoppingLinkStatus.boundingBox();
+    expect(keepStatusBox?.height).toBeGreaterThanOrEqual(44);
+
+    await assertNoHorizontalScroll(page);
+  });
 });
