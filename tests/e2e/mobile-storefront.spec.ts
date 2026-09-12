@@ -484,4 +484,87 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
       expect(box?.height).toBeGreaterThanOrEqual(44);
     }
   });
+
+  test('Product detail page redesign: image-first layout, pricing & >=44px touch targets', async ({
+    page,
+    browser,
+  }) => {
+    // 1. Verify unauthenticated / no-store-context visitor redirects to /store/select
+    const incognito = await browser.newContext();
+    const freshPage = await incognito.newPage();
+    await freshPage.goto('/p/ragi-flour-1kg');
+    await expect(freshPage).toHaveURL(/\/store\/select$/);
+    await incognito.close();
+
+    // 2. Select Store 1 community
+    await page.goto('/store/select');
+    await page.getByRole('button', { name: /shop store 1/i }).click();
+    await expect(page).toHaveURL(/\/$|\/\?/);
+
+    // 3. Navigate to a product page with images
+    await page.goto('/p/ragi-flour-1kg');
+    await expect(page).toHaveURL(/\/p\/ragi-flour-1kg$/);
+
+    const main = page.getByRole('main');
+
+    // 4. Verify Breadcrumb landmark and navigation links
+    const breadcrumb = main.getByRole('navigation', { name: 'Breadcrumb' });
+    await expect(breadcrumb).toBeVisible();
+    await expect(breadcrumb.getByRole('link', { name: 'All products' })).toBeVisible();
+
+    // 5. Verify Product heading, brand, pack size, exact seeded pricing, MRP, saving, and discount
+    await expect(main.getByRole('heading', { level: 1, name: 'Ragi Flour' })).toBeVisible();
+    await expect(main.getByText('Annapurna').first()).toBeVisible();
+    await expect(main.getByText('1 kg').first()).toBeVisible();
+    await expect(main.getByText('₹90.25')).toBeVisible();
+    await expect(main.getByText('MRP ₹95.00')).toBeVisible();
+    await expect(main.getByText('Save ₹4.75')).toBeVisible();
+    await expect(main.getByText('5% OFF')).toBeVisible();
+    await expect(main.getByText('In stock')).toBeVisible();
+
+    // Verify backed service signals and absence of unbacked claims
+    await expect(main.getByText('Scheduled slot fresh delivery')).toBeVisible();
+    await expect(main.getByText('Live store pricing & availability')).toBeVisible();
+    await expect(main.getByText('Inclusive of all taxes')).not.toBeVisible();
+    await expect(main.getByText('Store-fresh quality guarantee')).not.toBeVisible();
+
+    // 6. Verify image showcase: exact src, alt, and real browser image load (complete & naturalWidth > 0)
+    const heroImg = main.locator('img[src="/seed/products/ragi-flour.svg"]');
+    await expect(heroImg).toBeVisible();
+    await expect(heroImg).toHaveAttribute('alt', 'A pack of ragi flour');
+    const isImgLoaded = await heroImg.evaluate(
+      (img: HTMLImageElement) => img.complete && img.naturalWidth > 0,
+    );
+    expect(isImgLoaded).toBe(true);
+
+    // 7. Verify touch targets on interactive controls (min-h >= 44px)
+    const breadcrumbLink = breadcrumb.getByRole('link', { name: 'All products' });
+    const breadcrumbBox = await breadcrumbLink.boundingBox();
+    expect(breadcrumbBox?.height).toBeGreaterThanOrEqual(44);
+
+    const qtyInput = main.getByLabel('Quantity');
+    await expect(qtyInput).toBeVisible();
+    const qtyBox = await qtyInput.boundingBox();
+    expect(qtyBox?.height).toBeGreaterThanOrEqual(44);
+
+    const addBtn = main.getByRole('button', { name: 'Add to basket' });
+    await expect(addBtn).toBeVisible();
+    const btnBox = await addBtn.boundingBox();
+    expect(btnBox?.height).toBeGreaterThanOrEqual(44);
+
+    // 8. Deterministic in-stock Add-to-basket flow (unconditional since Ragi is deterministically in stock)
+    await addBtn.click();
+    await expect(main.locator('form').getByRole('status')).toContainText(/in your basket/i);
+
+    // 9. Assert zero horizontal overflow on this viewport
+    await assertNoHorizontalScroll(page);
+
+    // 10. Verify fallback treatment for products without images
+    await page.goto('/p/sona-masoori-rice-5kg');
+    await expect(page.getByRole('main').getByText('No photo yet')).toBeVisible();
+    await expect(
+      page.getByRole('main').getByText('Product image will appear once added'),
+    ).toBeVisible();
+    await assertNoHorizontalScroll(page);
+  });
 });
