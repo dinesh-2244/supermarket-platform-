@@ -1,7 +1,13 @@
 import Link from 'next/link';
 import { requirePrincipal } from '@/auth';
 import { listStores } from '@/modules/stores';
-import { ACTIONABLE_ORDER_STATUSES, orderQueue, overview, resolveStoreId } from '@/modules/admin';
+import {
+  ACTIONABLE_ORDER_STATUSES,
+  adminHref,
+  orderQueue,
+  overview,
+  resolveStoreId,
+} from '@/modules/admin';
 import type { OrderStatus } from '@/modules/orders';
 import { Card, Empty, OrderStatusBadge, PageHeading, StatCard, StoreSwitcher, Table } from '../ui';
 
@@ -81,7 +87,7 @@ export default async function ReportsPage({
           label="Total store orders"
           value={queue.rows.length}
           subtitle="All recorded orders in store history"
-          href={`/admin/orders?store=${storeId}&all=1`}
+          href={adminHref('/admin/orders?all=1', storeId)}
           icon={
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
@@ -98,7 +104,7 @@ export default async function ReportsPage({
           label="Price variances"
           value={flaggedVarianceCount}
           subtitle="Orders requiring manager/customer check"
-          href={`/admin/orders?store=${storeId}`}
+          href={adminHref('/admin/orders', storeId)}
           urgency={flaggedVarianceCount > 0 ? 'amber' : 'default'}
           icon={
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -116,7 +122,7 @@ export default async function ReportsPage({
           label="Low stock threshold"
           value={data.lowStock.items.length}
           subtitle={`Items at or under ${String(data.lowStock.threshold)} units`}
-          href={`/admin/inventory?store=${storeId}`}
+          href={adminHref('/admin/inventory', storeId)}
           urgency={data.lowStock.items.length > 0 ? 'rose' : 'emerald'}
           icon={
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -134,7 +140,7 @@ export default async function ReportsPage({
           label="Store catalog coverage"
           value={`${data.listedCount} / ${data.productCount}`}
           subtitle={`${data.categoryCount} master categories active`}
-          href={`/admin/listings?store=${storeId}`}
+          href={adminHref('/admin/listings', storeId)}
           icon={
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
@@ -154,7 +160,7 @@ export default async function ReportsPage({
         subtitle="Distribution of all orders across the 12 lifecycle states."
         action={
           <Link
-            href={`/admin/orders?store=${storeId}`}
+            href={adminHref('/admin/orders', storeId)}
             className="inline-flex min-h-[44px] items-center text-xs font-bold text-emerald-800 underline hover:text-emerald-950"
           >
             Open orders queue &rarr;
@@ -206,7 +212,7 @@ export default async function ReportsPage({
         subtitle="Catalog inventory status and replenishment warnings."
         action={
           <Link
-            href={`/admin/inventory?store=${storeId}`}
+            href={adminHref('/admin/inventory', storeId)}
             className="inline-flex min-h-[44px] items-center text-xs font-bold text-emerald-800 underline hover:text-emerald-950"
           >
             Manage stock &rarr;

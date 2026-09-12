@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { requirePrincipal } from '@/auth';
 import { listCategories, listProductImages, listProducts, searchProducts } from '@/modules/catalog';
+import { adminHref } from '@/modules/admin';
 import {
   addProductImageAction,
   createProductAction,
@@ -25,6 +26,7 @@ export default async function ProductsPage({
 }): Promise<React.ReactElement> {
   const principal = await requirePrincipal();
   const params = await searchParams;
+  const storeId = typeof params.store === 'string' ? params.store : null;
   const query = typeof params.q === 'string' ? params.q.trim() : '';
 
   const [categories, products] = await Promise.all([
@@ -54,6 +56,7 @@ export default async function ProductsPage({
 
       <Card title="Search">
         <form method="get" className="flex flex-wrap items-end gap-3">
+          {storeId !== null ? <input type="hidden" name="store" value={storeId} /> : null}
           <label className="text-xs font-semibold text-slate-700">
             <span className="mb-1.5 block">Name or brand (typos tolerated)</span>
             <input
@@ -71,7 +74,7 @@ export default async function ProductsPage({
           </button>
           {query !== '' ? (
             <Link
-              href="/admin/products"
+              href={adminHref('/admin/products', storeId)}
               className="inline-flex min-h-[44px] items-center text-xs font-semibold text-slate-500 underline hover:text-slate-900 px-2"
             >
               clear
@@ -230,7 +233,10 @@ export default async function ProductsPage({
                       </ActionForm>
                       <Link
                         className="inline-flex min-h-[44px] items-center px-2 text-xs font-bold text-emerald-800 underline hover:text-emerald-950"
-                        href={`/admin/products?edit=${product.id}${query === '' ? '' : `&q=${encodeURIComponent(query)}`}`}
+                        href={adminHref(
+                          `/admin/products?edit=${product.id}${query === '' ? '' : `&q=${encodeURIComponent(query)}`}`,
+                          storeId,
+                        )}
                       >
                         edit
                       </Link>

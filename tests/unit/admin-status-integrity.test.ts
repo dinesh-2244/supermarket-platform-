@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ACTIONABLE_ORDER_STATUSES } from '@/modules/admin';
+import { ACTIONABLE_ORDER_STATUSES, adminHref, navigationFor } from '@/modules/admin';
 import { ORDER_STATUSES, type OrderStatus } from '@/modules/orders';
 
 /**
@@ -75,5 +75,98 @@ describe('Admin Order Status domain integrity (M3 regression guard)', () => {
     for (const state of activeStates) {
       expect(actionable.has(state), `${state} must be in actionable queue`).toBe(true);
     }
+  });
+});
+
+describe('adminHref query parameter preservation (R1 / M2 regression guard)', () => {
+  it('returns href unchanged when storeId is null, undefined, or empty', () => {
+    expect(adminHref('/admin', null)).toBe('/admin');
+    expect(adminHref('/admin', undefined)).toBe('/admin');
+    expect(adminHref('/admin', '')).toBe('/admin');
+    expect(adminHref('/admin/products?q=tea', null)).toBe('/admin/products?q=tea');
+  });
+
+  it('appends store query param when absent', () => {
+    expect(adminHref('/admin', 'store-123')).toBe('/admin?store=store-123');
+    expect(adminHref('/admin/orders', 'store-123')).toBe('/admin/orders?store=store-123');
+  });
+
+  it('preserves other existing query parameters', () => {
+    expect(adminHref('/admin/products?edit=p1&q=tea', 'store-123')).toBe(
+      '/admin/products?edit=p1&q=tea&store=store-123',
+    );
+    expect(adminHref('/admin/orders?all=1', 'store-123')).toBe(
+      '/admin/orders?all=1&store=store-123',
+    );
+  });
+
+  it('preserves existing store query parameter if already set', () => {
+    expect(adminHref('/admin/orders?store=custom-store', 'store-123')).toBe(
+      '/admin/orders?store=custom-store',
+    );
+  });
+
+  it('preserves url fragments / hashes', () => {
+    expect(adminHref('/admin#summary', 'store-123')).toBe('/admin?store=store-123#summary');
+    expect(adminHref('/admin/orders?all=1#top', 'store-123')).toBe(
+      '/admin/orders?all=1&store=store-123#top',
+    );
+  });
+});
+
+describe('navigationFor role access and information architecture (R2 / M4 regression guard)', () => {
+  it('returns exactly 10 navigation items for STORE_STAFF', () => {
+    const items = navigationFor('STORE_STAFF');
+    expect(items).toEqual([
+      { href: '/admin', label: 'Overview' },
+      { href: '/admin/orders', label: 'Orders' },
+      { href: '/admin/inventory', label: 'Inventory' },
+      { href: '/admin/listings', label: 'Listings & prices' },
+      { href: '/admin/products', label: 'Products' },
+      { href: '/admin/zones', label: 'Delivery areas' },
+      { href: '/admin/stores', label: 'Stores & settings' },
+      { href: '/admin/two-factor', label: 'Two-factor auth' },
+      { href: '/admin/fulfillment', label: 'Fulfillment' },
+      { href: '/admin/pos', label: 'POS Integration' },
+    ]);
+  });
+
+  it('returns exactly 13 navigation items for STORE_MANAGER', () => {
+    const items = navigationFor('STORE_MANAGER');
+    expect(items).toEqual([
+      { href: '/admin', label: 'Overview' },
+      { href: '/admin/orders', label: 'Orders' },
+      { href: '/admin/inventory', label: 'Inventory' },
+      { href: '/admin/listings', label: 'Listings & prices' },
+      { href: '/admin/products', label: 'Products' },
+      { href: '/admin/zones', label: 'Delivery areas' },
+      { href: '/admin/stores', label: 'Stores & settings' },
+      { href: '/admin/two-factor', label: 'Two-factor auth' },
+      { href: '/admin/fulfillment', label: 'Fulfillment' },
+      { href: '/admin/pos', label: 'POS Integration' },
+      { href: '/admin/users', label: 'Users' },
+      { href: '/admin/audit', label: 'Audit log' },
+      { href: '/admin/reports', label: 'Reports & KPIs' },
+    ]);
+  });
+
+  it('returns exactly 14 navigation items for SUPER_ADMIN', () => {
+    const items = navigationFor('SUPER_ADMIN');
+    expect(items).toEqual([
+      { href: '/admin', label: 'Overview' },
+      { href: '/admin/orders', label: 'Orders' },
+      { href: '/admin/inventory', label: 'Inventory' },
+      { href: '/admin/listings', label: 'Listings & prices' },
+      { href: '/admin/products', label: 'Products' },
+      { href: '/admin/zones', label: 'Delivery areas' },
+      { href: '/admin/stores', label: 'Stores & settings' },
+      { href: '/admin/two-factor', label: 'Two-factor auth' },
+      { href: '/admin/fulfillment', label: 'Fulfillment' },
+      { href: '/admin/pos', label: 'POS Integration' },
+      { href: '/admin/users', label: 'Users' },
+      { href: '/admin/audit', label: 'Audit log' },
+      { href: '/admin/reports', label: 'Reports & KPIs' },
+      { href: '/admin/categories', label: 'Categories' },
+    ]);
   });
 });

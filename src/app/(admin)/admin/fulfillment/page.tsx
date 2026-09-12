@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { adminHref } from '@/modules/admin';
 import { Card, PageHeading } from '../ui';
 
 export const dynamic = 'force-dynamic';
@@ -10,7 +11,13 @@ export const dynamic = 'force-dynamic';
  * short-pick, POS handoff, packing, dispatch, delivery) per Phase 5 planning,
  * without pre-building mock logic against an unbuilt backend.
  */
-export default function FulfillmentSlotPage(): React.ReactElement {
+export default async function FulfillmentSlotPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}): Promise<React.ReactElement> {
+  const params = searchParams ? await searchParams : {};
+  const storeId = typeof params.store === 'string' ? params.store : null;
   return (
     <div className="space-y-6">
       <PageHeading
@@ -76,13 +83,13 @@ export default function FulfillmentSlotPage(): React.ReactElement {
             </p>
             <div className="flex flex-wrap gap-3">
               <Link
-                href="/admin/orders"
+                href={adminHref('/admin/orders', storeId)}
                 className="inline-flex min-h-[44px] items-center justify-center rounded-xl bg-slate-900 px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-slate-800 transition"
               >
                 View orders queue &rarr;
               </Link>
               <Link
-                href="/admin"
+                href={adminHref('/admin', storeId)}
                 className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-slate-300 bg-white px-5 py-2 text-xs font-bold text-slate-700 shadow-2xs hover:bg-slate-50 transition"
               >
                 Back to overview

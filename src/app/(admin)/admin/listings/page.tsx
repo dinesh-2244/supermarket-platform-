@@ -3,7 +3,13 @@ import { requirePrincipal } from '@/auth';
 import { listStores } from '@/modules/stores';
 import { listProducts } from '@/modules/catalog';
 import { listPriceHistory } from '@/modules/pricing';
-import { formatDateTime, formatPaise, listingRows, resolveStoreId } from '@/modules/admin';
+import {
+  adminHref,
+  formatDateTime,
+  formatPaise,
+  listingRows,
+  resolveStoreId,
+} from '@/modules/admin';
 import { setListedAction, setPriceAction } from '../actions';
 import { ActionForm, Check, Field, Hidden, Select } from '../form';
 import { Card, Empty, PageHeading, StoreSwitcher, Table } from '../ui';
@@ -108,7 +114,7 @@ export default async function ListingsPage({
                   </div>
                   <Link
                     className="inline-flex min-h-[44px] items-center text-xs font-semibold text-emerald-800 underline hover:text-emerald-950"
-                    href={`/admin/listings?store=${storeId}&history=${listing.id}`}
+                    href={adminHref(`/admin/listings?history=${listing.id}`, storeId)}
                   >
                     View price history &rarr;
                   </Link>

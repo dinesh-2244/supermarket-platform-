@@ -57,6 +57,26 @@ export function formatDateTime(value: Date | null): string {
   return value.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+/**
+ * Appends or preserves the `?store=` query parameter for internal admin navigation.
+ *
+ * If `storeId` is missing/empty, returns `href` unchanged.
+ * If `href` already has an explicit `store=` parameter, preserves it.
+ * Otherwise, appends `store=${storeId}`, maintaining any other query parameters or hash.
+ */
+export function adminHref(href: string, storeId: string | null | undefined): string {
+  if (!storeId) return href;
+  const [baseAndQuery, hash] = href.split('#');
+  const [path, query] = (baseAndQuery ?? '').split('?');
+  const params = new URLSearchParams(query ?? '');
+  if (!params.has('store')) {
+    params.set('store', storeId);
+  }
+  const queryString = params.toString();
+  const fullPath = queryString ? `${path}?${queryString}` : (path ?? '');
+  return hash !== undefined ? `${fullPath}#${hash}` : fullPath;
+}
+
 /** The nav entries a principal may actually reach, so nothing dead is shown. */
 export interface NavItem {
   readonly href: string;
@@ -77,6 +97,9 @@ export function navigationFor(
     { href: '/admin/products', label: 'Products' },
     { href: '/admin/zones', label: 'Delivery areas' },
     { href: '/admin/stores', label: 'Stores & settings' },
+    { href: '/admin/two-factor', label: 'Two-factor auth' },
+    { href: '/admin/fulfillment', label: 'Fulfillment' },
+    { href: '/admin/pos', label: 'POS Integration' },
   ];
   if (role === 'STORE_STAFF') return everyone;
 
@@ -84,6 +107,7 @@ export function navigationFor(
     ...everyone,
     { href: '/admin/users', label: 'Users' },
     { href: '/admin/audit', label: 'Audit log' },
+    { href: '/admin/reports', label: 'Reports & KPIs' },
   ];
   if (role === 'STORE_MANAGER') return managers;
 

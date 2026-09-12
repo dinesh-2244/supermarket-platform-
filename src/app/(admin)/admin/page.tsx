@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requirePrincipal } from '@/auth';
-import { formatDateTime, orderQueue, overview, resolveStoreId } from '@/modules/admin';
+import { adminHref, formatDateTime, orderQueue, overview, resolveStoreId } from '@/modules/admin';
 import { hasTotpEnrolled } from '@/modules/identity';
 import { changePasswordAction } from './actions';
 import { ActionForm, Field } from './form';
@@ -28,7 +28,6 @@ export default async function OverviewPage({
   const actionableOrderCount = orders?.rows.length ?? 0;
 
   const activeStore = view.stores.find((s) => s.id === view.storeId) ?? view.stores[0];
-  const storeQuery = view.storeId ? `?store=${encodeURIComponent(view.storeId)}` : '';
 
   return (
     <div className="space-y-6">
@@ -58,7 +57,7 @@ export default async function OverviewPage({
           label="Actionable orders"
           value={actionableOrderCount}
           subtitle="Awaiting store action"
-          href={`/admin/orders${storeQuery}`}
+          href={adminHref('/admin/orders', view.storeId)}
           urgency={actionableOrderCount > 0 ? 'amber' : 'default'}
           icon={
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -76,7 +75,7 @@ export default async function OverviewPage({
           label="Low stock items"
           value={view.lowStock.items.length}
           subtitle={`At or below ${String(view.lowStock.threshold)} units`}
-          href={`/admin/inventory${storeQuery}`}
+          href={adminHref('/admin/inventory', view.storeId)}
           urgency={view.lowStock.items.length > 0 ? 'rose' : 'default'}
           icon={
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -94,7 +93,7 @@ export default async function OverviewPage({
           label="Listed products"
           value={view.listedCount}
           subtitle={`In active store (${view.productCount} master)`}
-          href={`/admin/listings${storeQuery}`}
+          href={adminHref('/admin/listings', view.storeId)}
           icon={
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
@@ -111,7 +110,7 @@ export default async function OverviewPage({
           label="Operating stores"
           value={view.stores.filter((s) => s.isActive).length}
           subtitle="Active community fulfillment hubs"
-          href={`/admin/stores${storeQuery}`}
+          href={adminHref('/admin/stores', view.storeId)}
           icon={
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
@@ -142,7 +141,7 @@ export default async function OverviewPage({
         }
         action={
           <Link
-            href={`/admin/inventory${storeQuery}`}
+            href={adminHref('/admin/inventory', view.storeId)}
             className="inline-flex min-h-[44px] items-center gap-1 text-xs font-bold text-emerald-800 hover:text-emerald-900"
           >
             Manage inventory &rarr;
@@ -181,7 +180,7 @@ export default async function OverviewPage({
               : 'Off — your password alone signs you in. Recommended for super admins.'}
           </p>
           <Link
-            href="/admin/two-factor"
+            href={adminHref('/admin/two-factor', view.storeId)}
             className="inline-flex min-h-[44px] items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs sm:text-sm font-bold text-slate-800 shadow-2xs hover:bg-slate-50 active:scale-[0.99] transition"
           >
             {twoFactor ? 'Manage two-factor authentication' : 'Set up two-factor authentication'}

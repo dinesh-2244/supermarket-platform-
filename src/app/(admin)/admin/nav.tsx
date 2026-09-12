@@ -3,7 +3,7 @@
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { RoleBadge } from './ui';
+import { adminHref, RoleBadge } from './ui';
 
 interface NavGroup {
   readonly title: string;
@@ -421,13 +421,7 @@ function NavLinksContent({
   currentStore: string | null;
   onNavigate: () => void;
 }): React.ReactElement {
-  const getHref = (href: string) => {
-    if (!currentStore) return href;
-    const [path, query] = href.split('?');
-    const params = new URLSearchParams(query ?? '');
-    params.set('store', currentStore);
-    return `${path}?${params.toString()}`;
-  };
+  const getHref = (href: string) => adminHref(href, currentStore);
 
   return (
     <nav className="flex-1 overflow-y-auto px-4 py-2 space-y-5" aria-label="Back office navigation">

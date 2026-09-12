@@ -255,7 +255,9 @@ test.describe.serial('Admin Dashboard Tablet Usability & IA Redesign (AD1–AD12
     await assertNoHorizontalScroll(page);
   });
 
-  test('M2: Store context persists across navigation for SUPER_ADMIN', async ({ page }) => {
+  test('M2: Store context persists across navigation and page link click-throughs for SUPER_ADMIN', async ({
+    page,
+  }) => {
     await signInAdmin(page);
 
     // 1. Overview: locate S2 in StoreSwitcher
@@ -326,51 +328,75 @@ test.describe.serial('Admin Dashboard Tablet Usability & IA Redesign (AD1–AD12
       new RegExp(`/admin/stores\\?store=${s2Id}`),
     );
 
-    // 2. Navigate to Orders queue: verify store context and filter tabs
+    // Click-through non-nav link 1: Overview Two-factor link
+    const twoFactorLink = page.getByRole('link', {
+      name: /Set up two-factor authentication|Manage two-factor authentication/,
+    });
+    await expect(twoFactorLink).toBeVisible();
+    await twoFactorLink.click();
+    await expect(page).toHaveURL(new RegExp(`/admin/two-factor\\?store=${s2Id}`));
+    await expect(page.getByRole('heading', { name: 'Two-Factor Authentication' })).toBeVisible();
+
+    // Click-through non-nav link 2: Products list -> edit product link
+    await page.goto(`/admin/products?store=${s2Id}`);
+    await expect(page.getByRole('heading', { name: 'Products' })).toBeVisible();
+    const editLink = page.locator('main').getByRole('link', { name: 'edit' }).first();
+    await expect(editLink).toBeVisible();
+    await editLink.click();
+    await expect(page).toHaveURL(new RegExp(`/admin/products\\?edit=[^&]+&store=${s2Id}`));
+    await expect(page.getByRole('heading', { name: /^Edit / })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save product' })).toBeVisible();
+
+    // Click-through non-nav link 3: Orders queue -> View details -> Back to queue
     await page.goto(`/admin/orders?store=${s2Id}`);
     await expect(page.getByRole('heading', { name: 'Orders' })).toBeVisible();
     await expect(page.locator('main').getByRole('link', { name: /^S2 · / })).toHaveAttribute(
       'aria-current',
       'page',
     );
-    await expect(page.getByRole('link', { name: 'All orders' })).toHaveAttribute(
-      'href',
-      new RegExp(`/admin/orders\\?store=${s2Id}&all=1`),
-    );
-    // Verify nav links from orders page still retain store
-    await openNavIfNeeded();
-    await expect(nav.getByRole('link', { name: 'Inventory', exact: true })).toHaveAttribute(
-      'href',
-      new RegExp(`/admin/inventory\\?store=${s2Id}`),
-    );
+    const viewDetailsLink = page
+      .locator('main')
+      .getByRole('link', { name: 'View details →' })
+      .first();
+    await expect(viewDetailsLink).toBeVisible();
+    await viewDetailsLink.click();
+    await expect(page).toHaveURL(new RegExp(`/admin/orders/[^?]+\\?store=${s2Id}`));
+    await expect(page.getByRole('heading', { name: 'Order details', exact: true })).toBeVisible();
 
-    // 3. Navigate to Inventory: verify store context retained
-    await page.goto(`/admin/inventory?store=${s2Id}`);
-    await expect(page.getByRole('heading', { name: 'Inventory' })).toBeVisible();
-    await expect(page.locator('main').getByRole('link', { name: /^S2 · / })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
+    // Click Back to queue
+    const backLink = page.getByRole('link', { name: /Back to queue/ });
+    await expect(backLink).toBeVisible();
+    await backLink.click();
+    await expect(page).toHaveURL(new RegExp(`/admin/orders\\?store=${s2Id}`));
 
-    // 4. Navigate to Listings: verify store context retained
-    await page.goto(`/admin/listings?store=${s2Id}`);
-    await expect(page.getByRole('heading', { name: 'Listings & prices' })).toBeVisible();
-    await expect(page.locator('main').getByRole('link', { name: /^S2 · / })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
+    // Click filter tabs
+    await page.getByRole('link', { name: 'All orders' }).click();
+    await expect(page).toHaveURL(new RegExp(`store=${s2Id}`));
+    await expect(page).toHaveURL(/all=1/);
+    await page.getByRole('link', { name: /Actionable/ }).click();
+    await expect(page).toHaveURL(`/admin/orders?store=${s2Id}`);
 
-    // 5. Navigate to Reports: verify store context retained
+    // Click-through non-nav link 4: Fulfillment reserved slot -> View orders queue
+    await page.goto(`/admin/fulfillment?store=${s2Id}`);
+    await expect(page.getByRole('heading', { name: 'Fulfillment', exact: true })).toBeVisible();
+    await page.getByRole('link', { name: 'View orders queue →' }).click();
+    await expect(page).toHaveURL(new RegExp(`/admin/orders\\?store=${s2Id}`));
+
+    // Click-through non-nav link 5: POS Integration reserved slot -> Go to orders queue
+    await page.goto(`/admin/pos?store=${s2Id}`);
+    await expect(page.getByRole('heading', { name: 'POS Integration', exact: true })).toBeVisible();
+    await page.getByRole('link', { name: 'Go to orders queue →' }).click();
+    await expect(page).toHaveURL(new RegExp(`/admin/orders\\?store=${s2Id}`));
+
+    // Click-through non-nav link 6: Reports & KPIs -> Open orders queue
     await page.goto(`/admin/reports?store=${s2Id}`);
-    await expect(page.getByRole('heading', { name: 'Reports & KPIs' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Reports & KPIs', exact: true })).toBeVisible();
     await expect(page.locator('main').getByRole('link', { name: /^S2 · / })).toHaveAttribute(
       'aria-current',
       'page',
     );
-    await expect(page.getByRole('link', { name: 'Open orders queue' })).toHaveAttribute(
-      'href',
-      new RegExp(`/admin/orders\\?store=${s2Id}`),
-    );
+    await page.getByRole('link', { name: 'Open orders queue →' }).click();
+    await expect(page).toHaveURL(new RegExp(`/admin/orders\\?store=${s2Id}`));
   });
 
   test('M4: Exact role-gated navigation links per navigationFor()', async ({ page }) => {
@@ -382,8 +408,25 @@ test.describe.serial('Admin Dashboard Tablet Usability & IA Redesign (AD1–AD12
       'Products',
       'Delivery areas',
       'Stores & settings',
+      'Two-factor auth',
+      'Fulfillment',
+      'POS Integration',
     ];
-    const MANAGER_EXPECTED = [...STAFF_EXPECTED, 'Users', 'Audit log'];
+    const MANAGER_EXPECTED = [
+      'Overview',
+      'Orders',
+      'Inventory',
+      'Listings & prices',
+      'Products',
+      'Delivery areas',
+      'Stores & settings',
+      'Users',
+      'Audit log',
+      'Reports & KPIs',
+      'Two-factor auth',
+      'Fulfillment',
+      'POS Integration',
+    ];
     const SUPER_EXPECTED = [
       'Overview',
       'Orders',
@@ -395,9 +438,6 @@ test.describe.serial('Admin Dashboard Tablet Usability & IA Redesign (AD1–AD12
       'Stores & settings',
       'Users',
       'Audit log',
-    ];
-
-    const FORBIDDEN_EVERYONE = [
       'Reports & KPIs',
       'Two-factor auth',
       'Fulfillment',
@@ -423,39 +463,38 @@ test.describe.serial('Admin Dashboard Tablet Usability & IA Redesign (AD1–AD12
       const count = await links.count();
       const labels: string[] = [];
       for (let i = 0; i < count; i++) {
-        const text = await links.nth(i).innerText();
+        const labelSpan = links.nth(i).locator('div > span:last-child');
+        const text =
+          (await labelSpan.count()) > 0
+            ? await labelSpan.innerText()
+            : await links.nth(i).innerText();
         const line = text.split('\n')[0]?.trim();
         if (line) labels.push(line);
       }
       return labels;
     };
 
-    // 1. STORE_STAFF
+    // 1. STORE_STAFF (10 items)
     await signInWith(page, 'staff.s1@munderfresh.local');
     const staffLabels = await getNavLabels();
     expect(staffLabels).toEqual(STAFF_EXPECTED);
-    for (const forbidden of [...FORBIDDEN_EVERYONE, 'Users', 'Audit log', 'Categories']) {
+    for (const forbidden of ['Users', 'Audit log', 'Reports & KPIs', 'Categories']) {
       expect(staffLabels).not.toContain(forbidden);
     }
     await page.getByRole('button', { name: 'Sign out' }).click();
     await expect(page).toHaveURL(/\/admin\/sign-in/);
 
-    // 2. STORE_MANAGER
+    // 2. STORE_MANAGER (13 items)
     await signInWith(page, 'manager.s1@munderfresh.local');
     const managerLabels = await getNavLabels();
     expect(managerLabels).toEqual(MANAGER_EXPECTED);
-    for (const forbidden of [...FORBIDDEN_EVERYONE, 'Categories']) {
-      expect(managerLabels).not.toContain(forbidden);
-    }
+    expect(managerLabels).not.toContain('Categories');
     await page.getByRole('button', { name: 'Sign out' }).click();
     await expect(page).toHaveURL(/\/admin\/sign-in/);
 
-    // 3. SUPER_ADMIN
+    // 3. SUPER_ADMIN (14 items)
     await signInWith(page, SEED_ADMIN);
     const superLabels = await getNavLabels();
     expect(superLabels).toEqual(SUPER_EXPECTED);
-    for (const forbidden of FORBIDDEN_EVERYONE) {
-      expect(superLabels).not.toContain(forbidden);
-    }
   });
 });

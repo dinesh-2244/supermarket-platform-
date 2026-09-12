@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { adminHref } from '@/modules/admin';
 import { Card, PageHeading } from '../ui';
 
 export const dynamic = 'force-dynamic';
@@ -11,7 +12,13 @@ export const dynamic = 'force-dynamic';
  * - MANUAL mode (manual POS bill entry and CSV inventory reconciliation) is a
  *   permanent first-class operating mode, not a temporary stopgap.
  */
-export default function PosIntegrationSlotPage(): React.ReactElement {
+export default async function PosIntegrationSlotPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}): Promise<React.ReactElement> {
+  const params = searchParams ? await searchParams : {};
+  const storeId = typeof params.store === 'string' ? params.store : null;
   return (
     <div className="space-y-6">
       <PageHeading
@@ -64,7 +71,7 @@ export default function PosIntegrationSlotPage(): React.ReactElement {
                 transition.
               </p>
               <Link
-                href="/admin/orders"
+                href={adminHref('/admin/orders', storeId)}
                 className="inline-flex min-h-[44px] items-center text-xs font-bold text-emerald-800 hover:text-emerald-950 underline"
               >
                 Go to orders queue &rarr;
@@ -93,7 +100,7 @@ export default function PosIntegrationSlotPage(): React.ReactElement {
                 atomic CSV reconciliation, maintaining an immutable ledger record for every SKU.
               </p>
               <Link
-                href="/admin/inventory"
+                href={adminHref('/admin/inventory', storeId)}
                 className="inline-flex min-h-[44px] items-center text-xs font-bold text-emerald-800 hover:text-emerald-950 underline"
               >
                 Go to inventory import &rarr;

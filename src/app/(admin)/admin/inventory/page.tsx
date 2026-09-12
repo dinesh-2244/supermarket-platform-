@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { requirePrincipal } from '@/auth';
 import { listStores } from '@/modules/stores';
 import { listImportHistory, listLedger, listLowStock, STOCK_REASONS } from '@/modules/inventory';
-import { formatDateTime, formatDelta, resolveStoreId, stockRows } from '@/modules/admin';
+import { adminHref, formatDateTime, formatDelta, resolveStoreId, stockRows } from '@/modules/admin';
 import { adjustStockAction, importStockAction, reconcileStockAction } from '../actions';
 import { ActionForm, Check, Field, Hidden, Select } from '../form';
 import { Card, Empty, PageHeading, StatCard, StoreSwitcher, Table } from '../ui';
@@ -188,7 +188,7 @@ export default async function InventoryPage({
                   <div className="font-bold text-slate-900">{product?.name ?? item.productId}</div>
                   <Link
                     className="inline-flex min-h-[44px] items-center text-xs font-semibold text-emerald-800 underline hover:text-emerald-950"
-                    href={`/admin/inventory?store=${storeId}&product=${item.productId}`}
+                    href={adminHref(`/admin/inventory?product=${item.productId}`, storeId)}
                   >
                     View ledger history &rarr;
                   </Link>
@@ -296,7 +296,7 @@ export default async function InventoryPage({
           </button>
           <Link
             className="inline-flex min-h-[44px] items-center text-xs font-semibold text-slate-500 hover:text-slate-900 underline px-2"
-            href={`/admin/inventory?store=${storeId}`}
+            href={adminHref('/admin/inventory', storeId)}
           >
             clear
           </Link>

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { requirePrincipal } from '@/auth';
 import { listStores } from '@/modules/stores';
-import { formatPaise, orderQueue, resolveStoreId } from '@/modules/admin';
+import { adminHref, formatPaise, orderQueue, resolveStoreId } from '@/modules/admin';
 import type { QueueRow } from '@/modules/orders';
 import { Card, Empty, OrderStatusBadge, PageHeading, StoreSwitcher, Table } from '../ui';
 
@@ -57,7 +57,7 @@ export default async function OrdersPage({
       {/* Filter Tabs */}
       <div className="flex flex-wrap items-center gap-2">
         <Link
-          href={`/admin/orders?store=${storeId}`}
+          href={adminHref('/admin/orders', storeId)}
           className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition shadow-2xs ${
             !all
               ? 'bg-slate-900 text-white'
@@ -72,7 +72,7 @@ export default async function OrdersPage({
           ) : null}
         </Link>
         <Link
-          href={`/admin/orders?store=${storeId}&all=1`}
+          href={adminHref('/admin/orders?all=1', storeId)}
           className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition shadow-2xs ${
             all
               ? 'bg-slate-900 text-white'
@@ -130,7 +130,7 @@ function Row({
     <tr className="hover:bg-slate-50/60 transition align-top">
       <td className="py-3 px-4">
         <Link
-          href={`/admin/orders/${row.id}?store=${storeId}`}
+          href={adminHref(`/admin/orders/${row.id}`, storeId)}
           className="inline-flex min-h-[44px] flex-col justify-center font-bold text-emerald-800 hover:text-emerald-950"
         >
           <span className="font-mono text-sm underline">{row.orderNumber}</span>
@@ -159,7 +159,7 @@ function Row({
       </td>
       <td className="py-3 px-4">
         <Link
-          href={`/admin/orders/${row.id}`}
+          href={adminHref(`/admin/orders/${row.id}`, storeId)}
           className="inline-flex min-h-[44px] items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-2xs hover:bg-slate-50 active:scale-[0.99] transition"
         >
           View details &rarr;

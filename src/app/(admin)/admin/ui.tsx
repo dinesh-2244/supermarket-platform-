@@ -310,3 +310,23 @@ export function RoleBadge({ role }: { role: string }): React.ReactElement {
     </span>
   );
 }
+
+/**
+ * Appends or preserves the `?store=` query parameter for internal admin navigation.
+ *
+ * If `storeId` is missing/empty, returns `href` unchanged.
+ * If `href` already has an explicit `store=` parameter, preserves it.
+ * Otherwise, appends `store=${storeId}`, maintaining any other query parameters or hash.
+ */
+export function adminHref(href: string, storeId: string | null | undefined): string {
+  if (!storeId) return href;
+  const [baseAndQuery, hash] = href.split('#');
+  const [path, query] = (baseAndQuery ?? '').split('?');
+  const params = new URLSearchParams(query ?? '');
+  if (!params.has('store')) {
+    params.set('store', storeId);
+  }
+  const queryString = params.toString();
+  const fullPath = queryString ? `${path}?${queryString}` : (path ?? '');
+  return hash !== undefined ? `${fullPath}#${hash}` : fullPath;
+}

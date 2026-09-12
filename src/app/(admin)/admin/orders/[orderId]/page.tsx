@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requirePrincipal } from '@/auth';
-import { formatPaise, orderDetail } from '@/modules/admin';
+import { adminHref, formatPaise, orderDetail } from '@/modules/admin';
 import { canCancelByStore, requiresDiscrepancyNote, type StaffOrderRow } from '@/modules/orders';
 import { cancelOrderAction, confirmRevisedAmountAction } from '../../actions';
 import { ActionForm, Field, Hidden } from '../../form';
@@ -40,7 +40,7 @@ export default async function OrderDetailPage({
         badge={<OrderStatusBadge status={order.status} />}
         action={
           <Link
-            href={`/admin/orders?store=${currentStore}`}
+            href={adminHref('/admin/orders', currentStore)}
             className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 shadow-2xs hover:bg-slate-50 active:scale-[0.99] transition"
           >
             &larr; Back to queue
