@@ -29,13 +29,23 @@ export default async function OverviewPage({
   const storeId = resolveStoreId(principal, requested, data.stores);
   const view = storeId === data.storeId ? data : await overview(principal, storeId);
 
-  // Fetch actionable orders for the active store (AD1 / AD9 authoritative read path)
-  const counts =
-    view.storeId !== null ? await orderCounts(principal, view.storeId).catch(() => null) : null;
-  const actionableOrderCount =
-    counts !== null
-      ? ACTIONABLE_ORDER_STATUSES.reduce((sum, s) => sum + (counts.byStatus[s] ?? 0), 0)
-      : 0;
+  // Fetch actionable orders for the active store (AD1 / AD9 authoritative read path).
+  // An unavailable authoritative KPI must not be swallowed into 0 (OSCAR R4 / M1).
+  let actionableOrderCount: number | 'Unavailable' = 0;
+  let orderCountUnavailable = false;
+
+  if (view.storeId !== null) {
+    try {
+      const counts = await orderCounts(principal, view.storeId);
+      actionableOrderCount = ACTIONABLE_ORDER_STATUSES.reduce(
+        (sum, s) => sum + (counts.byStatus[s] ?? 0),
+        0,
+      );
+    } catch {
+      actionableOrderCount = 'Unavailable';
+      orderCountUnavailable = true;
+    }
+  }
 
   const activeStore = view.stores.find((s) => s.id === view.storeId) ?? view.stores[0];
 
@@ -66,9 +76,17 @@ export default async function OverviewPage({
         <StatCard
           label="Actionable orders"
           value={actionableOrderCount}
-          subtitle="Awaiting store action"
+          subtitle={
+            orderCountUnavailable ? 'Reading temporarily unavailable' : 'Awaiting store action'
+          }
           href={adminHref('/admin/orders', view.storeId)}
-          urgency={actionableOrderCount > 0 ? 'amber' : 'default'}
+          urgency={
+            orderCountUnavailable
+              ? 'rose'
+              : typeof actionableOrderCount === 'number' && actionableOrderCount > 0
+                ? 'amber'
+                : 'default'
+          }
           icon={
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path

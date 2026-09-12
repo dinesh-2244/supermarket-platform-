@@ -205,4 +205,12 @@ describe('Admin Reports and Overview real aggregates integrity (M1 regression gu
     expect(overviewContent).toContain('orderCounts(principal, view.storeId)');
     expect(overviewContent).toContain('ACTIONABLE_ORDER_STATUSES.reduce');
   });
+
+  it('verifies overview/page.tsx never swallows orderCounts failures into numeral 0 (R4 / M1)', () => {
+    expect(overviewContent).not.toMatch(/orderCounts[^;]*\.catch\(\s*\(\)\s*=>\s*(null|0)/);
+    expect(overviewContent).toContain("actionableOrderCount = 'Unavailable'");
+    expect(overviewContent).toContain('orderCountUnavailable = true');
+    expect(overviewContent).toContain('Reading temporarily unavailable');
+    expect(overviewContent).toMatch(/orderCountUnavailable\s*\?\s*['"]rose['"]/);
+  });
 });

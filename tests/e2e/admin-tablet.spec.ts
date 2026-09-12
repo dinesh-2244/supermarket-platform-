@@ -591,4 +591,42 @@ test.describe.serial('Admin Dashboard Tablet Usability & IA Redesign (AD1–AD12
       });
     }
   });
+
+  test('R4/M1: Overview displays explicit Unavailable state and never numeral 0 when orderCounts fails', async ({
+    page,
+  }) => {
+    await signInAdmin(page);
+
+    const prisma = getPrisma();
+
+    // Reproduce Oscar's live failure test: break the order query by renaming the table
+    await prisma.$executeRawUnsafe('ALTER TABLE "Order" RENAME TO "Order_simulated_failure"');
+
+    try {
+      await page.goto('/admin');
+      await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
+
+      // Actionable orders card MUST NOT display numeral 0; it must display "Unavailable"
+      const actionableCard = page.getByRole('link', { name: /Actionable orders/ });
+      await expect(actionableCard).toBeVisible();
+      await expect(actionableCard).toContainText('Unavailable');
+      await expect(actionableCard).toContainText('Reading temporarily unavailable');
+      await expect(actionableCard).not.toContainText(/\b0\b/);
+
+      // Other cards on overview (e.g. Operating stores) still function and display
+      const operatingStoresCard = page.getByRole('link', { name: /Operating stores/ });
+      await expect(operatingStoresCard).toBeVisible();
+    } finally {
+      // Restore the table immediately
+      await prisma
+        .$executeRawUnsafe('ALTER TABLE "Order_simulated_failure" RENAME TO "Order"')
+        .catch(() => null);
+    }
+
+    // Verify recovery after restoration
+    await page.goto('/admin');
+    const recoveredCard = page.getByRole('link', { name: /Actionable orders/ });
+    await expect(recoveredCard).toBeVisible();
+    await expect(recoveredCard).not.toContainText('Unavailable');
+  });
 });
