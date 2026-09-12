@@ -28,8 +28,9 @@ export default function AboutPage(): React.ReactElement {
           </h1>
           <p className="mt-3 text-sm sm:text-base text-emerald-100 leading-relaxed">
             Munder Fresh was built to solve a simple problem: residential communities need fresh,
-            reliable daily groceries delivered in predictable time windows without surprise markups,
-            distant dark stores, or missing items.
+            reliable daily groceries delivered in predictable time windows, with live stock and
+            pricing shown straight from their community's dedicated store — no distant dark stores,
+            no surprise markups.
           </p>
         </div>
         <div className="absolute -right-8 -bottom-8 opacity-15 pointer-events-none text-9xl">
@@ -111,10 +112,10 @@ export default function AboutPage(): React.ReactElement {
 
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col">
             <span className="text-2xl">🥦</span>
-            <h3 className="mt-3 text-sm font-bold text-slate-900">Morning Fresh Sourcing</h3>
+            <h3 className="mt-3 text-sm font-bold text-slate-900">One Hub, One Community</h3>
             <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-              Vegetables, fruits, and dairy are sourced fresh every morning directly from vetted
-              local producers and markets.
+              Each community is served by a single dedicated store hub, not a shared regional
+              warehouse — so what's stocked there is what's actually available to you.
             </p>
           </div>
 
@@ -131,8 +132,8 @@ export default function AboutPage(): React.ReactElement {
             <span className="text-2xl">🛡️</span>
             <h3 className="mt-3 text-sm font-bold text-slate-900">Pay at Doorstep</h3>
             <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-              Pay via Cash on Delivery or UPI once your order is handed over. Zero prepayment
-              friction or cancellation penalties.
+              Pay via Cash on Delivery or UPI once your order is handed over — no prepayment
+              required.
             </p>
           </div>
         </div>
