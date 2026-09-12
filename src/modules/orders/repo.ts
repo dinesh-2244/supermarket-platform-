@@ -269,6 +269,52 @@ export async function listForPrincipal(
   });
 }
 
+export interface CustomerOrderRow {
+  readonly id: string;
+  readonly orderNumber: string;
+  readonly trackingToken: string;
+  readonly status: OrderStatus;
+  readonly placedAt: Date;
+  readonly deliverySlotStart: Date;
+  readonly deliverySlotEnd: Date;
+  readonly estimatedTotalPaise: number;
+  readonly store: { readonly name: string; readonly timezone: string };
+}
+
+/**
+ * A shopper's own orders, newest first.
+ *
+ * Scoped by `customerId` **here**, for the same reason `listForPrincipal` scopes
+ * by store: the query is the one place the filter cannot be forgotten, so it can
+ * never return another shopper's row whatever the caller passed. Served by the
+ * `(customerId, placedAt)` index. A history list carries neither lines nor the
+ * address snapshot — the tracking page has those, and the token links to it.
+ */
+export async function listForCustomer(
+  db: DbExecutor,
+  customerId: string,
+  filter: { limit?: number },
+): Promise<CustomerOrderRow[]> {
+  return executor(db).order.findMany({
+    where: { customerId },
+    select: {
+      id: true,
+      orderNumber: true,
+      trackingToken: true,
+      status: true,
+      placedAt: true,
+      deliverySlotStart: true,
+      deliverySlotEnd: true,
+      estimatedTotalPaise: true,
+      store: { select: { name: true, timezone: true } },
+    },
+    // `id` breaks the tie for orders placed in the same instant, so paging
+    // never sees one twice or skips one.
+    orderBy: [{ placedAt: 'desc' }, { id: 'desc' }],
+    take: filter.limit ?? 50,
+  });
+}
+
 export interface StaffOrderRow extends QueueRow {
   readonly paymentMethod: 'COD' | 'UPI_ON_DELIVERY';
   readonly subtotalPaise: number;
