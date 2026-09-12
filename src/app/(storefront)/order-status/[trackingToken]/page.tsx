@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { orderForTracking, type TimelineStep } from '@/modules/orders';
+import { orderForTracking, type TimelineStep, type OrderStatus } from '@/modules/orders';
 import { rupees } from '../../ui';
 
 export const metadata: Metadata = {
@@ -10,6 +10,178 @@ export const metadata: Metadata = {
   // The token is the credential; a search engine holding one would be a leak.
   robots: { index: false, follow: false },
 };
+
+type StatusTone = 'active' | 'success' | 'warning' | 'error';
+type StatusIconType = 'clock' | 'check' | 'alert' | 'cross';
+
+interface StatusPresentation {
+  readonly tone: StatusTone;
+  readonly bannerClasses: string;
+  readonly iconBadgeClasses: string;
+  readonly dotClasses: string;
+  readonly icon: StatusIconType;
+}
+
+/**
+ * Exhaustive presentation mapping by OrderStatus (OSCAR PR #42 corrective).
+ *
+ * Distinct visual tones and markers:
+ * - Active / in-progress (PLACED, ACCEPTED, PICKING, PICKED, BILLED_IN_POS, PACKED, OUT_FOR_DELIVERY): blue neutral with clock icon
+ * - Completed / delivered (DELIVERED, CLOSED): emerald success with checkmark
+ * - Non-terminal delivery issue (DELIVERY_FAILED): amber warning with alert icon
+ * - Terminal negative / cancelled (CANCELLED_BY_STORE, CLOSED_UNDELIVERED): red error with cross icon
+ */
+const STATUS_PRESENTATION: Readonly<Record<OrderStatus, StatusPresentation>> = {
+  PLACED: {
+    tone: 'active',
+    bannerClasses: 'border-blue-200 bg-blue-50 text-blue-950',
+    iconBadgeClasses: 'bg-blue-200 text-blue-900',
+    dotClasses: 'bg-blue-600',
+    icon: 'clock',
+  },
+  ACCEPTED: {
+    tone: 'active',
+    bannerClasses: 'border-blue-200 bg-blue-50 text-blue-950',
+    iconBadgeClasses: 'bg-blue-200 text-blue-900',
+    dotClasses: 'bg-blue-600',
+    icon: 'clock',
+  },
+  PICKING: {
+    tone: 'active',
+    bannerClasses: 'border-blue-200 bg-blue-50 text-blue-950',
+    iconBadgeClasses: 'bg-blue-200 text-blue-900',
+    dotClasses: 'bg-blue-600',
+    icon: 'clock',
+  },
+  PICKED: {
+    tone: 'active',
+    bannerClasses: 'border-blue-200 bg-blue-50 text-blue-950',
+    iconBadgeClasses: 'bg-blue-200 text-blue-900',
+    dotClasses: 'bg-blue-600',
+    icon: 'clock',
+  },
+  BILLED_IN_POS: {
+    tone: 'active',
+    bannerClasses: 'border-blue-200 bg-blue-50 text-blue-950',
+    iconBadgeClasses: 'bg-blue-200 text-blue-900',
+    dotClasses: 'bg-blue-600',
+    icon: 'clock',
+  },
+  PACKED: {
+    tone: 'active',
+    bannerClasses: 'border-blue-200 bg-blue-50 text-blue-950',
+    iconBadgeClasses: 'bg-blue-200 text-blue-900',
+    dotClasses: 'bg-blue-600',
+    icon: 'clock',
+  },
+  OUT_FOR_DELIVERY: {
+    tone: 'active',
+    bannerClasses: 'border-blue-200 bg-blue-50 text-blue-950',
+    iconBadgeClasses: 'bg-blue-200 text-blue-900',
+    dotClasses: 'bg-blue-600',
+    icon: 'clock',
+  },
+  DELIVERED: {
+    tone: 'success',
+    bannerClasses: 'border-emerald-200 bg-emerald-50 text-emerald-950',
+    iconBadgeClasses: 'bg-emerald-200 text-emerald-900',
+    dotClasses: 'bg-emerald-600',
+    icon: 'check',
+  },
+  CLOSED: {
+    tone: 'success',
+    bannerClasses: 'border-emerald-200 bg-emerald-50 text-emerald-950',
+    iconBadgeClasses: 'bg-emerald-200 text-emerald-900',
+    dotClasses: 'bg-emerald-600',
+    icon: 'check',
+  },
+  DELIVERY_FAILED: {
+    tone: 'warning',
+    bannerClasses: 'border-amber-200 bg-amber-50 text-amber-950',
+    iconBadgeClasses: 'bg-amber-200 text-amber-900',
+    dotClasses: 'bg-amber-600',
+    icon: 'alert',
+  },
+  CANCELLED_BY_STORE: {
+    tone: 'error',
+    bannerClasses: 'border-red-200 bg-red-50 text-red-950',
+    iconBadgeClasses: 'bg-red-200 text-red-900',
+    dotClasses: 'bg-red-600',
+    icon: 'cross',
+  },
+  CLOSED_UNDELIVERED: {
+    tone: 'error',
+    bannerClasses: 'border-red-200 bg-red-50 text-red-950',
+    iconBadgeClasses: 'bg-red-200 text-red-900',
+    dotClasses: 'bg-red-600',
+    icon: 'cross',
+  },
+};
+
+function StatusIcon({ icon }: { icon: StatusIconType }): React.ReactElement {
+  switch (icon) {
+    case 'clock':
+      return (
+        <svg
+          className="h-3.5 w-3.5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2.5}
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
+        </svg>
+      );
+    case 'check':
+      return (
+        <svg
+          className="h-3.5 w-3.5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={3}
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+      );
+    case 'alert':
+      return (
+        <svg
+          className="h-3.5 w-3.5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2.5}
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
+          />
+        </svg>
+      );
+    case 'cross':
+      return (
+        <svg
+          className="h-3.5 w-3.5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={3}
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      );
+  }
+}
 
 /**
  * The guest order-status page (D5).
@@ -35,7 +207,7 @@ export default async function OrderStatusPage({
   const order = await orderForTracking(trackingToken);
   if (order === null) notFound();
 
-  const cancelled = order.status === 'CANCELLED_BY_STORE';
+  const presentation = STATUS_PRESENTATION[order.status];
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 py-2 sm:py-6">
@@ -48,31 +220,15 @@ export default async function OrderStatusPage({
 
       <div className="rounded-3xl border border-slate-200/90 bg-white p-6 sm:p-8 shadow-xs space-y-5">
         <div
-          className={`flex items-center gap-2.5 rounded-2xl border px-4 py-3.5 text-sm sm:text-base font-bold ${
-            cancelled
-              ? 'border-red-200 bg-red-50 text-red-800'
-              : 'border-emerald-200 bg-emerald-50 text-emerald-950'
-          }`}
+          data-status={order.status}
+          data-tone={presentation.tone}
+          className={`flex items-center gap-2.5 rounded-2xl border px-4 py-3.5 text-sm sm:text-base font-bold ${presentation.bannerClasses}`}
         >
           <span
-            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-black ${
-              cancelled ? 'bg-red-200 text-red-900' : 'bg-emerald-200 text-emerald-900'
-            }`}
+            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-black ${presentation.iconBadgeClasses}`}
             aria-hidden="true"
           >
-            <svg
-              className="h-3.5 w-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={3}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d={cancelled ? 'M6 18L18 6M6 6l12 12' : 'M5 13l4 4L19 7'}
-              />
-            </svg>
+            <StatusIcon icon={presentation.icon} />
           </span>
           <p role="status">{order.statusLabel}</p>
         </div>
@@ -172,6 +328,7 @@ function Row({
  * would be told something true and useless.
  */
 function Step({ step, timeZone }: { step: TimelineStep; timeZone: string }): React.ReactElement {
+  const presentation = STATUS_PRESENTATION[step.status];
   const when = new Intl.DateTimeFormat('en-IN', {
     timeZone,
     day: 'numeric',
@@ -183,7 +340,12 @@ function Step({ step, timeZone }: { step: TimelineStep; timeZone: string }): Rea
 
   return (
     <li className="relative flex flex-wrap items-baseline justify-between gap-2 text-sm pl-2">
-      <span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full bg-emerald-600 ring-4 ring-white" />
+      <span
+        data-step-status={step.status}
+        data-step-tone={presentation.tone}
+        className={`absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full ring-4 ring-white ${presentation.dotClasses}`}
+        aria-hidden="true"
+      />
       <span className="font-semibold text-slate-900">{step.label}</span>
       <time
         dateTime={step.at.toISOString()}

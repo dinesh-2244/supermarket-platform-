@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { getPrisma } from '@/modules/platform';
 
 /**
  * Mobile-First Acceptance Suite for Customer Storefront Retail Redesign (D1–D7).
@@ -570,7 +571,7 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
 
   test('Order confirmation, tracking & unserviceable pages: visual layout, >=44px touch targets & zero horizontal scroll', async ({
     page,
-  }) => {
+  }, testInfo) => {
     // 1. Test /unserviceable page
     await page.goto('/unserviceable?reason=out-of-zone');
     await expect(page.getByRole('heading', { name: /not in your area yet/i })).toBeVisible();
@@ -620,6 +621,15 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     await page.getByLabel('Your name').fill('Mobile Confirmation Tester');
     await page.getByLabel('Phone number').fill('9812300099');
     await page.getByRole('main').getByLabel('Address line 1').fill('123 Mobile Way');
+
+    // Select delivery slot with low parallel contention across workers
+    const slotSelect = page.getByLabel('Delivery window');
+    const slotOptions = await slotSelect.locator('option').all();
+    if (slotOptions.length > 2) {
+      const slotIndex = Math.min(slotOptions.length - 1, (testInfo.parallelIndex % 10) + 3);
+      await slotSelect.selectOption({ index: slotIndex });
+    }
+
     await page.getByRole('button', { name: 'Place order' }).click();
 
     // 3. Verify /order-placed/[trackingToken] page
@@ -650,7 +660,6 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     await expect(
       mainStatus.getByRole('heading', { name: /^Order S\d-\d{6}-[0-9A-Z]{5}$/ }),
     ).toBeVisible();
-    await expect(mainStatus.getByRole('status')).toHaveText('Order placed');
     await expect(mainStatus.getByRole('heading', { name: 'Progress' })).toBeVisible();
     await expect(mainStatus.getByRole('heading', { name: 'What you ordered' })).toBeVisible();
 
@@ -665,6 +674,152 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     await expect(keepShoppingLinkStatus).toBeVisible();
     const keepStatusBox = await keepShoppingLinkStatus.boundingBox();
     expect(keepStatusBox?.height).toBeGreaterThanOrEqual(44);
+
+    await assertNoHorizontalScroll(page);
+
+    // 5. Exhaustive OrderStatus presentation coverage (OSCAR PR #42 corrective M1)
+    const trackingTokenMatch = /\/order-status\/(t_[0-9A-Z]{20})$/.exec(page.url());
+    expect(trackingTokenMatch).toBeTruthy();
+    const trackingToken = trackingTokenMatch?.[1];
+    expect(trackingToken).toBeDefined();
+    if (!trackingToken) throw new Error('Tracking token not found in URL');
+
+    const prisma = getPrisma();
+    const orderRecord = await prisma.order.findUniqueOrThrow({
+      where: { trackingToken },
+    });
+
+    const statusBanner = mainStatus.locator('[data-status]');
+
+    // 5a. Active state (PLACED): blue tone, clock icon, blue timeline dot
+    await expect(mainStatus.getByRole('status')).toHaveText('Order placed');
+    await expect(statusBanner).toHaveAttribute('data-status', 'PLACED');
+    await expect(statusBanner).toHaveAttribute('data-tone', 'active');
+    await expect(statusBanner).toHaveClass(/border-blue-200 bg-blue-50 text-blue-950/);
+    await expect(mainStatus.locator('[data-step-status="PLACED"]')).toHaveClass(/bg-blue-600/);
+
+    // 5b. Active state (OUT_FOR_DELIVERY): blue tone, clock icon, blue timeline dot
+    await prisma.$transaction([
+      prisma.order.update({
+        where: { id: orderRecord.id },
+        data: { status: 'OUT_FOR_DELIVERY' },
+      }),
+      prisma.orderStatusHistory.create({
+        data: {
+          orderId: orderRecord.id,
+          fromStatus: 'PLACED',
+          toStatus: 'OUT_FOR_DELIVERY',
+          actorType: 'SYSTEM',
+        },
+      }),
+    ]);
+    await page.reload();
+    await expect(mainStatus.getByRole('status')).toHaveText('Out for delivery');
+    await expect(statusBanner).toHaveAttribute('data-status', 'OUT_FOR_DELIVERY');
+    await expect(statusBanner).toHaveAttribute('data-tone', 'active');
+    await expect(statusBanner).toHaveClass(/border-blue-200 bg-blue-50 text-blue-950/);
+    await expect(mainStatus.locator('[data-step-status="OUT_FOR_DELIVERY"]')).toHaveClass(
+      /bg-blue-600/,
+    );
+
+    // 5c. Warning state (DELIVERY_FAILED): amber tone, alert icon, amber timeline dot
+    await prisma.$transaction([
+      prisma.order.update({
+        where: { id: orderRecord.id },
+        data: { status: 'DELIVERY_FAILED' },
+      }),
+      prisma.orderStatusHistory.create({
+        data: {
+          orderId: orderRecord.id,
+          fromStatus: 'OUT_FOR_DELIVERY',
+          toStatus: 'DELIVERY_FAILED',
+          actorType: 'SYSTEM',
+          note: 'Customer address gate locked',
+        },
+      }),
+    ]);
+    await page.reload();
+    await expect(mainStatus.getByRole('status')).toHaveText('Delivery attempt failed');
+    await expect(statusBanner).toHaveAttribute('data-status', 'DELIVERY_FAILED');
+    await expect(statusBanner).toHaveAttribute('data-tone', 'warning');
+    await expect(statusBanner).toHaveClass(/border-amber-200 bg-amber-50 text-amber-950/);
+    await expect(mainStatus.locator('[data-step-status="DELIVERY_FAILED"]')).toHaveClass(
+      /bg-amber-600/,
+    );
+
+    // 5d. Terminal negative state (CLOSED_UNDELIVERED): red tone, cross icon, red timeline dot
+    await prisma.$transaction([
+      prisma.order.update({
+        where: { id: orderRecord.id },
+        data: { status: 'CLOSED_UNDELIVERED' },
+      }),
+      prisma.orderStatusHistory.create({
+        data: {
+          orderId: orderRecord.id,
+          fromStatus: 'DELIVERY_FAILED',
+          toStatus: 'CLOSED_UNDELIVERED',
+          actorType: 'SYSTEM',
+          note: 'Undelivered order closed',
+        },
+      }),
+    ]);
+    await page.reload();
+    await expect(mainStatus.getByRole('status')).toHaveText('Closed — not delivered');
+    await expect(statusBanner).toHaveAttribute('data-status', 'CLOSED_UNDELIVERED');
+    await expect(statusBanner).toHaveAttribute('data-tone', 'error');
+    await expect(statusBanner).toHaveClass(/border-red-200 bg-red-50 text-red-950/);
+    await expect(mainStatus.locator('[data-step-status="CLOSED_UNDELIVERED"]')).toHaveClass(
+      /bg-red-600/,
+    );
+
+    // 5e. Cancellation state (CANCELLED_BY_STORE): red tone, cross icon, red timeline dot
+    await prisma.$transaction([
+      prisma.order.update({
+        where: { id: orderRecord.id },
+        data: { status: 'CANCELLED_BY_STORE' },
+      }),
+      prisma.orderStatusHistory.create({
+        data: {
+          orderId: orderRecord.id,
+          fromStatus: 'CLOSED_UNDELIVERED',
+          toStatus: 'CANCELLED_BY_STORE',
+          actorType: 'USER',
+          note: 'Cancelled by store manager',
+        },
+      }),
+    ]);
+    await page.reload();
+    await expect(mainStatus.getByRole('status')).toHaveText('Cancelled by the shop');
+    await expect(statusBanner).toHaveAttribute('data-status', 'CANCELLED_BY_STORE');
+    await expect(statusBanner).toHaveAttribute('data-tone', 'error');
+    await expect(statusBanner).toHaveClass(/border-red-200 bg-red-50 text-red-950/);
+    await expect(mainStatus.locator('[data-step-status="CANCELLED_BY_STORE"]')).toHaveClass(
+      /bg-red-600/,
+    );
+
+    // 5f. Completed / delivered state (DELIVERED): emerald tone, check icon, emerald timeline dot
+    await prisma.$transaction([
+      prisma.order.update({
+        where: { id: orderRecord.id },
+        data: { status: 'DELIVERED' },
+      }),
+      prisma.orderStatusHistory.create({
+        data: {
+          orderId: orderRecord.id,
+          fromStatus: 'CANCELLED_BY_STORE',
+          toStatus: 'DELIVERED',
+          actorType: 'SYSTEM',
+        },
+      }),
+    ]);
+    await page.reload();
+    await expect(mainStatus.getByRole('status')).toHaveText('Delivered');
+    await expect(statusBanner).toHaveAttribute('data-status', 'DELIVERED');
+    await expect(statusBanner).toHaveAttribute('data-tone', 'success');
+    await expect(statusBanner).toHaveClass(/border-emerald-200 bg-emerald-50 text-emerald-950/);
+    await expect(mainStatus.locator('[data-step-status="DELIVERED"]')).toHaveClass(
+      /bg-emerald-600/,
+    );
 
     await assertNoHorizontalScroll(page);
   });
