@@ -290,6 +290,10 @@ CI runs typecheck → lint → format → unit + coverage → `npm audit` → bu
 every PR, plus an integration job against a `postgres:16` service container.
 Playwright runs on `main`.
 
+Reviewers reproduce a candidate independently — own clone at the exact commit,
+own PostgreSQL, own probes — in a disposable container: see
+[`docs/review-runtime.md`](docs/review-runtime.md) (`scripts/review-runtime.sh`).
+
 ## Security baseline
 
 No card data is ever handled (COD / UPI-on-delivery only). Secrets come from the
