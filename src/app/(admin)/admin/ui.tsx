@@ -220,6 +220,7 @@ export function StoreSwitcher({
           <Link
             key={store.id}
             href={`${basePath}?store=${store.id}`}
+            aria-current={isSelected ? 'page' : undefined}
             className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition shadow-2xs active:scale-[0.99] ${
               isSelected
                 ? 'border border-emerald-800 bg-emerald-800 text-white'
