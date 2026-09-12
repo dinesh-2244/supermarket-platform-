@@ -29,6 +29,7 @@ import * as repo from './repo';
 import {
   assertTransition,
   canCancelByStore,
+  ORDER_STATUSES,
   requiresDiscrepancyNote,
   type OrderStatus,
   type OrderTransitionEvent,
@@ -465,6 +466,54 @@ export async function queueForStore(
 ): Promise<repo.QueueRow[]> {
   assertAuthorized(principal, 'order:read', { type: 'Order', storeId });
   return repo.listForPrincipal(getPrisma(), principal, { storeId, ...filter });
+}
+
+/** Exact, store-scoped order counts for the reports screen. */
+export interface OrderCounts {
+  readonly storeId: string;
+  readonly total: number;
+  /** Every status is present, zero where the store has none. */
+  readonly byStatus: Readonly<Record<OrderStatus, number>>;
+  /** Orders whose POS total exceeded the estimate (R6), by status. */
+  readonly flaggedByStatus: Readonly<Record<OrderStatus, number>>;
+  readonly priceVarianceFlagged: number;
+}
+
+function zeroByStatus(): Record<OrderStatus, number> {
+  return Object.fromEntries(ORDER_STATUSES.map((status) => [status, 0])) as Record<
+    OrderStatus,
+    number
+  >;
+}
+
+/**
+ * The store's order census: totals by status and by price-variance state.
+ *
+ * Authorized and scoped exactly as {@link queueForStore} is — the same
+ * `order:read` check against the store asked for, and the repository's scope
+ * filter on top — but it is a `COUNT`, not a page of rows, so the reports
+ * screen gets the real number rather than however many rows a list returns.
+ */
+export async function orderCountsForStore(
+  principal: Principal,
+  storeId: string,
+): Promise<OrderCounts> {
+  assertAuthorized(principal, 'order:read', { type: 'Order', storeId });
+  const cells = await repo.countByStatusAndVariance(getPrisma(), principal, storeId);
+
+  const byStatus = zeroByStatus();
+  const flaggedByStatus = zeroByStatus();
+  let total = 0;
+  let priceVarianceFlagged = 0;
+  for (const cell of cells) {
+    byStatus[cell.status] += cell.count;
+    total += cell.count;
+    if (cell.priceVarianceFlagged) {
+      flaggedByStatus[cell.status] += cell.count;
+      priceVarianceFlagged += cell.count;
+    }
+  }
+  return { storeId, total, byStatus, flaggedByStatus, priceVarianceFlagged };
 }
 
 /**

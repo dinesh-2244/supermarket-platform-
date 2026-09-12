@@ -315,6 +315,39 @@ export async function listForCustomer(
   });
 }
 
+export interface OrderCountCell {
+  readonly status: OrderStatus;
+  readonly priceVarianceFlagged: boolean;
+  readonly count: number;
+}
+
+/**
+ * How many orders the store has in each (status, variance-flag) cell — a real
+ * `COUNT … GROUP BY`, so the answer is exact however many orders there are.
+ *
+ * The reports screen used to derive its totals from `listForPrincipal`, which
+ * is a *page* (`take` 200) and was never a census; past 200 orders it reported
+ * the cap as the total. The store scope is applied here for the same reason
+ * it is in `listForPrincipal`: the query is the one place it cannot be
+ * forgotten. Cells with no orders are absent; the service zero-fills.
+ */
+export async function countByStatusAndVariance(
+  db: DbExecutor,
+  principal: Principal,
+  storeId: string,
+): Promise<OrderCountCell[]> {
+  const rows = await executor(db).order.groupBy({
+    by: ['status', 'priceVarianceFlagged'],
+    where: { ...storeScopeFilter(principal), storeId },
+    _count: { _all: true },
+  });
+  return rows.map((row) => ({
+    status: row.status,
+    priceVarianceFlagged: row.priceVarianceFlagged,
+    count: row._count._all,
+  }));
+}
+
 export interface StaffOrderRow extends QueueRow {
   readonly paymentMethod: 'COD' | 'UPI_ON_DELIVERY';
   readonly subtotalPaise: number;

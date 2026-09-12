@@ -80,6 +80,30 @@ export async function listVisibleStores(
   });
 }
 
+/**
+ * How many of the principal's stores are active and how many are not — a
+ * `COUNT … GROUP BY isActive` under the same scope as `listVisibleStores`.
+ * The overview used to show `stores.length` as "active stores", which counted
+ * a deactivated shop as operating.
+ */
+export async function countVisibleStores(
+  principal: Principal,
+  db?: DbExecutor,
+): Promise<{ active: number; inactive: number }> {
+  const rows = await executor(db).store.groupBy({
+    by: ['isActive'],
+    where: storeScopeFilter(principal, 'id'),
+    _count: { _all: true },
+  });
+  let active = 0;
+  let inactive = 0;
+  for (const row of rows) {
+    if (row.isActive) active += row._count._all;
+    else inactive += row._count._all;
+  }
+  return { active, inactive };
+}
+
 export async function findStore(id: string, db?: DbExecutor): Promise<StoreRecord | null> {
   return executor(db).store.findUnique({ where: { id }, select: storeSelect });
 }
