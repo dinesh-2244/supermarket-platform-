@@ -5,6 +5,7 @@ import { adminHref } from '@/modules/admin';
 import {
   addProductImageAction,
   createProductAction,
+  deactivateProductAction,
   editProductAction,
   moveProductImageAction,
   removeProductImageAction,
@@ -126,7 +127,28 @@ export default async function ProductsPage({
               defaultValue={openProduct.categoryId}
               width="w-44"
             />
+            <Check label="Active" name="isActive" defaultChecked={openProduct.isActive} />
           </ActionForm>
+
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+            <span className="text-xs font-medium text-slate-500">
+              Product status:{' '}
+              {openProduct.isActive ? (
+                <span className="font-bold text-emerald-800">Active</span>
+              ) : (
+                <span className="font-bold text-slate-500">Inactive / Deactivated</span>
+              )}
+            </span>
+            {openProduct.isActive ? (
+              <ActionForm
+                action={deactivateProductAction}
+                submitLabel="Deactivate product"
+                submitButtonClassName="inline-flex min-h-[44px] items-center justify-center rounded-xl bg-rose-50 text-rose-800 border border-rose-200 px-3 py-1.5 text-xs font-bold shadow-xs hover:bg-rose-100 transition"
+              >
+                <Hidden name="productId" value={openProduct.id} />
+              </ActionForm>
+            ) : null}
+          </div>
 
           <div className="mt-6 border-t border-slate-100 pt-4">
             <h3 className="mb-3 text-sm font-bold text-slate-900">Product Images</h3>

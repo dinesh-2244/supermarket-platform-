@@ -140,9 +140,11 @@ function priceForm(admin: Page, product: Fixture = FIXTURE): ReturnType<Page['lo
 
 async function currentPrice(admin: Page, product: Fixture = FIXTURE): Promise<Price> {
   const form = priceForm(admin, product);
+  const mrpRupees = Number(await form.getByLabel('MRP (₹)').inputValue());
+  const sellingRupees = Number(await form.getByLabel('Selling price (₹)').inputValue());
   return {
-    mrpPaise: Number(await form.getByLabel('MRP (paise)').inputValue()),
-    sellingPricePaise: Number(await form.getByLabel('Selling (paise)').inputValue()),
+    mrpPaise: Math.round(mrpRupees * 100),
+    sellingPricePaise: Math.round(sellingRupees * 100),
   };
 }
 
@@ -156,8 +158,8 @@ async function currentPrice(admin: Page, product: Fixture = FIXTURE): Promise<Pr
  */
 async function setPrice(admin: Page, price: Price, product: Fixture = FIXTURE): Promise<void> {
   const form = priceForm(admin, product);
-  await form.getByLabel('MRP (paise)').fill(String(price.mrpPaise));
-  await form.getByLabel('Selling (paise)').fill(String(price.sellingPricePaise));
+  await form.getByLabel('MRP (₹)').fill((price.mrpPaise / 100).toFixed(2));
+  await form.getByLabel('Selling price (₹)').fill((price.sellingPricePaise / 100).toFixed(2));
   await form.getByRole('button', { name: 'Set price' }).click();
   await expect(form.getByRole('status')).toContainText(/Price saved/i);
 }

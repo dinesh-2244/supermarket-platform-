@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { signIn, signOut, requirePrincipal } from '@/auth';
 import { isAppError, ValidationError } from '@/modules/platform';
 import { safeNextPath } from '@/modules/admin';
+import { MAX_PAISE, parseRupeesToPaise } from './price-parser';
 import {
   changeOwnPassword,
   confirmTotpEnrolment,
@@ -28,6 +29,7 @@ import {
   createCategory,
   listProductImages,
   createProduct,
+  deactivateProduct,
   removeProductImage,
   reorderProductImages,
   updateCategory,
@@ -90,7 +92,7 @@ function int(form: FormData, key: string, label = key): number {
     });
   }
   const value = Number(raw);
-  if (!Number.isSafeInteger(value)) {
+  if (!Number.isSafeInteger(value) || value > MAX_PAISE) {
     throw new ValidationError(`${label} is out of range`, { field: key, value: raw });
   }
   return value;
@@ -361,11 +363,28 @@ export async function createProductAction(_state: ActionState, form: FormData): 
 export async function updateProductAction(_state: ActionState, form: FormData): Promise<string> {
   return run(async () => {
     const principal = await requirePrincipal();
-    await updateProduct(principal, text(form, 'productId'), {
-      isActive: checked(form, 'isActive'),
-    });
+    const productId = text(form, 'productId');
+    const isActive = checked(form, 'isActive');
+    if (!isActive) {
+      const product = await deactivateProduct(principal, productId);
+      revalidatePath('/admin/products');
+      return `${product.name} deactivated.`;
+    }
+    const product = await updateProduct(principal, productId, { isActive: true });
     revalidatePath('/admin/products');
-    return 'Product updated.';
+    return `${product.name} activated.`;
+  });
+}
+
+export async function deactivateProductAction(
+  _state: ActionState,
+  form: FormData,
+): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const product = await deactivateProduct(principal, text(form, 'productId'));
+    revalidatePath('/admin/products');
+    return `${product.name} deactivated.`;
   });
 }
 
@@ -373,12 +392,18 @@ export async function updateProductAction(_state: ActionState, form: FormData): 
 export async function editProductAction(_state: ActionState, form: FormData): Promise<string> {
   return run(async () => {
     const principal = await requirePrincipal();
-    const product = await updateProduct(principal, text(form, 'productId'), {
+    const productId = text(form, 'productId');
+    const isActive = checked(form, 'isActive');
+    const product = await updateProduct(principal, productId, {
       name: text(form, 'name'),
       brand: optionalText(form, 'brand') ?? null,
       packSize: text(form, 'packSize'),
       categoryId: text(form, 'categoryId'),
+      ...(isActive ? { isActive: true } : {}),
     });
+    if (!isActive) {
+      await deactivateProduct(principal, productId);
+    }
     revalidatePath('/admin/products');
     return `${product.name} saved.`;
   });
@@ -438,6 +463,19 @@ export async function moveProductImageAction(_state: ActionState, form: FormData
 export async function setPriceAction(_state: ActionState, form: FormData): Promise<string> {
   return run(async () => {
     const principal = await requirePrincipal();
+
+    // The form displays/inputs rupees with decimals (MRP (₹) and Selling price (₹)).
+    // If rupee inputs are present, strictly parse to integer paise before reading paise.
+    if (form.has('mrp') && !form.has('mrpPaise')) {
+      const paise = parseRupeesToPaise(text(form, 'mrp'), 'mrp', 'MRP');
+      form.set('mrpPaise', String(paise));
+    }
+
+    if (form.has('sellingPrice') && !form.has('sellingPricePaise')) {
+      const paise = parseRupeesToPaise(text(form, 'sellingPrice'), 'sellingPrice', 'Selling price');
+      form.set('sellingPricePaise', String(paise));
+    }
+
     await setPrice(principal, text(form, 'storeId'), text(form, 'productId'), {
       mrpPaise: int(form, 'mrpPaise', 'MRP'),
       sellingPricePaise: int(form, 'sellingPricePaise', 'Selling price'),

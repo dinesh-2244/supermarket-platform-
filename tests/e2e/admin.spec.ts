@@ -112,8 +112,8 @@ test.describe.serial('back office', () => {
     const priceForm = page.locator('form').filter({ hasText: 'Set price' }).first();
     // Derived from this row's own MRP rather than hardcoded: selling price must
     // stay at or below MRP, and the seed prices differ per product.
-    const mrp = Number(await priceForm.getByLabel('MRP (paise)').inputValue());
-    await priceForm.getByLabel('Selling (paise)').fill(String(mrp - 100));
+    const mrp = Number(await priceForm.getByLabel('MRP (₹)').inputValue());
+    await priceForm.getByLabel('Selling price (₹)').fill((mrp - 1.0).toFixed(2));
     await priceForm.getByLabel('Reason').fill('e2e');
     await priceForm.getByRole('button', { name: 'Set price' }).click();
     await expect(page.getByRole('status').first()).toContainText(/Price saved/i);
@@ -284,8 +284,8 @@ test.describe.serial('back office', () => {
     await firstPrice
       .getByLabel('Product')
       .selectOption({ label: `E2E-SKU-${run} · E2E Product ${run}` });
-    await firstPrice.getByLabel('MRP (paise)').fill('20000');
-    await firstPrice.getByLabel('Selling (paise)').fill('18000');
+    await firstPrice.getByLabel('MRP (₹)').fill('200.00');
+    await firstPrice.getByLabel('Selling price (₹)').fill('180.00');
     await firstPrice.getByRole('button', { name: 'Set first price' }).click();
     await expect(page.getByRole('status').first()).toContainText(/Price saved/i);
 
@@ -335,6 +335,30 @@ test.describe.serial('back office', () => {
     await page.getByRole('button', { name: 'Remove' }).first().click();
     await expect(page.getByRole('cell', { name: 'https://cdn.example/e2e-2.jpg' })).toHaveCount(0);
     await expect(page.getByRole('cell', { name: 'https://cdn.example/e2e-1.jpg' })).toBeVisible();
+
+    // Deactivate: deactivate the product and verify inactive status
+    const deactivateForm = page.locator('form').filter({ hasText: 'Deactivate product' });
+    await expect(deactivateForm).toBeVisible();
+    await deactivateForm.getByRole('button', { name: 'Deactivate product' }).click();
+    await expect(page.getByText('Inactive / Deactivated')).toBeVisible();
+
+    // Reactivate via Active checkbox in the edit form
+    await edit.getByLabel('Active').check();
+    await edit.getByRole('button', { name: 'Save product' }).click();
+    await expect(edit.getByRole('status')).toContainText(/saved/i);
+    await expect(page.getByText('Product status: Active')).toBeVisible();
+
+    // M2: uncheck Active in edit drawer, save, and verify product becomes inactive
+    await edit.getByLabel('Active').uncheck();
+    await edit.getByRole('button', { name: 'Save product' }).click();
+    await expect(edit.getByRole('status')).toContainText(/saved/i);
+    await expect(page.getByText('Inactive / Deactivated')).toBeVisible();
+
+    // Re-check Active and save to restore active status
+    await edit.getByLabel('Active').check();
+    await edit.getByRole('button', { name: 'Save product' }).click();
+    await expect(edit.getByRole('status')).toContainText(/saved/i);
+    await expect(page.getByText('Product status: Active')).toBeVisible();
   });
 
   test('a failed import can be diagnosed from its downloadable report and corrected', async ({
