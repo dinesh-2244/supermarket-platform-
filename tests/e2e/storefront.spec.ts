@@ -57,10 +57,10 @@ test.describe.serial('storefront', () => {
     await pickFirstArea(page);
 
     await page.goto('/');
-    await expect(page).not.toHaveURL(/\/locality$/);
+    await expect(page).not.toHaveURL(/\/store\/select$|\/locality$/);
 
     await page.getByRole('button', { name: /change delivery area/i }).click();
-    await expect(page).toHaveURL(/\/locality$/);
+    await expect(page).toHaveURL(/\/store\/select$/);
     // Forgetting the area really forgets it.
     await page.goto('/');
     await expect(page.locator('article')).toHaveCount(0);

@@ -25,12 +25,14 @@ export function PageHeading({
 export function Card({
   title,
   children,
+  className,
 }: {
   title?: string;
   children: React.ReactNode;
+  className?: string;
 }): React.ReactElement {
   return (
-    <section className="mb-4 rounded border border-slate-200 bg-white p-4">
+    <section className={className ?? 'mb-4 rounded border border-slate-200 bg-white p-4'}>
       {title !== undefined ? <h2 className="mb-3 font-medium">{title}</h2> : null}
       {children}
     </section>

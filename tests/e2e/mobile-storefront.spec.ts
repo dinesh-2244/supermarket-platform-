@@ -235,4 +235,91 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     await expect(alert).toBeVisible();
     await expect(alert).toContainText(/your basket is empty/i);
   });
+
+  test('Basket page redesign: mobile layout, image thumbnails, touch targets and /store/select redirect', async ({
+    page,
+    context,
+  }) => {
+    // 1. Unselected visitor visiting /cart is redirected to /store/select
+    await context.clearCookies();
+    await page.goto('/cart');
+    await expect(page).toHaveURL(/\/store\/select$/);
+
+    // 2. Select Store 1 Community
+    await page.getByRole('button', { name: /shop store 1/i }).click();
+    await expect(page).toHaveURL(/\/$|\/\?/);
+
+    // 3. Visit empty basket
+    await page.goto('/cart');
+    await expect(page.getByText(/your basket is empty/i)).toBeVisible();
+    const startShoppingLink = page.getByRole('link', { name: 'Start shopping' });
+    await expect(startShoppingLink).toBeVisible();
+    const startBox = await startShoppingLink.boundingBox();
+    expect(startBox?.height).toBeGreaterThanOrEqual(44);
+
+    // 4. Add a product with a known seeded image (Ragi Flour)
+    await page.goto('/c/staples');
+    const ragiCard = page.locator('article').filter({ hasText: 'Ragi Flour' });
+    await expect(ragiCard).toBeVisible();
+    const addBtn = ragiCard.getByRole('button', { name: /add .* to basket/i });
+    await addBtn.click();
+    await expect(ragiCard.getByRole('button', { name: /^increase quantity/i })).toBeVisible();
+
+    // 5. Navigate to /cart
+    await page.goto('/cart');
+    await expect(page).toHaveURL(/\/cart$/);
+    await expect(page.getByRole('heading', { name: 'Your basket' })).toBeVisible();
+
+    // M1: Verify active community badge is a real Link to /store/select with >=44px touch target
+    const communityBadge = page.getByRole('main').getByRole('link', { name: 'Store 1 Community' });
+    await expect(communityBadge).toBeVisible();
+    await expect(communityBadge).toHaveAttribute('href', '/store/select');
+    const badgeBox = await communityBadge.boundingBox();
+    expect(badgeBox?.height).toBeGreaterThanOrEqual(44);
+
+    // M2: Verify Continue shopping link meets >=44px touch target
+    const continueShoppingLink = page.getByRole('link', { name: /continue shopping/i });
+    await expect(continueShoppingLink).toBeVisible();
+    const continueBox = await continueShoppingLink.boundingBox();
+    expect(continueBox?.height).toBeGreaterThanOrEqual(44);
+
+    // S1: Verify cart row product thumbnail renders actual <img> with expected seeded src
+    const cartRow = page.locator('li').filter({ hasText: 'Ragi Flour' });
+    await expect(cartRow).toBeVisible();
+    const thumbImg = cartRow.locator('img');
+    await expect(thumbImg).toBeVisible();
+    await expect(thumbImg).toHaveAttribute('src', '/seed/products/ragi-flour.svg');
+
+    // Verify quantity and remove controls meet >=44px touch targets
+    const updateBtn = cartRow
+      .locator('form')
+      .filter({ hasText: 'Update' })
+      .getByRole('button', { name: 'Update' });
+    await expect(updateBtn).toBeVisible();
+    const updateBox = await updateBtn.boundingBox();
+    expect(updateBox?.height).toBeGreaterThanOrEqual(44);
+    expect(updateBox?.width).toBeGreaterThanOrEqual(44);
+
+    const removeBtn = cartRow
+      .locator('form')
+      .filter({ hasText: 'Remove' })
+      .getByRole('button', { name: 'Remove' });
+    await expect(removeBtn).toBeVisible();
+    const removeBox = await removeBtn.boundingBox();
+    expect(removeBox?.height).toBeGreaterThanOrEqual(44);
+    expect(removeBox?.width).toBeGreaterThanOrEqual(44);
+
+    // Verify Proceed to checkout link meets >=44px touch target
+    const checkoutLink = page.getByRole('link', { name: 'Proceed to checkout' });
+    await expect(checkoutLink).toBeVisible();
+    const checkoutBox = await checkoutLink.boundingBox();
+    expect(checkoutBox?.height).toBeGreaterThanOrEqual(44);
+
+    // Verify zero horizontal scroll on mobile viewport
+    await assertNoHorizontalScroll(page);
+
+    // M1: Verify clicking the active community badge navigates to /store/select
+    await communityBadge.click();
+    await expect(page).toHaveURL(/\/store\/select$/);
+  });
 });

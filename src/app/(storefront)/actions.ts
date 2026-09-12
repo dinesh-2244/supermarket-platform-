@@ -122,7 +122,7 @@ export async function chooseAreaAction(
  */
 export async function clearAreaAction(): Promise<void> {
   await clearStoreContext();
-  redirect('/locality');
+  redirect('/store/select');
 }
 
 /**
