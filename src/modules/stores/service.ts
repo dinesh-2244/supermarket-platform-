@@ -45,6 +45,19 @@ export async function listStores(principal: Principal): Promise<readonly repo.St
   return repo.listVisibleStores(principal);
 }
 
+export interface StoreCounts {
+  readonly total: number;
+  readonly active: number;
+  readonly inactive: number;
+}
+
+/** The stores the principal may see, counted by `isActive` — for the overview's badge. */
+export async function storeCounts(principal: Principal): Promise<StoreCounts> {
+  assertAuthorized(principal, 'store:read', { type: 'Store', storeId: scopeOf(principal) });
+  const { active, inactive } = await repo.countVisibleStores(principal);
+  return { total: active + inactive, active, inactive };
+}
+
 export async function getStore(principal: Principal, storeId: string): Promise<repo.StoreRecord> {
   const store = await repo.findStore(storeId);
   if (store === null) throw new NotFoundError('Store not found', { storeId });
