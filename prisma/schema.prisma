@@ -422,18 +422,22 @@ model PosSkuMap {
 // ---------------------------------------------------------------------------
 
 model User {
-  id              String    @id @default(uuid())
-  email           String    @unique
-  passwordHash    String
-  name            String
-  role            UserRole
+  id                   String    @id @default(uuid())
+  email                String    @unique
+  passwordHash         String
+  name                 String
+  role                 UserRole
   /// Null only for SUPER_ADMIN, who is not scoped to a store.
-  storeId         String?
-  isActive        Boolean   @default(true)
-  twoFactorSecret String?
-  lastLoginAt     DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  storeId              String?
+  isActive             Boolean   @default(true)
+  twoFactorSecret      String?
+  /// The TOTP step (RFC 6238 counter) of the last code accepted, so a code
+  /// cannot be accepted twice inside its own thirty seconds. Steps since the
+  /// Unix epoch fit an Int until the year 4000. Null until a code is accepted.
+  twoFactorLastCounter Int?
+  lastLoginAt          DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   store        Store?              @relation(fields: [storeId], references: [id])
   sessions     Session[]

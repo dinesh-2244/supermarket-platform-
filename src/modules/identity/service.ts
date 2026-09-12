@@ -35,7 +35,7 @@ import {
   type PrincipalSource,
 } from './domain/index';
 import * as repo from './repo';
-import { generateTotpSecret, otpauthUri, verifyTotpCode } from './domain/totp';
+import { generateTotpSecret, matchTotpCode, otpauthUri } from './domain/totp';
 
 /** What this module owns and is allowed to depend on (§4). */
 export function moduleDescriptor(): ModuleDescriptor {
@@ -131,6 +131,15 @@ async function verifyPassword(email: string, password: string): Promise<Authenti
  * undifferentiated `null`. A missing or wrong code is not distinguishable from
  * a wrong password, so the form cannot be used to discover *who* has 2FA on.
  *
+ * A code is good **once**. The step it came from is recorded on the account
+ * and a code from that step, or an earlier one, is refused afterwards even
+ * while the window would still accept it (RFC 6238 §5.2) — so a code seen in
+ * flight cannot be replayed for the rest of its thirty seconds. The record is
+ * a conditional write, so two sign-ins racing with the same code cannot both
+ * win — and it names the secret the code was checked against, so a request
+ * that reaches its claim after that factor was withdrawn (or replaced) is
+ * refused too. A replay is refused with the same undifferentiated `null`.
+ *
  * `lastLoginAt` is stamped here rather than in {@link verifyPassword}: it
  * records a sign-in, not every time someone retypes their password.
  */
@@ -144,7 +153,11 @@ export async function verifyCredentials(
   if (user === null) return null;
 
   const secret = await repo.findTwoFactorSecret(user.id);
-  if (secret !== null && !(await verifyTotpCode(secret, totpCode, now))) return null;
+  if (secret !== null) {
+    const counter = await matchTotpCode(secret, totpCode, now);
+    if (counter === null) return null;
+    if (!(await repo.claimTotpCounter(user.id, secret, counter))) return null;
+  }
 
   await repo.touchLastLogin(user.id);
   return user;
@@ -527,7 +540,8 @@ export async function confirmTotpEnrolment(
   if ((await verifyPassword(user.email, input.password)) === null) {
     throw new ValidationError('That password is not correct', {});
   }
-  if (!(await verifyTotpCode(input.secret, input.code, now))) {
+  const counter = await matchTotpCode(input.secret, input.code, now);
+  if (counter === null) {
     throw new ValidationError(
       'That code does not match — check your authenticator and try the next one',
       {},
@@ -538,7 +552,7 @@ export async function confirmTotpEnrolment(
   }
 
   await withTransaction(async (tx) => {
-    if (!(await repo.enrolTwoFactorSecret(tx, principal.userId, input.secret))) {
+    if (!(await repo.enrolTwoFactorSecret(tx, principal.userId, input.secret, counter))) {
       // Somebody else enrolled between the read above and this write. Throwing
       // inside the transaction rolls the audit row back with it.
       throw new ConflictError('A second factor is already enrolled — disable it first', {});
@@ -579,12 +593,22 @@ export async function disableTotp(
   if ((await verifyPassword(user.email, input.password)) === null) {
     throw new ValidationError('That password is not correct', {});
   }
-  if (!(await verifyTotpCode(secret, input.code, now))) {
+  const counter = await matchTotpCode(secret, input.code, now);
+  if (counter === null) {
     throw new ValidationError('That code does not match', {});
   }
 
   await withTransaction(async (tx) => {
-    await repo.clearTwoFactorSecret(tx, principal.userId);
+    // A replayed code cannot withdraw the factor either, and a withdrawal
+    // queued behind another one of the same factor finds it already gone.
+    // Both checks are inside the transaction so a refusal rolls the audit row
+    // back with it.
+    if (!(await repo.claimTotpCounter(principal.userId, secret, counter, tx))) {
+      throw new ValidationError('That code has already been used', {});
+    }
+    if (!(await repo.clearTwoFactorSecret(tx, principal.userId, secret))) {
+      throw new ConflictError('That second factor has already been withdrawn', {});
+    }
     await writeAuditLog(tx, {
       principal,
       action: 'update',

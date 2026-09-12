@@ -64,20 +64,75 @@ export async function enrolTwoFactorSecret(
   tx: Tx,
   userId: string,
   secret: string,
+  acceptedCounter: number,
 ): Promise<boolean> {
   const { count } = await auditedExecutor(tx).user.updateMany({
     where: { id: userId, twoFactorSecret: null },
-    data: { twoFactorSecret: secret },
+    // The confirming code has been *used*: it must not sign the account in
+    // as well, so it is recorded exactly as a sign-in would record it.
+    data: { twoFactorSecret: secret, twoFactorLastCounter: acceptedCounter },
   });
   return count === 1;
 }
 
-/** Withdraw a second factor. */
-export async function clearTwoFactorSecret(tx: Tx, userId: string): Promise<void> {
-  await auditedExecutor(tx).user.update({
-    where: { id: userId },
+/**
+ * Withdraw a second factor — **the one the caller verified a code from**.
+ *
+ * Conditional on the stored secret still being that one, and answered by row
+ * count. The claim in front of this (see `disableTotp`) is what turns away a
+ * withdrawal queued behind another of the same factor; this condition is the
+ * second line, so the function cannot remove a factor other than the one it
+ * was told about, whoever calls it.
+ *
+ * The step record is deliberately **left in place** (H1). Blanking it here
+ * re-opened the claim: a sign-in queued on the row with the same code was
+ * re-checked after this committed, saw an empty record, and used the code a
+ * second time. The next enrolment overwrites the record with its own accepted
+ * step, so nothing needs it cleared.
+ */
+export async function clearTwoFactorSecret(
+  tx: Tx,
+  userId: string,
+  expectedSecret: string,
+): Promise<boolean> {
+  const { count } = await auditedExecutor(tx).user.updateMany({
+    where: { id: userId, twoFactorSecret: expectedSecret },
     data: { twoFactorSecret: null },
   });
+  return count === 1;
+}
+
+/**
+ * Record that a code from `counter` has been accepted — **only if it is later
+ * than the last one, and the account still holds the secret the code was
+ * checked against**. Returns whether it was.
+ *
+ * This is the replay guard, and it is a compare-and-set the database arbitrates
+ * for the same reason enrolment is: two sign-ins carrying the same code at the
+ * same instant must not both be told yes. A counter no greater than the one
+ * already stored is the same code, or an older one, being used again.
+ *
+ * The secret is part of the predicate (H1) because the check and the claim are
+ * two statements with a gap between them: a request that verified factor A can
+ * reach its claim after A has been withdrawn and B enrolled. Its counter may
+ * well be ahead of B's record; what it is not is a code for the factor the
+ * account now holds. Binding the claim to A is what refuses it.
+ */
+export async function claimTotpCounter(
+  userId: string,
+  expectedSecret: string,
+  counter: number,
+  db?: DbExecutor,
+): Promise<boolean> {
+  const { count } = await executor(db).user.updateMany({
+    where: {
+      id: userId,
+      twoFactorSecret: expectedSecret,
+      OR: [{ twoFactorLastCounter: null }, { twoFactorLastCounter: { lt: counter } }],
+    },
+    data: { twoFactorLastCounter: counter },
+  });
+  return count === 1;
 }
 
 /** Columns safe to return from a list — never `passwordHash` or `twoFactorSecret`. */

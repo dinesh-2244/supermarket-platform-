@@ -4,6 +4,7 @@ import {
   base32Encode,
   counterFor,
   generateTotpSecret,
+  matchTotpCode,
   otpauthUri,
   totpCodeAt,
   totpCodeFor,
@@ -138,6 +139,40 @@ describe('verifyTotpCode', () => {
     // of minutes ago is no longer worth anything.
     const stale = await totpCodeAt(secret, now);
     expect(await verifyTotpCode(secret, stale, now + 5 * step)).toBe(false);
+  });
+});
+
+describe('matchTotpCode', () => {
+  // The replay guard needs to know *which* step a code came from, not only
+  // that one matched: the counter it returns is what sign-in records, so the
+  // same code cannot be accepted twice within its own thirty seconds.
+  const secret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+  const now = Date.UTC(2026, 8, 10, 12, 0, 30);
+  const step = TOTP_PERIOD_SECONDS * 1000;
+
+  it('names the step the code came from', async () => {
+    expect(await matchTotpCode(secret, await totpCodeAt(secret, now), now)).toBe(counterFor(now));
+    expect(await matchTotpCode(secret, await totpCodeAt(secret, now - step), now)).toBe(
+      counterFor(now) - 1,
+    );
+    expect(await matchTotpCode(secret, await totpCodeAt(secret, now + step), now)).toBe(
+      counterFor(now) + 1,
+    );
+  });
+
+  it('is null outside the window, for another secret, and for a malformed code', async () => {
+    expect(await matchTotpCode(secret, await totpCodeAt(secret, now + 2 * step), now)).toBeNull();
+    expect(
+      await matchTotpCode(generateTotpSecret(), await totpCodeAt(secret, now), now),
+    ).toBeNull();
+    expect(await matchTotpCode(secret, '12345', now)).toBeNull();
+  });
+
+  it('is what verifyTotpCode answers from', async () => {
+    const code = await totpCodeAt(secret, now);
+    expect(await verifyTotpCode(secret, code, now)).toBe(
+      (await matchTotpCode(secret, code, now)) !== null,
+    );
   });
 });
 
