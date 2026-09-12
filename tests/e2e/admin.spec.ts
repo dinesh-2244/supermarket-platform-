@@ -346,6 +346,19 @@ test.describe.serial('back office', () => {
     await edit.getByLabel('Active').check();
     await edit.getByRole('button', { name: 'Save product' }).click();
     await expect(edit.getByRole('status')).toContainText(/saved/i);
+    await expect(page.getByText('Product status: Active')).toBeVisible();
+
+    // M2: uncheck Active in edit drawer, save, and verify product becomes inactive
+    await edit.getByLabel('Active').uncheck();
+    await edit.getByRole('button', { name: 'Save product' }).click();
+    await expect(edit.getByRole('status')).toContainText(/saved/i);
+    await expect(page.getByText('Inactive / Deactivated')).toBeVisible();
+
+    // Re-check Active and save to restore active status
+    await edit.getByLabel('Active').check();
+    await edit.getByRole('button', { name: 'Save product' }).click();
+    await expect(edit.getByRole('status')).toContainText(/saved/i);
+    await expect(page.getByText('Product status: Active')).toBeVisible();
   });
 
   test('a failed import can be diagnosed from its downloadable report and corrected', async ({

@@ -245,10 +245,10 @@ describe('Admin pricing inputs & product deactivation integrity', () => {
     expect(formContent).toContain('min={min}');
   });
 
-  it('verifies actions.ts converts rupee inputs using fromRupees and keeps integer paise contract', () => {
-    expect(actionsContent).toContain('fromRupees');
-    expect(actionsContent).toContain("form.set('mrpPaise', String(fromRupees(num)))");
-    expect(actionsContent).toContain("form.set('sellingPricePaise', String(fromRupees(num)))");
+  it('verifies actions.ts strictly parses rupee inputs via parseRupeesToPaise and keeps integer paise contract', () => {
+    expect(actionsContent).toContain('parseRupeesToPaise');
+    expect(actionsContent).toContain("form.set('mrpPaise', String(paise))");
+    expect(actionsContent).toContain("form.set('sellingPricePaise', String(paise))");
     expect(actionsContent).toContain("mrpPaise: int(form, 'mrpPaise', 'MRP')");
     expect(actionsContent).toContain(
       "sellingPricePaise: int(form, 'sellingPricePaise', 'Selling price')",

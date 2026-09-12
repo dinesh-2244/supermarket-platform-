@@ -3,8 +3,9 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { signIn, signOut, requirePrincipal } from '@/auth';
-import { fromRupees, isAppError, ValidationError } from '@/modules/platform';
+import { isAppError, ValidationError } from '@/modules/platform';
 import { safeNextPath } from '@/modules/admin';
+import { MAX_PAISE, parseRupeesToPaise } from './price-parser';
 import {
   changeOwnPassword,
   confirmTotpEnrolment,
@@ -91,7 +92,7 @@ function int(form: FormData, key: string, label = key): number {
     });
   }
   const value = Number(raw);
-  if (!Number.isSafeInteger(value)) {
+  if (!Number.isSafeInteger(value) || value > MAX_PAISE) {
     throw new ValidationError(`${label} is out of range`, { field: key, value: raw });
   }
   return value;
@@ -392,14 +393,17 @@ export async function editProductAction(_state: ActionState, form: FormData): Pr
   return run(async () => {
     const principal = await requirePrincipal();
     const productId = text(form, 'productId');
-    const isActive = form.has('isActive') ? checked(form, 'isActive') : undefined;
+    const isActive = checked(form, 'isActive');
     const product = await updateProduct(principal, productId, {
       name: text(form, 'name'),
       brand: optionalText(form, 'brand') ?? null,
       packSize: text(form, 'packSize'),
       categoryId: text(form, 'categoryId'),
-      ...(isActive !== undefined ? { isActive } : {}),
+      ...(isActive ? { isActive: true } : {}),
     });
+    if (!isActive) {
+      await deactivateProduct(principal, productId);
+    }
     revalidatePath('/admin/products');
     return `${product.name} saved.`;
   });
@@ -461,32 +465,15 @@ export async function setPriceAction(_state: ActionState, form: FormData): Promi
     const principal = await requirePrincipal();
 
     // The form displays/inputs rupees with decimals (MRP (₹) and Selling price (₹)).
-    // If rupee inputs are present, convert to integer paise via fromRupees before reading paise.
+    // If rupee inputs are present, strictly parse to integer paise before reading paise.
     if (form.has('mrp') && !form.has('mrpPaise')) {
-      const raw = text(form, 'mrp');
-      if (raw === '') throw new ValidationError('MRP is required', { field: 'mrp' });
-      const num = Number(raw);
-      if (!Number.isFinite(num) || num < 0) {
-        throw new ValidationError(`MRP must be a valid non-negative rupee amount, not "${raw}"`, {
-          field: 'mrp',
-          value: raw,
-        });
-      }
-      form.set('mrpPaise', String(fromRupees(num)));
+      const paise = parseRupeesToPaise(text(form, 'mrp'), 'mrp', 'MRP');
+      form.set('mrpPaise', String(paise));
     }
 
     if (form.has('sellingPrice') && !form.has('sellingPricePaise')) {
-      const raw = text(form, 'sellingPrice');
-      if (raw === '')
-        throw new ValidationError('Selling price is required', { field: 'sellingPrice' });
-      const num = Number(raw);
-      if (!Number.isFinite(num) || num < 0) {
-        throw new ValidationError(
-          `Selling price must be a valid non-negative rupee amount, not "${raw}"`,
-          { field: 'sellingPrice', value: raw },
-        );
-      }
-      form.set('sellingPricePaise', String(fromRupees(num)));
+      const paise = parseRupeesToPaise(text(form, 'sellingPrice'), 'sellingPrice', 'Selling price');
+      form.set('sellingPricePaise', String(paise));
     }
 
     await setPrice(principal, text(form, 'storeId'), text(form, 'productId'), {
