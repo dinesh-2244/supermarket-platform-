@@ -484,4 +484,70 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
       expect(box?.height).toBeGreaterThanOrEqual(44);
     }
   });
+
+  test('Product detail page redesign: image-first layout, pricing & >=44px touch targets', async ({
+    page,
+    browser,
+  }) => {
+    // 1. Verify unauthenticated / no-store-context visitor redirects to /store/select
+    const incognito = await browser.newContext();
+    const freshPage = await incognito.newPage();
+    await freshPage.goto('/p/ragi-flour-1kg');
+    await expect(freshPage).toHaveURL(/\/store\/select$/);
+    await incognito.close();
+
+    // 2. Select Store 1 community
+    await page.goto('/store/select');
+    await page.getByRole('button', { name: /shop store 1/i }).click();
+    await expect(page).toHaveURL(/\/$|\/\?/);
+
+    // 3. Navigate to a product page with images
+    await page.goto('/p/ragi-flour-1kg');
+    await expect(page).toHaveURL(/\/p\/ragi-flour-1kg$/);
+
+    const main = page.getByRole('main');
+
+    // 4. Verify Breadcrumb landmark and navigation links
+    const breadcrumb = main.getByRole('navigation', { name: 'Breadcrumb' });
+    await expect(breadcrumb).toBeVisible();
+    await expect(breadcrumb.getByRole('link', { name: 'All products' })).toBeVisible();
+
+    // 5. Verify Product heading and pricing
+    await expect(main.getByRole('heading', { level: 1 })).toBeVisible();
+    await expect(main.getByText('₹').first()).toBeVisible();
+
+    // 6. Verify image showcase container & image loaded
+    const images = main.locator('img');
+    await expect(images.first()).toBeVisible();
+
+    // 7. Verify touch targets on interactive controls (min-h >= 44px)
+    const breadcrumbLink = breadcrumb.getByRole('link', { name: 'All products' });
+    const breadcrumbBox = await breadcrumbLink.boundingBox();
+    expect(breadcrumbBox?.height).toBeGreaterThanOrEqual(44);
+
+    const addOrOosBtn = main.getByRole('button', { name: /add to basket|out of stock/i });
+    await expect(addOrOosBtn).toBeVisible();
+    const btnBox = await addOrOosBtn.boundingBox();
+    expect(btnBox?.height).toBeGreaterThanOrEqual(44);
+
+    // 8. If in stock, test quantity input touch target and adding to basket
+    const addBtn = main.getByRole('button', { name: 'Add to basket' });
+    if (await addBtn.isVisible()) {
+      const qtyInput = main.getByLabel('Quantity');
+      await expect(qtyInput).toBeVisible();
+      const qtyBox = await qtyInput.boundingBox();
+      expect(qtyBox?.height).toBeGreaterThanOrEqual(44);
+
+      await addBtn.click();
+      await expect(main.locator('form').getByRole('status')).toContainText(/in your basket/i);
+    }
+
+    // 9. Assert zero horizontal overflow on this viewport
+    await assertNoHorizontalScroll(page);
+
+    // 10. Verify fallback treatment for products without images
+    await page.goto('/p/sona-masoori-rice-5kg');
+    await expect(page.getByRole('main').getByText('No photo yet')).toBeVisible();
+    await assertNoHorizontalScroll(page);
+  });
 });
