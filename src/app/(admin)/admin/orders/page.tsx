@@ -108,7 +108,7 @@ export default async function OrdersPage({
             ]}
           >
             {queue.rows.map((row) => (
-              <Row key={row.id} row={row} timeZone={timeZone} />
+              <Row key={row.id} row={row} timeZone={timeZone} storeId={storeId} />
             ))}
           </Table>
         )}
@@ -117,12 +117,20 @@ export default async function OrdersPage({
   );
 }
 
-function Row({ row, timeZone }: { row: QueueRow; timeZone: string }): React.ReactElement {
+function Row({
+  row,
+  timeZone,
+  storeId,
+}: {
+  row: QueueRow;
+  timeZone: string;
+  storeId: string;
+}): React.ReactElement {
   return (
     <tr className="hover:bg-slate-50/60 transition align-top">
       <td className="py-3 px-4">
         <Link
-          href={`/admin/orders/${row.id}`}
+          href={`/admin/orders/${row.id}?store=${storeId}`}
           className="inline-flex min-h-[44px] flex-col justify-center font-bold text-emerald-800 hover:text-emerald-950"
         >
           <span className="font-mono text-sm underline">{row.orderNumber}</span>

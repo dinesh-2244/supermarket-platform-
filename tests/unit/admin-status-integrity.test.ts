@@ -1,0 +1,79 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { ACTIONABLE_ORDER_STATUSES } from '@/modules/admin';
+import { ORDER_STATUSES, type OrderStatus } from '@/modules/orders';
+
+/**
+ * Regression guard for Admin Order Status integrity (M3).
+ *
+ * Ensures:
+ * 1. OrderStatusBadge in ui.tsx exhaustively maps all 12 domain OrderStatus values.
+ * 2. Closed states (CLOSED, CLOSED_UNDELIVERED) are present with valid styles.
+ * 3. Nonexistent statuses (CANCELLED_BY_CUSTOMER, REFUNDED) never reappear.
+ * 4. Report pipeline role classification derives from domain ACTIONABLE_ORDER_STATUSES.
+ */
+describe('Admin Order Status domain integrity (M3 regression guard)', () => {
+  const uiFile = path.resolve(__dirname, '../../src/app/(admin)/admin/ui.tsx');
+  const reportsFile = path.resolve(__dirname, '../../src/app/(admin)/admin/reports/page.tsx');
+
+  const uiContent = fs.readFileSync(uiFile, 'utf-8');
+  const reportsContent = fs.readFileSync(reportsFile, 'utf-8');
+
+  it('verifies the order domain exports exactly 12 OrderStatus values', () => {
+    expect(ORDER_STATUSES).toHaveLength(12);
+    expect(ORDER_STATUSES).toContain('CLOSED');
+    expect(ORDER_STATUSES).toContain('CLOSED_UNDELIVERED');
+    expect(ORDER_STATUSES).toContain('CANCELLED_BY_STORE');
+    expect(ORDER_STATUSES).toContain('DELIVERED');
+  });
+
+  it('verifies OrderStatusBadge maps all 12 domain statuses in ORDER_STATUS_STYLES', () => {
+    expect(uiContent).toContain("import type { OrderStatus } from '@/modules/orders'");
+    expect(uiContent).toContain('ORDER_STATUS_STYLES: Readonly<Record<OrderStatus, string>>');
+
+    for (const status of ORDER_STATUSES) {
+      expect(
+        uiContent.includes(`${status}:`),
+        `ui.tsx ORDER_STATUS_STYLES must define style for ${status}`,
+      ).toBe(true);
+    }
+  });
+
+  it('verifies CLOSED and CLOSED_UNDELIVERED are present in OrderStatusBadge', () => {
+    expect(uiContent).toMatch(/CLOSED:\s*'bg-emerald/);
+    expect(uiContent).toMatch(/CLOSED_UNDELIVERED:\s*'bg-rose/);
+  });
+
+  it('rejects fictitious statuses from ui.tsx and reports/page.tsx', () => {
+    expect(uiContent).not.toContain('CANCELLED_BY_CUSTOMER');
+    expect(uiContent).not.toContain('REFUNDED');
+    expect(reportsContent).not.toContain('CANCELLED_BY_CUSTOMER');
+    expect(reportsContent).not.toContain('REFUNDED');
+  });
+
+  it('verifies reports/page.tsx classifies pipeline roles using ACTIONABLE_ORDER_STATUSES', () => {
+    expect(reportsContent).toContain('ACTIONABLE_ORDER_STATUSES');
+
+    const actionable = new Set(ACTIONABLE_ORDER_STATUSES);
+    expect(actionable.has('CLOSED')).toBe(false);
+    expect(actionable.has('CLOSED_UNDELIVERED')).toBe(false);
+    expect(actionable.has('CANCELLED_BY_STORE')).toBe(false);
+    expect(actionable.has('DELIVERED')).toBe(false);
+
+    // Active operational queue
+    const activeStates: OrderStatus[] = [
+      'PLACED',
+      'ACCEPTED',
+      'PICKING',
+      'PICKED',
+      'BILLED_IN_POS',
+      'PACKED',
+      'OUT_FOR_DELIVERY',
+      'DELIVERY_FAILED',
+    ];
+    for (const state of activeStates) {
+      expect(actionable.has(state), `${state} must be in actionable queue`).toBe(true);
+    }
+  });
+});

@@ -15,14 +15,18 @@ export const dynamic = 'force-dynamic';
  */
 export default async function OrderDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ orderId: string }>;
+  searchParams?: Promise<{ store?: string }>;
 }): Promise<React.ReactElement> {
   const principal = await requirePrincipal();
   const { orderId } = await params;
+  const resolvedSearchParams = await searchParams;
   const order = await orderDetail(principal, orderId);
   if (order === null) notFound();
 
+  const currentStore = resolvedSearchParams?.store ?? order.storeId;
   const zone = order.store.timezone;
   const cancellable = canCancelByStore(order.status);
   const needsNote = requiresDiscrepancyNote(order.status);
@@ -36,7 +40,7 @@ export default async function OrderDetailPage({
         badge={<OrderStatusBadge status={order.status} />}
         action={
           <Link
-            href="/admin/orders"
+            href={`/admin/orders?store=${currentStore}`}
             className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 shadow-2xs hover:bg-slate-50 active:scale-[0.99] transition"
           >
             &larr; Back to queue

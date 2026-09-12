@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { requirePrincipal } from '@/auth';
 import { listStores } from '@/modules/stores';
-import { orderQueue, overview, resolveStoreId } from '@/modules/admin';
+import { ACTIONABLE_ORDER_STATUSES, orderQueue, overview, resolveStoreId } from '@/modules/admin';
+import type { OrderStatus } from '@/modules/orders';
 import { Card, Empty, OrderStatusBadge, PageHeading, StatCard, StoreSwitcher, Table } from '../ui';
 
 export const dynamic = 'force-dynamic';
@@ -31,7 +32,10 @@ export default async function ReportsPage({
   if (storeId === null) {
     return (
       <div className="space-y-6">
-        <PageHeading title="Reports & KPIs" />
+        <PageHeading
+          title="Reports & KPIs"
+          subtitle="Store-level operational analytics and order pipeline distribution."
+        />
         <Empty title="No Store Assigned">You are not assigned to a store.</Empty>
       </div>
     );
@@ -45,7 +49,7 @@ export default async function ReportsPage({
   const activeStore = stores.find((s) => s.id === storeId) ?? stores[0];
 
   // Group orders by status using existing QueueRow data
-  const statusCounts = new Map<string, number>();
+  const statusCounts = new Map<OrderStatus, number>();
   let flaggedVarianceCount = 0;
 
   for (const row of queue.rows) {
@@ -163,11 +167,8 @@ export default async function ReportsPage({
           <Table head={['Order status', 'Orders count', 'Share of total', 'Pipeline role']}>
             {statusList.map(([status, count]) => {
               const percentage = ((count / queue.rows.length) * 100).toFixed(1);
-              const isTerminal =
-                status === 'DELIVERED' ||
-                status === 'CANCELLED_BY_STORE' ||
-                status === 'CANCELLED_BY_CUSTOMER' ||
-                status === 'REFUNDED';
+              const isActionable = ACTIONABLE_ORDER_STATUSES.includes(status);
+              const isTerminal = !isActionable;
               return (
                 <tr key={status} className="hover:bg-slate-50/60 transition">
                   <td className="py-3 px-4">

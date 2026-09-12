@@ -28,6 +28,7 @@ export default async function OverviewPage({
   const actionableOrderCount = orders?.rows.length ?? 0;
 
   const activeStore = view.stores.find((s) => s.id === view.storeId) ?? view.stores[0];
+  const storeQuery = view.storeId ? `?store=${encodeURIComponent(view.storeId)}` : '';
 
   return (
     <div className="space-y-6">
@@ -36,9 +37,14 @@ export default async function OverviewPage({
         subtitle="What the back office is looking after right now."
         badge={
           activeStore !== undefined ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-900 border border-emerald-200">
-              <span className="h-2 w-2 rounded-full bg-emerald-600 animate-pulse" />
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-800 border border-slate-200 shadow-2xs">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  activeStore.isActive ? 'bg-emerald-600 animate-pulse' : 'bg-slate-400'
+                }`}
+              />
               {activeStore.code} &middot; {activeStore.name}
+              {!activeStore.isActive && ' (inactive)'}
             </span>
           ) : undefined
         }
@@ -52,7 +58,7 @@ export default async function OverviewPage({
           label="Actionable orders"
           value={actionableOrderCount}
           subtitle="Awaiting store action"
-          href="/admin/orders"
+          href={`/admin/orders${storeQuery}`}
           urgency={actionableOrderCount > 0 ? 'amber' : 'default'}
           icon={
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -70,7 +76,7 @@ export default async function OverviewPage({
           label="Low stock items"
           value={view.lowStock.items.length}
           subtitle={`At or below ${String(view.lowStock.threshold)} units`}
-          href="/admin/inventory"
+          href={`/admin/inventory${storeQuery}`}
           urgency={view.lowStock.items.length > 0 ? 'rose' : 'default'}
           icon={
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -88,7 +94,7 @@ export default async function OverviewPage({
           label="Listed products"
           value={view.listedCount}
           subtitle={`In active store (${view.productCount} master)`}
-          href="/admin/listings"
+          href={`/admin/listings${storeQuery}`}
           icon={
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
@@ -103,9 +109,9 @@ export default async function OverviewPage({
 
         <StatCard
           label="Operating stores"
-          value={view.stores.length}
-          subtitle="Community fulfillment hubs"
-          href="/admin/stores"
+          value={view.stores.filter((s) => s.isActive).length}
+          subtitle="Active community fulfillment hubs"
+          href={`/admin/stores${storeQuery}`}
           icon={
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
@@ -136,7 +142,7 @@ export default async function OverviewPage({
         }
         action={
           <Link
-            href="/admin/inventory"
+            href={`/admin/inventory${storeQuery}`}
             className="inline-flex min-h-[44px] items-center gap-1 text-xs font-bold text-emerald-800 hover:text-emerald-900"
           >
             Manage inventory &rarr;

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { OrderStatus } from '@/modules/orders';
 
 /**
  * Modern UI primitives for MunderFresh back office (AD1–AD12).
@@ -262,24 +263,24 @@ export function Notice({ message }: { message: string | undefined }): React.Reac
   );
 }
 
-/** Accessible Order Status Badges matching the 12 state-machine states. */
-export function OrderStatusBadge({ status }: { status: string }): React.ReactElement {
-  const styles: Record<string, string> = {
-    PLACED: 'bg-amber-100 text-amber-900 border-amber-300',
-    ACCEPTED: 'bg-sky-100 text-sky-900 border-sky-300',
-    PICKING: 'bg-indigo-100 text-indigo-900 border-indigo-300',
-    PICKED: 'bg-purple-100 text-purple-900 border-purple-300',
-    BILLED_IN_POS: 'bg-blue-100 text-blue-900 border-blue-300',
-    PACKED: 'bg-teal-100 text-teal-900 border-teal-300',
-    OUT_FOR_DELIVERY: 'bg-emerald-100 text-emerald-900 border-emerald-300',
-    DELIVERED: 'bg-green-100 text-green-900 border-green-300',
-    CANCELLED_BY_STORE: 'bg-rose-100 text-rose-900 border-rose-300',
-    CANCELLED_BY_CUSTOMER: 'bg-rose-100 text-rose-900 border-rose-300',
-    DELIVERY_FAILED: 'bg-orange-100 text-orange-900 border-orange-300',
-    REFUNDED: 'bg-slate-100 text-slate-800 border-slate-300',
-  };
+export const ORDER_STATUS_STYLES: Readonly<Record<OrderStatus, string>> = {
+  PLACED: 'bg-amber-100 text-amber-900 border-amber-300',
+  ACCEPTED: 'bg-sky-100 text-sky-900 border-sky-300',
+  PICKING: 'bg-indigo-100 text-indigo-900 border-indigo-300',
+  PICKED: 'bg-purple-100 text-purple-900 border-purple-300',
+  BILLED_IN_POS: 'bg-blue-100 text-blue-900 border-blue-300',
+  PACKED: 'bg-teal-100 text-teal-900 border-teal-300',
+  OUT_FOR_DELIVERY: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+  DELIVERED: 'bg-green-100 text-green-900 border-green-300',
+  CLOSED: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  CANCELLED_BY_STORE: 'bg-rose-100 text-rose-900 border-rose-300',
+  DELIVERY_FAILED: 'bg-orange-100 text-orange-900 border-orange-300',
+  CLOSED_UNDELIVERED: 'bg-rose-50 text-rose-800 border-rose-200',
+};
 
-  const className = styles[status] ?? 'bg-slate-100 text-slate-800 border-slate-300';
+/** Accessible Order Status Badges matching the 12 state-machine states. */
+export function OrderStatusBadge({ status }: { status: OrderStatus }): React.ReactElement {
+  const className = ORDER_STATUS_STYLES[status] ?? 'bg-slate-100 text-slate-800 border-slate-300';
 
   return (
     <span
