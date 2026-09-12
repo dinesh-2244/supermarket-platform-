@@ -87,8 +87,15 @@ export default async function ListingsPage({
                 label: `${product.sku} · ${product.name}`,
               }))}
             />
-            <Field label="MRP (paise)" name="mrpPaise" type="number" width="w-28" />
-            <Field label="Selling (paise)" name="sellingPricePaise" type="number" width="w-28" />
+            <Field label="MRP (₹)" name="mrp" type="number" step="0.01" min="0" width="w-28" />
+            <Field
+              label="Selling price (₹)"
+              name="sellingPrice"
+              type="number"
+              step="0.01"
+              min="0"
+              width="w-28"
+            />
             <Field label="Reason" name="reason" width="w-36" placeholder="Initial store listing" />
           </ActionForm>
         )}
@@ -154,17 +161,21 @@ export default async function ListingsPage({
                     <Hidden name="storeId" value={storeId} />
                     <Hidden name="productId" value={listing.productId} />
                     <Field
-                      label="MRP (paise)"
-                      name="mrpPaise"
+                      label="MRP (₹)"
+                      name="mrp"
                       type="number"
-                      defaultValue={listing.mrpPaise}
+                      step="0.01"
+                      min="0"
+                      defaultValue={(listing.mrpPaise / 100).toFixed(2)}
                       width="w-28"
                     />
                     <Field
-                      label="Selling (paise)"
-                      name="sellingPricePaise"
+                      label="Selling price (₹)"
+                      name="sellingPrice"
                       type="number"
-                      defaultValue={listing.sellingPricePaise}
+                      step="0.01"
+                      min="0"
+                      defaultValue={(listing.sellingPricePaise / 100).toFixed(2)}
                       width="w-28"
                     />
                     <Field label="Reason" name="reason" width="w-32" />

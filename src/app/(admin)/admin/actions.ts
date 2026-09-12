@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { signIn, signOut, requirePrincipal } from '@/auth';
-import { isAppError, ValidationError } from '@/modules/platform';
+import { fromRupees, isAppError, ValidationError } from '@/modules/platform';
 import { safeNextPath } from '@/modules/admin';
 import {
   changeOwnPassword,
@@ -28,6 +28,7 @@ import {
   createCategory,
   listProductImages,
   createProduct,
+  deactivateProduct,
   removeProductImage,
   reorderProductImages,
   updateCategory,
@@ -361,11 +362,28 @@ export async function createProductAction(_state: ActionState, form: FormData): 
 export async function updateProductAction(_state: ActionState, form: FormData): Promise<string> {
   return run(async () => {
     const principal = await requirePrincipal();
-    await updateProduct(principal, text(form, 'productId'), {
-      isActive: checked(form, 'isActive'),
-    });
+    const productId = text(form, 'productId');
+    const isActive = checked(form, 'isActive');
+    if (!isActive) {
+      const product = await deactivateProduct(principal, productId);
+      revalidatePath('/admin/products');
+      return `${product.name} deactivated.`;
+    }
+    const product = await updateProduct(principal, productId, { isActive: true });
     revalidatePath('/admin/products');
-    return 'Product updated.';
+    return `${product.name} activated.`;
+  });
+}
+
+export async function deactivateProductAction(
+  _state: ActionState,
+  form: FormData,
+): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const product = await deactivateProduct(principal, text(form, 'productId'));
+    revalidatePath('/admin/products');
+    return `${product.name} deactivated.`;
   });
 }
 
@@ -373,11 +391,14 @@ export async function updateProductAction(_state: ActionState, form: FormData): 
 export async function editProductAction(_state: ActionState, form: FormData): Promise<string> {
   return run(async () => {
     const principal = await requirePrincipal();
-    const product = await updateProduct(principal, text(form, 'productId'), {
+    const productId = text(form, 'productId');
+    const isActive = form.has('isActive') ? checked(form, 'isActive') : undefined;
+    const product = await updateProduct(principal, productId, {
       name: text(form, 'name'),
       brand: optionalText(form, 'brand') ?? null,
       packSize: text(form, 'packSize'),
       categoryId: text(form, 'categoryId'),
+      ...(isActive !== undefined ? { isActive } : {}),
     });
     revalidatePath('/admin/products');
     return `${product.name} saved.`;
@@ -438,6 +459,36 @@ export async function moveProductImageAction(_state: ActionState, form: FormData
 export async function setPriceAction(_state: ActionState, form: FormData): Promise<string> {
   return run(async () => {
     const principal = await requirePrincipal();
+
+    // The form displays/inputs rupees with decimals (MRP (₹) and Selling price (₹)).
+    // If rupee inputs are present, convert to integer paise via fromRupees before reading paise.
+    if (form.has('mrp') && !form.has('mrpPaise')) {
+      const raw = text(form, 'mrp');
+      if (raw === '') throw new ValidationError('MRP is required', { field: 'mrp' });
+      const num = Number(raw);
+      if (!Number.isFinite(num) || num < 0) {
+        throw new ValidationError(`MRP must be a valid non-negative rupee amount, not "${raw}"`, {
+          field: 'mrp',
+          value: raw,
+        });
+      }
+      form.set('mrpPaise', String(fromRupees(num)));
+    }
+
+    if (form.has('sellingPrice') && !form.has('sellingPricePaise')) {
+      const raw = text(form, 'sellingPrice');
+      if (raw === '')
+        throw new ValidationError('Selling price is required', { field: 'sellingPrice' });
+      const num = Number(raw);
+      if (!Number.isFinite(num) || num < 0) {
+        throw new ValidationError(
+          `Selling price must be a valid non-negative rupee amount, not "${raw}"`,
+          { field: 'sellingPrice', value: raw },
+        );
+      }
+      form.set('sellingPricePaise', String(fromRupees(num)));
+    }
+
     await setPrice(principal, text(form, 'storeId'), text(form, 'productId'), {
       mrpPaise: int(form, 'mrpPaise', 'MRP'),
       sellingPricePaise: int(form, 'sellingPricePaise', 'Selling price'),

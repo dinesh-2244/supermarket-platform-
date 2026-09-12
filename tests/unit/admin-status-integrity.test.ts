@@ -214,3 +214,57 @@ describe('Admin Reports and Overview real aggregates integrity (M1 regression gu
     expect(overviewContent).toMatch(/orderCountUnavailable\s*\?\s*['"]rose['"]/);
   });
 });
+
+describe('Admin pricing inputs & product deactivation integrity', () => {
+  const listingsFile = path.resolve(__dirname, '../../src/app/(admin)/admin/listings/page.tsx');
+  const productsFile = path.resolve(__dirname, '../../src/app/(admin)/admin/products/page.tsx');
+  const formFile = path.resolve(__dirname, '../../src/app/(admin)/admin/form.tsx');
+  const actionsFile = path.resolve(__dirname, '../../src/app/(admin)/admin/actions.ts');
+
+  const listingsContent = fs.readFileSync(listingsFile, 'utf-8');
+  const productsContent = fs.readFileSync(productsFile, 'utf-8');
+  const formContent = fs.readFileSync(formFile, 'utf-8');
+  const actionsContent = fs.readFileSync(actionsFile, 'utf-8');
+
+  it('verifies listings/page.tsx uses rupee decimal pricing inputs instead of raw paise', () => {
+    expect(listingsContent).not.toContain('MRP (paise)');
+    expect(listingsContent).not.toContain('Selling (paise)');
+    expect(listingsContent).toContain('MRP (₹)');
+    expect(listingsContent).toContain('Selling price (₹)');
+    expect(listingsContent).toContain('step="0.01"');
+    expect(listingsContent).toContain('defaultValue={(listing.mrpPaise / 100).toFixed(2)}');
+    expect(listingsContent).toContain(
+      'defaultValue={(listing.sellingPricePaise / 100).toFixed(2)}',
+    );
+  });
+
+  it('verifies form.tsx Field supports step and min props', () => {
+    expect(formContent).toContain('step?: string | undefined');
+    expect(formContent).toContain('min?: string | number | undefined');
+    expect(formContent).toContain('step={step}');
+    expect(formContent).toContain('min={min}');
+  });
+
+  it('verifies actions.ts converts rupee inputs using fromRupees and keeps integer paise contract', () => {
+    expect(actionsContent).toContain('fromRupees');
+    expect(actionsContent).toContain("form.set('mrpPaise', String(fromRupees(num)))");
+    expect(actionsContent).toContain("form.set('sellingPricePaise', String(fromRupees(num)))");
+    expect(actionsContent).toContain("mrpPaise: int(form, 'mrpPaise', 'MRP')");
+    expect(actionsContent).toContain(
+      "sellingPricePaise: int(form, 'sellingPricePaise', 'Selling price')",
+    );
+  });
+
+  it('verifies actions.ts exports deactivateProductAction and wires to deactivateProduct', () => {
+    expect(actionsContent).toContain('export async function deactivateProductAction');
+    expect(actionsContent).toContain('deactivateProduct(principal');
+  });
+
+  it('verifies products/page.tsx wires deactivateProductAction and has Active checkbox in edit drawer', () => {
+    expect(productsContent).toContain('deactivateProductAction');
+    expect(productsContent).toContain(
+      '<Check label="Active" name="isActive" defaultChecked={openProduct.isActive}',
+    );
+    expect(productsContent).toContain('submitLabel="Deactivate product"');
+  });
+});
