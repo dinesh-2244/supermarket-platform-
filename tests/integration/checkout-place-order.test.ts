@@ -696,7 +696,7 @@ describe('a guest order does not lock the phone number out of an account (R2)', 
 
     expect(page).not.toMatch(/\border\b\s*\./i);
     expect(page).not.toContain('@/modules/orders');
-    expect(page).toContain('No orders yet');
+    expect(page).toContain('Account order history is not available yet');
   });
 });
 

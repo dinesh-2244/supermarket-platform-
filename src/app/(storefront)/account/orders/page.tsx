@@ -13,8 +13,8 @@ export const metadata: Metadata = {
 /**
  * Order history page (D7).
  *
- * Scoped to active customer sessions.
- * Pinned by checkout-place-order integration test: No orders yet exposed in account area.
+ * Scoped to active customer sessions. Order history in account dashboard is
+ * not yet available; delivery status is tracked via private tracking links.
  */
 export default async function OrderHistoryPage(): Promise<React.ReactElement> {
   if ((await currentCustomer()) === null) redirect('/account/sign-in');
