@@ -10,7 +10,7 @@
 import {
   getPrisma,
   selectForUpdate,
-  storeScopeFilter,
+  scopedWhere,
   type DbExecutor,
   type LockedInventoryRow,
   type Principal,
@@ -167,11 +167,10 @@ export async function listItems(
   db?: DbExecutor,
 ): Promise<readonly InventoryRecord[]> {
   return executor(db).inventoryItem.findMany({
-    where: {
-      ...storeScopeFilter(principal),
+    where: scopedWhere(principal, {
       ...(options.storeId !== undefined ? { storeId: options.storeId } : {}),
       ...(options.productIds !== undefined ? { productId: { in: [...options.productIds] } } : {}),
-    },
+    }),
     select: itemSelect,
     orderBy: [{ storeId: 'asc' }, { productId: 'asc' }],
     take: options.limit ?? 500,
@@ -187,11 +186,7 @@ export async function listLowStock(
   db?: DbExecutor,
 ): Promise<readonly InventoryRecord[]> {
   return executor(db).inventoryItem.findMany({
-    where: {
-      ...storeScopeFilter(principal),
-      storeId,
-      websiteStock: { lte: threshold },
-    },
+    where: scopedWhere(principal, { storeId, websiteStock: { lte: threshold } }),
     select: itemSelect,
     orderBy: [{ websiteStock: 'asc' }, { productId: 'asc' }],
     take: limit,
@@ -215,8 +210,7 @@ export async function listLedger(
   db?: DbExecutor,
 ): Promise<readonly LedgerRecord[]> {
   return executor(db).stockLedger.findMany({
-    where: {
-      ...storeScopeFilter(principal),
+    where: scopedWhere(principal, {
       storeId: query.storeId,
       ...(query.productId !== undefined ? { productId: query.productId } : {}),
       ...(query.reasons !== undefined ? { reason: { in: [...query.reasons] } } : {}),
@@ -229,7 +223,7 @@ export async function listLedger(
             },
           }
         : {}),
-    },
+    }),
     orderBy: { createdAt: 'desc' },
     take: query.limit ?? 200,
   });
@@ -296,7 +290,7 @@ export async function listImportRuns(
   db?: DbExecutor,
 ): Promise<readonly ImportRunRecord[]> {
   return executor(db).inventoryImport.findMany({
-    where: { ...storeScopeFilter(principal), storeId },
+    where: scopedWhere(principal, { storeId }),
     orderBy: { createdAt: 'desc' },
     take: limit,
   });
