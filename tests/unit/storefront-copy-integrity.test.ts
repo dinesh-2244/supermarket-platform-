@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
+import ts from 'typescript';
 import {
   STOREFRONT_COPY_MANIFEST,
   formatHubCardDescription,
@@ -348,9 +349,7 @@ describe('Storefront copy integrity & manifest guard', () => {
     // Sanity check that manifest contains substantial copy (>80 leaves)
     expect(leafPaths.length).toBeGreaterThanOrEqual(80);
 
-    const combinedSource = storefrontFiles
-      .map((file) => fs.readFileSync(file, 'utf-8'))
-      .join('\n');
+    const combinedSource = storefrontFiles.map((file) => fs.readFileSync(file, 'utf-8')).join('\n');
 
     const unconsumedLeaves: string[] = [];
     for (const leafPath of leafPaths) {
@@ -375,9 +374,7 @@ describe('Storefront copy integrity & manifest guard', () => {
       'formatCommunityDeliveryNote',
     ];
 
-    const nonManifestFiles = storefrontFiles.filter(
-      (file) => !file.endsWith('copy-manifest.ts'),
-    );
+    const nonManifestFiles = storefrontFiles.filter((file) => !file.endsWith('copy-manifest.ts'));
     const nonManifestCombinedSource = nonManifestFiles
       .map((file) => fs.readFileSync(file, 'utf-8'))
       .join('\n');
@@ -435,7 +432,9 @@ describe('Storefront copy integrity & manifest guard', () => {
     );
 
     const combinedSourceWithMutation = storefrontFiles
-      .map((file) => (file.endsWith('page.tsx') ? simulatedOscarPage : fs.readFileSync(file, 'utf-8')))
+      .map((file) =>
+        file.endsWith('page.tsx') ? simulatedOscarPage : fs.readFileSync(file, 'utf-8'),
+      )
       .join('\n');
 
     const leafPaths = getManifestLeafPaths(STOREFRONT_COPY_MANIFEST);
@@ -458,7 +457,9 @@ describe('Storefront copy integrity & manifest guard', () => {
     );
 
     const combinedSourceWithMutation = storefrontFiles
-      .map((file) => (file.endsWith('cart/page.tsx') ? simulatedOscarCart : fs.readFileSync(file, 'utf-8')))
+      .map((file) =>
+        file.endsWith('cart/page.tsx') ? simulatedOscarCart : fs.readFileSync(file, 'utf-8'),
+      )
       .join('\n');
 
     const leafPaths = getManifestLeafPaths(STOREFRONT_COPY_MANIFEST);
@@ -470,7 +471,8 @@ describe('Storefront copy integrity & manifest guard', () => {
   test('Oscar bypass probe rejection: about commitment description replacement fails programmatic leaf consumption guard', () => {
     // About surface non-heading probe:
     const aboutSource = fs.readFileSync(path.join(storefrontDir, 'about/page.tsx'), 'utf-8');
-    const leafTarget = 'STOREFRONT_COPY_MANIFEST.about.commitments.cards.scheduledSlots.description';
+    const leafTarget =
+      'STOREFRONT_COPY_MANIFEST.about.commitments.cards.scheduledSlots.description';
     expect(aboutSource).toContain(leafTarget);
 
     const simulatedOscarAbout = aboutSource.replace(
@@ -479,12 +481,144 @@ describe('Storefront copy integrity & manifest guard', () => {
     );
 
     const combinedSourceWithMutation = storefrontFiles
-      .map((file) => (file.endsWith('about/page.tsx') ? simulatedOscarAbout : fs.readFileSync(file, 'utf-8')))
+      .map((file) =>
+        file.endsWith('about/page.tsx') ? simulatedOscarAbout : fs.readFileSync(file, 'utf-8'),
+      )
       .join('\n');
 
     const leafPaths = getManifestLeafPaths(STOREFRONT_COPY_MANIFEST);
     const unconsumed = leafPaths.filter((lp) => !combinedSourceWithMutation.includes(lp));
 
     expect(unconsumed).toContain(leafTarget);
+  });
+
+  // ---------------------------------------------------------------------------
+  // 4. Reverse-Direction AST Literal Guard & God Probe Rejection
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Scans a TSX file via TypeScript AST and extracts:
+   * 1. All non-empty JSX text literals
+   * 2. All string-valued JSX attributes on claim-bearing props
+   *    (e.g., 'title', 'subtitle', 'badge', 'heading', 'description', 'notice')
+   *
+   * Completes the two-way architectural guarantee:
+   * - Forward: every manifest leaf is consumed (Section 3)
+   * - Reverse: every customer-facing literal in designated files is either in
+   *   STOREFRONT_COPY_MANIFEST or on an explicit, reviewed allowlist of functional labels.
+   */
+  function extractJsxLiterals(filePath: string): string[] {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const sf = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
+    const literals: string[] = [];
+
+    function visit(node: ts.Node) {
+      if (ts.isJsxText(node)) {
+        const text = node.text.trim().replace(/\s+/g, ' ');
+        if (text) literals.push(text);
+      } else if (ts.isJsxAttribute(node)) {
+        const propName = node.name.getText(sf);
+        if (
+          ['title', 'subtitle', 'badge', 'heading', 'description', 'notice'].includes(
+            propName.toLowerCase(),
+          )
+        ) {
+          if (node.initializer && ts.isStringLiteral(node.initializer)) {
+            literals.push(`${propName}="${node.initializer.text}"`);
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    }
+
+    visit(sf);
+    return literals;
+  }
+
+  const ABOUT_PAGE_ALLOWED_LITERALS = new Set([
+    '🌱',
+    'Dedicated Store Hub',
+    'Shop',
+    'Store →',
+    '⚡',
+    '🥦',
+    '🏷️',
+    '🛡️',
+    'Request Delivery to Your Society →',
+    'Browse Product Catalogue →',
+  ]);
+
+  const MOBILE_BAR_ALLOWED_LITERALS = new Set(['added', 'View Basket', '→']);
+
+  const HOME_PAGE_ALLOWED_LITERALS = new Set([
+    '🥦',
+    '⚡',
+    '🛡️',
+    '🏠',
+    'Learn More About Us →',
+    'Select Community →',
+    'This shop has nothing listed yet.',
+    'Explore the Full Catalogue',
+    'Browse all',
+    'products across categories with search, filters, and complete listings in our Shop.',
+    'Open Full Shop Catalogue →',
+  ]);
+
+  test('designated customer-facing pages strictly forbid unauthorized inline literals via AST scan', () => {
+    // 1. about/page.tsx: 100% of customer commitments route through STOREFRONT_COPY_MANIFEST.about
+    const aboutLiterals = extractJsxLiterals(path.join(storefrontDir, 'about/page.tsx'));
+    const unauthorizedAbout = aboutLiterals.filter(
+      (literal) => !ABOUT_PAGE_ALLOWED_LITERALS.has(literal),
+    );
+    expect(
+      unauthorizedAbout,
+      `Unauthorized inline literals found in about/page.tsx:\n${unauthorizedAbout.join('\n')}\nMarketing and operational commitments MUST be defined in STOREFRONT_COPY_MANIFEST.`,
+    ).toEqual([]);
+
+    // 2. mobile-cart-bar.tsx
+    const mobileLiterals = extractJsxLiterals(path.join(storefrontDir, 'mobile-cart-bar.tsx'));
+    const unauthorizedMobile = mobileLiterals.filter(
+      (literal) => !MOBILE_BAR_ALLOWED_LITERALS.has(literal),
+    );
+    expect(unauthorizedMobile).toEqual([]);
+
+    // 3. page.tsx (Home)
+    const homeLiterals = extractJsxLiterals(path.join(storefrontDir, 'page.tsx'));
+    const unauthorizedHome = homeLiterals.filter(
+      (literal) => !HOME_PAGE_ALLOWED_LITERALS.has(literal),
+    );
+    expect(unauthorizedHome).toEqual([]);
+  });
+
+  test('God bypass probe rejection: an unauthorized inline guarantee in about/page.tsx fails the AST scanner', () => {
+    // God's probe: adding a brand-new unmodeled claim:
+    // 'Every order is backed by our 100% satisfaction guarantee.' to about/page.tsx
+    // without touching or removing any existing manifest leaf.
+    const aboutPath = path.join(storefrontDir, 'about/page.tsx');
+    const aboutSource = fs.readFileSync(aboutPath, 'utf-8');
+
+    const simulatedGodAbout = aboutSource.replace(
+      '</section>',
+      '<p>Every order is backed by our 100% satisfaction guarantee.</p></section>',
+    );
+
+    const sf = ts.createSourceFile(
+      'simulated-about.tsx',
+      simulatedGodAbout,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const literals: string[] = [];
+    function visit(node: ts.Node) {
+      if (ts.isJsxText(node)) {
+        const text = node.text.trim().replace(/\s+/g, ' ');
+        if (text) literals.push(text);
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(sf);
+
+    const unauthorized = literals.filter((lit) => !ABOUT_PAGE_ALLOWED_LITERALS.has(lit));
+    expect(unauthorized).toContain('Every order is backed by our 100% satisfaction guarantee.');
   });
 });
