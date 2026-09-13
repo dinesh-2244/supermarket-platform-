@@ -354,6 +354,17 @@ describe('order actions (Phase 4) — additive, and no existing grant moved', ()
     }
   });
 
+  it('order:assign-picker (Phase 5) is a manager’s, store-scoped — staff and shoppers have none', () => {
+    expect(allows(superAdmin, 'order:assign-picker', orderInA)).toBe(true);
+    expect(allows(superAdmin, 'order:assign-picker', orderInB)).toBe(true);
+    expect(allows(managerA, 'order:assign-picker', orderInA)).toBe(true);
+    expect(allows(managerA, 'order:assign-picker', orderInB)).toBe(false);
+    expect(allows(staffA, 'order:assign-picker', orderInA)).toBe(false);
+    for (const principal of [visitor, shopperA, accountA, system]) {
+      expect(allows(principal, 'order:assign-picker', orderInA)).toBe(false);
+    }
+  });
+
   it('gives the system principal none of them', () => {
     // Placing an order is a customer use-case running as a customer; the stock
     // decrement inside it goes through `applyMovement`, which takes a `Tx` and
@@ -414,7 +425,8 @@ describe('order actions (Phase 4) — additive, and no existing grant moved', ()
     expect(ALL_ACTIONS.filter((action) => !action.startsWith('order:')).sort()).toEqual(
       [...before].sort(),
     );
-    expect(ALL_ACTIONS.filter((action) => action.startsWith('order:'))).toHaveLength(4);
+    // Four from Phase 4, one from Phase 5 (`order:assign-picker`).
+    expect(ALL_ACTIONS.filter((action) => action.startsWith('order:'))).toHaveLength(5);
 
     // A staff member still cannot write inventory; a shopper still cannot write
     // anything at all. Spot-checks of the decisions most likely to be loosened

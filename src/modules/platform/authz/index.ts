@@ -80,6 +80,8 @@ export type Action =
   | 'order:transition'
   | 'order:cancel'
   | 'order:confirm-variance'
+  // fulfillment (per store) — Phase 5: handing a pick task to someone else
+  | 'order:assign-picker'
   // audit
   | 'audit-log:read';
 
@@ -149,6 +151,7 @@ const SUPER_ADMIN_GRANTS: Readonly<Record<Action, Grant>> = {
   'order:transition': 'global',
   'order:cancel': 'global',
   'order:confirm-variance': 'global',
+  'order:assign-picker': 'global',
   'audit-log:read': 'global',
 };
 
@@ -194,6 +197,8 @@ const STORE_MANAGER_GRANTS: Partial<Readonly<Record<Action, Grant>>> = {
   'order:transition': 'store',
   'order:cancel': 'store',
   'order:confirm-variance': 'store',
+  // Who picks an order is a manager's call too: staff take a task themselves.
+  'order:assign-picker': 'store',
   'audit-log:read': 'store',
 };
 

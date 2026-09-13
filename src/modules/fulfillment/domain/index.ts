@@ -19,7 +19,7 @@ export interface ModuleDescriptor {
 export const descriptor: ModuleDescriptor = {
   name: 'fulfillment',
   owns: 'PickTask, PosBillingHandoff (+ variance calc), DeliveryRecord',
-  dependsOn: ['platform', 'orders', 'inventory', 'pricing', 'notifications'],
+  dependsOn: ['platform', 'orders', 'inventory', 'pricing', 'identity', 'notifications'],
   emits: ['order.picked', 'order.billed', 'order.delivered'],
 };
 
