@@ -103,3 +103,18 @@ describe('Product Requests UI: Admin Status Styles and Transitions', () => {
     );
   });
 });
+
+describe('Product Requests Action: clientKey derivation for phone-less guests', () => {
+  test('requestProductAction derives and passes clientKey into submitProductRequest', () => {
+    const actionsSource = fs.readFileSync(
+      path.resolve(__dirname, '../../src/app/(storefront)/actions.ts'),
+      'utf-8',
+    );
+
+    expect(actionsSource).toContain('const clientKey = await resolveClientKey()');
+    expect(actionsSource).toContain('clientKey,');
+    expect(actionsSource).toContain('resolveClientKey');
+    expect(actionsSource).toContain('currentCartToken()');
+    expect(actionsSource).toContain("headerStore.get('x-forwarded-for')");
+  });
+});
