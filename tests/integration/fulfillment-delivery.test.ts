@@ -10,6 +10,7 @@ import {
   closeOrder,
   closeUndelivered,
   completePicking,
+  confirmRevisedAmount,
   deliveryQueue,
   dispatch,
   markPacked,
@@ -37,6 +38,7 @@ let storeB: string;
 let productA: string;
 let productB: string;
 let customerId: string;
+let managerA: Principal;
 let managerB: Principal;
 let staffA: Principal;
 const userIds: string[] = [];
@@ -55,6 +57,7 @@ beforeAll(async () => {
   const mA = await createUser(prisma, { role: 'STORE_MANAGER', storeId: storeA });
   const mB = await createUser(prisma, { role: 'STORE_MANAGER', storeId: storeB });
   const sA = await createUser(prisma, { role: 'STORE_STAFF', storeId: storeA });
+  managerA = { kind: 'user', userId: mA.id, role: 'STORE_MANAGER', storeId: storeA };
   managerB = { kind: 'user', userId: mB.id, role: 'STORE_MANAGER', storeId: storeB };
   staffA = { kind: 'user', userId: sA.id, role: 'STORE_STAFF', storeId: storeA };
   userIds.push(mA.id, mB.id, sA.id);
@@ -104,6 +107,11 @@ async function outForDelivery(storeId = storeA, productId = productA, actor = st
   return id;
 }
 
+/** What the rider must collect: the POS bill, locked at billing. */
+async function due(id: string): Promise<number> {
+  return (await order(id)).posFinalTotalPaise!;
+}
+
 describe('delivered', () => {
   let heard: DomainEventName[];
   beforeEach(() => {
@@ -148,7 +156,7 @@ describe('delivered', () => {
     const id = await outForDelivery();
     await recordDelivered(staffA, id, {
       paymentMethodUsed: 'UPI',
-      amountCollectedPaise: 100,
+      amountCollectedPaise: await due(id),
       upiRef: ' 4123456789 ',
     });
     expect(await delivery(id)).toMatchObject({ paymentMethodUsed: 'UPI', upiRef: '4123456789' });
@@ -156,13 +164,14 @@ describe('delivered', () => {
 
   it('refuses a UPI delivery without a reference, and a cash one with', async () => {
     const id = await outForDelivery();
+    const total = await due(id);
     await expect(
-      recordDelivered(staffA, id, { paymentMethodUsed: 'UPI', amountCollectedPaise: 100 }),
+      recordDelivered(staffA, id, { paymentMethodUsed: 'UPI', amountCollectedPaise: total }),
     ).rejects.toThrow(/UPI reference/i);
     await expect(
       recordDelivered(staffA, id, {
         paymentMethodUsed: 'CASH',
-        amountCollectedPaise: 100,
+        amountCollectedPaise: total,
         upiRef: 'x',
       }),
     ).rejects.toThrow(/cash/i);
@@ -180,10 +189,79 @@ describe('delivered', () => {
     ).rejects.toThrow(/whole/i);
   });
 
+  it('refuses a delivery that collects nothing, less, or more than the POS bill — atomically', async () => {
+    const id = await outForDelivery();
+    heard.length = 0;
+    const total = await due(id);
+    expect(total).toBeGreaterThan(0);
+    const auditsBefore = await prisma.auditLog.count({
+      where: { entityType: 'Order', entityId: id },
+    });
+    for (const amount of [0, total - 1, total + 1]) {
+      await expect(
+        recordDelivered(staffA, id, { paymentMethodUsed: 'CASH', amountCollectedPaise: amount }),
+      ).rejects.toThrow(/POS bill/i);
+      await expect(
+        recordDelivered(staffA, id, {
+          paymentMethodUsed: 'UPI',
+          amountCollectedPaise: amount,
+          upiRef: 'r1',
+        }),
+      ).rejects.toThrow(/POS bill/i);
+    }
+    // Nothing moved: no status, no stamp, no payment, no audit, no event.
+    const row = await order(id);
+    expect(row.status).toBe('OUT_FOR_DELIVERY');
+    expect(row.deliveredAt).toBeNull();
+    expect(await delivery(id)).toMatchObject({
+      status: 'OUT',
+      deliveredAt: null,
+      amountCollectedPaise: null,
+      paymentMethodUsed: null,
+    });
+    expect(await prisma.auditLog.count({ where: { entityType: 'Order', entityId: id } })).toBe(
+      auditsBefore,
+    );
+    expect(heard).toEqual([]);
+    // The exact bill goes through.
+    await recordDelivered(staffA, id, { paymentMethodUsed: 'CASH', amountCollectedPaise: total });
+    expect((await order(id)).status).toBe('DELIVERED');
+  });
+
+  it('audits the POS bill as the amount due — not the estimate — on a varied order', async () => {
+    const id = await placeOrder(storeA, productA, customerId);
+    const estimated = (await order(id)).estimatedTotalPaise;
+    await walkTo(staffA, id, 'PACKED', { finalTotalPaise: estimated * 2 });
+    await confirmRevisedAmount(managerA, id);
+    await dispatch(staffA, id, { assigneeName: 'Ravi' });
+    const total = await due(id);
+    expect(total).toBe(estimated * 2);
+
+    // The estimate is what the customer saw at checkout; it is not what is due.
+    await expect(
+      recordDelivered(staffA, id, { paymentMethodUsed: 'CASH', amountCollectedPaise: estimated }),
+    ).rejects.toThrow(/POS bill/i);
+    await recordDelivered(staffA, id, { paymentMethodUsed: 'CASH', amountCollectedPaise: total });
+
+    const audit = await prisma.auditLog.findFirstOrThrow({
+      where: { entityType: 'Order', entityId: id, action: 'update' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(audit.afterJson).toMatchObject({
+      status: 'DELIVERED',
+      amountCollectedPaise: total,
+      amountDuePaise: total,
+    });
+    expect((audit.afterJson as { amountDuePaise: number }).amountDuePaise).not.toBe(estimated);
+  });
+
   it('closes a delivered order on staff confirmation, and never twice', async () => {
     const id = await outForDelivery();
     heard.length = 0;
-    await recordDelivered(staffA, id, { paymentMethodUsed: 'CASH', amountCollectedPaise: 1 });
+    await recordDelivered(staffA, id, {
+      paymentMethodUsed: 'CASH',
+      amountCollectedPaise: await due(id),
+    });
     const outcome = await closeOrder(staffA, id);
     expect(outcome).toMatchObject({ from: 'DELIVERED', to: 'CLOSED' });
     expect((await order(id)).closedAt).not.toBeNull();
@@ -227,7 +305,10 @@ describe('failed, retried, given up', () => {
     expect(await delivery(id)).toMatchObject({ status: 'OUT', assigneeName: 'Meena' });
     expect(await prisma.deliveryRecord.count({ where: { orderId: id } })).toBe(1);
 
-    await recordDelivered(staffA, id, { paymentMethodUsed: 'CASH', amountCollectedPaise: 1 });
+    await recordDelivered(staffA, id, {
+      paymentMethodUsed: 'CASH',
+      amountCollectedPaise: await due(id),
+    });
     expect(await history(id)).toEqual([
       'PLACED',
       'ACCEPTED',
@@ -291,7 +372,10 @@ describe('failed, retried, given up', () => {
     const id = await placeOrder(storeA, productA, customerId);
     await walkTo(staffA, id, 'PACKED');
     await expect(
-      recordDelivered(staffA, id, { paymentMethodUsed: 'CASH', amountCollectedPaise: 1 }),
+      recordDelivered(staffA, id, {
+        paymentMethodUsed: 'CASH',
+        amountCollectedPaise: await due(id),
+      }),
     ).rejects.toThrow(/PACKED/);
     await expect(recordDeliveryFailed(staffA, id, { failureReason: 'x' })).rejects.toThrow(
       /PACKED/,
@@ -307,7 +391,10 @@ describe('who may record an outcome', () => {
   it('refuses a shopper, and the other store’s manager as not found', async () => {
     const id = await outForDelivery();
     await expect(
-      recordDelivered(shopper, id, { paymentMethodUsed: 'CASH', amountCollectedPaise: 1 }),
+      recordDelivered(shopper, id, {
+        paymentMethodUsed: 'CASH',
+        amountCollectedPaise: await due(id),
+      }),
     ).rejects.toThrow(/permission/i);
     await expect(
       recordDelivered(managerB, id, { paymentMethodUsed: 'CASH', amountCollectedPaise: 1 }),
@@ -326,7 +413,10 @@ describe('the delivery queue', () => {
     const failed = await outForDelivery();
     await recordDeliveryFailed(staffA, failed, { failureReason: 'Nobody home' });
     const done = await outForDelivery();
-    await recordDelivered(staffA, done, { paymentMethodUsed: 'CASH', amountCollectedPaise: 1 });
+    await recordDelivered(staffA, done, {
+      paymentMethodUsed: 'CASH',
+      amountCollectedPaise: await due(done),
+    });
     const other = await outForDelivery(storeB, productB, managerB);
 
     const queue = await deliveryQueue(staffA, storeA);

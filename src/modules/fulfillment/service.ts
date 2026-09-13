@@ -506,9 +506,14 @@ export async function recordDelivered(
   orderId: string,
   input: DeliveredInput,
 ): Promise<TransitionOutcome> {
-  const payment = validatePaymentCapture(input);
   const outcome = await withTransaction(async (tx) => {
     const order = await lockForActor(tx, actor, orderId, ['OUT_FOR_DELIVERY']);
+    // What is due is the bill locked at BILLED_IN_POS — never the checkout
+    // estimate, which a variance may have moved. Read under the row lock.
+    if (order.posFinalTotalPaise === null) {
+      throw new ConflictError('That order has no POS bill to collect against', { orderId });
+    }
+    const payment = validatePaymentCapture(input, order.posFinalTotalPaise);
     await requireDelivery(tx, orderId);
     const moved = await transition(tx, orderId, 'DELIVERED', actor);
     await repo.markDelivered(tx, orderId, payment, new Date());
@@ -519,7 +524,7 @@ export async function recordDelivered(
       entityId: orderId,
       storeId: order.storeId,
       before: { status: order.status },
-      after: { status: 'DELIVERED', ...payment, amountDuePaise: order.estimatedTotalPaise },
+      after: { status: 'DELIVERED', ...payment, amountDuePaise: order.posFinalTotalPaise },
     });
     return moved;
   });

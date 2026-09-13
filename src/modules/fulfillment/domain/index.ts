@@ -147,12 +147,16 @@ const UPI_REF_MAX = 64;
 
 /**
  * What a delivery's payment capture must look like: a whole, non-negative
- * amount in paise; a UPI payment carries its reference, a cash one carries
- * none. The amount is recorded as collected, not checked against the bill —
- * a rider may legitimately collect less (a returned item at the door) and
- * the audit row keeps the amount due beside it.
+ * amount in paise that is the POS bill **exactly** (§5 step 8:
+ * `amountCollectedPaise` = POS final total); a UPI payment carries its
+ * reference, a cash one carries none. Nothing collected, less, or more is not
+ * a delivery — there is no balance-due or refund path in this phase, so a
+ * mismatch stops here rather than closing an order that was not paid for.
  */
-export function validatePaymentCapture(input: DeliveredInput): PaymentCapture {
+export function validatePaymentCapture(
+  input: DeliveredInput,
+  amountDuePaise: number,
+): PaymentCapture {
   const amount = input.amountCollectedPaise;
   if (!Number.isInteger(amount) || amount < 0) {
     throw new ValidationError(
@@ -161,6 +165,13 @@ export function validatePaymentCapture(input: DeliveredInput): PaymentCapture {
         field: 'amountCollectedPaise',
       },
     );
+  }
+  if (amount !== amountDuePaise) {
+    throw new ValidationError('The amount collected must be the POS bill exactly', {
+      field: 'amountCollectedPaise',
+      amountCollectedPaise: amount,
+      amountDuePaise,
+    });
   }
   const ref = (input.upiRef ?? '').trim();
   if (input.paymentMethodUsed === 'UPI') {

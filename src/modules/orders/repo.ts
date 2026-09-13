@@ -45,6 +45,8 @@ export interface LockedOrderRow {
   readonly priceVarianceFlagged: boolean;
   readonly customerConfirmedRevisedAmount: boolean;
   readonly estimatedTotalPaise: number;
+  /** The bill as recorded at `BILLED_IN_POS`; null before that. */
+  readonly posFinalTotalPaise: number | null;
 }
 
 /**
@@ -57,7 +59,8 @@ export interface LockedOrderRow {
 export async function lockOrder(tx: Tx, orderId: string): Promise<LockedOrderRow | null> {
   const rows = await auditedExecutor(tx).$queryRaw<LockedOrderRow[]>`
     SELECT "id", "orderNumber", "storeId", "customerId", "status",
-           "priceVarianceFlagged", "customerConfirmedRevisedAmount", "estimatedTotalPaise"
+           "priceVarianceFlagged", "customerConfirmedRevisedAmount", "estimatedTotalPaise",
+           "posFinalTotalPaise"
     FROM "Order"
     WHERE "id" = ${orderId}
     FOR UPDATE
