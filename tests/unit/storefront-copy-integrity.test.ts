@@ -607,61 +607,272 @@ describe('Storefront copy integrity & manifest guard', () => {
       '🥦',
     ]),
     'shop/page.tsx': new Set(['This store has no items listed currently.']),
+    'copy-manifest.ts': new Set([
+      '',
+      ' ',
+      ' · ',
+      ' · Delivery ',
+      ' · Min order ',
+      '{hubName}',
+      '{shortName}',
+      '{communityName}',
+      'Free',
+    ]),
   };
+
+  const APPROVED_FORMATTERS = new Set([
+    'formatActiveWelcomeTitle',
+    'formatActiveWelcomeTerms',
+    'formatShopSubtitle',
+    'formatHubCardDescription',
+    'formatCommunityDeliveryNote',
+    'formatCommunitySubtitle',
+    'formatContactHubDescription',
+    'formatDeliveryFee',
+  ]);
+
+  function unwrapStaticExpression(expr: ts.Expression): ts.Expression {
+    let curr = expr;
+    while (true) {
+      if (ts.isParenthesizedExpression(curr)) {
+        curr = curr.expression;
+      } else if (ts.isAsExpression(curr)) {
+        curr = curr.expression;
+      } else if (ts.isTypeAssertionExpression(curr)) {
+        curr = curr.expression;
+      } else if (ts.isSatisfiesExpression(curr)) {
+        curr = curr.expression;
+      } else if (ts.isNonNullExpression(curr)) {
+        curr = curr.expression;
+      } else {
+        break;
+      }
+    }
+    return curr;
+  }
+
+  function resolveStaticString(expr: ts.Expression): string | null {
+    const unwrapped = unwrapStaticExpression(expr);
+    if (ts.isStringLiteral(unwrapped) || ts.isNoSubstitutionTemplateLiteral(unwrapped)) {
+      return unwrapped.text;
+    }
+    if (
+      ts.isBinaryExpression(unwrapped) &&
+      unwrapped.operatorToken.kind === ts.SyntaxKind.PlusToken
+    ) {
+      const left = resolveStaticString(unwrapped.left);
+      const right = resolveStaticString(unwrapped.right);
+      if (left !== null && right !== null) {
+        return left + right;
+      }
+    }
+    return null;
+  }
+
+  function checkFormatterDefinitions(
+    sourceOverride?: string,
+  ): { formatter: string; violations: string[] }[] {
+    const manifestPath = path.join(storefrontDir, 'copy-manifest.ts');
+    const content = sourceOverride ?? fs.readFileSync(manifestPath, 'utf-8');
+    const sf = ts.createSourceFile(manifestPath, content, ts.ScriptTarget.Latest, true);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['copy-manifest.ts'] ?? new Set<string>();
+    const results: { formatter: string; violations: string[] }[] = [];
+
+    function collectParams(
+      node: ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression,
+    ): Set<string> {
+      const params = new Set<string>();
+      for (const param of node.parameters) {
+        if (ts.isIdentifier(param.name)) {
+          params.add(param.name.text);
+        } else {
+          function walkPattern(pat: ts.Node) {
+            if (ts.isBindingElement(pat) && ts.isIdentifier(pat.name)) {
+              params.add(pat.name.text);
+            }
+            ts.forEachChild(pat, walkPattern);
+          }
+          walkPattern(param.name);
+        }
+      }
+      return params;
+    }
+
+    function getReturnExpressions(
+      fnNode: ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression,
+    ): ts.Expression[] {
+      const returns: ts.Expression[] = [];
+      if (!fnNode.body) return returns;
+
+      if (!ts.isBlock(fnNode.body)) {
+        returns.push(fnNode.body);
+        return returns;
+      }
+
+      function visit(n: ts.Node) {
+        if (
+          n !== fnNode &&
+          (ts.isFunctionDeclaration(n) || ts.isArrowFunction(n) || ts.isFunctionExpression(n))
+        ) {
+          return;
+        }
+        if (ts.isReturnStatement(n) && n.expression) {
+          returns.push(n.expression);
+        }
+        ts.forEachChild(n, visit);
+      }
+
+      visit(fnNode.body);
+      return returns;
+    }
+
+    function isManifestPropAccess(expr: ts.Expression): boolean {
+      let curr: ts.Expression = expr;
+      while (ts.isPropertyAccessExpression(curr)) {
+        curr = curr.expression;
+      }
+      return ts.isIdentifier(curr) && curr.text === 'STOREFRONT_COPY_MANIFEST';
+    }
+
+    function inspectFormatterNode(
+      name: string,
+      fnNode: ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression,
+    ) {
+      const params = collectParams(fnNode);
+      const violations: string[] = [];
+
+      function checkText(text: string) {
+        if (text === '') return;
+        if (!allowed.has(text)) {
+          violations.push(text);
+        }
+      }
+
+      // 1. Scan literal texts anywhere in the formatter body
+      if (fnNode.body) {
+        function scanLiterals(n: ts.Node) {
+          if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
+            checkText(n.text);
+          } else if (ts.isTemplateExpression(n)) {
+            checkText(n.head.text);
+            for (const span of n.templateSpans) {
+              checkText(span.literal.text);
+            }
+          }
+          ts.forEachChild(n, scanLiterals);
+        }
+        scanLiterals(fnNode.body);
+      }
+
+      // 2. Validate return expressions: must be built ONLY from parameters, manifest refs, and allowed static pieces
+      const returnExprs = getReturnExpressions(fnNode);
+      if (returnExprs.length === 0) {
+        violations.push(`${name} has no return expression`);
+      }
+
+      function validateExpr(expr: ts.Expression) {
+        const unwrapped = unwrapStaticExpression(expr);
+
+        if (isManifestPropAccess(unwrapped)) {
+          return;
+        }
+
+        if (ts.isIdentifier(unwrapped) && params.has(unwrapped.text)) {
+          return;
+        }
+
+        if (ts.isStringLiteral(unwrapped) || ts.isNoSubstitutionTemplateLiteral(unwrapped)) {
+          if (!allowed.has(unwrapped.text) && unwrapped.text !== '') {
+            violations.push(unwrapped.text);
+          }
+          return;
+        }
+
+        if (ts.isTemplateExpression(unwrapped)) {
+          checkText(unwrapped.head.text);
+          for (const span of unwrapped.templateSpans) {
+            checkText(span.literal.text);
+            validateExpr(span.expression);
+          }
+          return;
+        }
+
+        if (
+          ts.isBinaryExpression(unwrapped) &&
+          unwrapped.operatorToken.kind === ts.SyntaxKind.PlusToken
+        ) {
+          validateExpr(unwrapped.left);
+          validateExpr(unwrapped.right);
+          return;
+        }
+
+        if (ts.isConditionalExpression(unwrapped)) {
+          validateExpr(unwrapped.whenTrue);
+          validateExpr(unwrapped.whenFalse);
+          return;
+        }
+
+        if (ts.isCallExpression(unwrapped)) {
+          const callee = unwrapped.expression;
+          if (
+            ts.isPropertyAccessExpression(callee) &&
+            (callee.name.text === 'replace' || callee.name.text === 'replaceAll')
+          ) {
+            validateExpr(callee.expression);
+            for (const arg of unwrapped.arguments) {
+              validateExpr(arg);
+            }
+            return;
+          }
+          if (
+            ts.isIdentifier(callee) &&
+            (APPROVED_FORMATTERS.has(callee.text) || callee.text === 'rupees')
+          ) {
+            for (const arg of unwrapped.arguments) {
+              validateExpr(arg);
+            }
+            return;
+          }
+        }
+
+        violations.push(unwrapped.getText());
+      }
+
+      for (const ret of returnExprs) {
+        validateExpr(ret);
+      }
+
+      if (violations.length > 0) {
+        results.push({ formatter: name, violations: Array.from(new Set(violations)) });
+      }
+    }
+
+    function visit(node: ts.Node) {
+      if (ts.isFunctionDeclaration(node) && node.name && APPROVED_FORMATTERS.has(node.name.text)) {
+        inspectFormatterNode(node.name.text, node);
+      } else if (ts.isVariableStatement(node)) {
+        for (const decl of node.declarationList.declarations) {
+          if (
+            ts.isIdentifier(decl.name) &&
+            APPROVED_FORMATTERS.has(decl.name.text) &&
+            decl.initializer &&
+            (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer))
+          ) {
+            inspectFormatterNode(decl.name.text, decl.initializer);
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    }
+
+    visit(sf);
+    return results;
+  }
 
   function extractJsxLiterals(filePath: string, sourceOverride?: string): string[] {
     const content = sourceOverride ?? fs.readFileSync(filePath, 'utf-8');
     const sf = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
     const literals: string[] = [];
-
-    function unwrapStaticExpression(expr: ts.Expression): ts.Expression {
-      let curr = expr;
-      while (true) {
-        if (ts.isParenthesizedExpression(curr)) {
-          curr = curr.expression;
-        } else if (ts.isAsExpression(curr)) {
-          curr = curr.expression;
-        } else if (ts.isTypeAssertionExpression(curr)) {
-          curr = curr.expression;
-        } else if (ts.isSatisfiesExpression(curr)) {
-          curr = curr.expression;
-        } else if (ts.isNonNullExpression(curr)) {
-          curr = curr.expression;
-        } else {
-          break;
-        }
-      }
-      return curr;
-    }
-
-    function resolveStaticString(expr: ts.Expression): string | null {
-      const unwrapped = unwrapStaticExpression(expr);
-      if (ts.isStringLiteral(unwrapped) || ts.isNoSubstitutionTemplateLiteral(unwrapped)) {
-        return unwrapped.text;
-      }
-      if (
-        ts.isBinaryExpression(unwrapped) &&
-        unwrapped.operatorToken.kind === ts.SyntaxKind.PlusToken
-      ) {
-        const left = resolveStaticString(unwrapped.left);
-        const right = resolveStaticString(unwrapped.right);
-        if (left !== null && right !== null) {
-          return left + right;
-        }
-      }
-      return null;
-    }
-
-    const APPROVED_FORMATTERS = new Set([
-      'formatActiveWelcomeTitle',
-      'formatActiveWelcomeTerms',
-      'formatShopSubtitle',
-      'formatHubCardDescription',
-      'formatCommunityDeliveryNote',
-      'formatCommunitySubtitle',
-      'formatContactHubDescription',
-      'formatDeliveryFee',
-    ]);
 
     function isManifestReference(expr: ts.Expression): boolean {
       const unwrapped = unwrapStaticExpression(expr);
@@ -679,6 +890,10 @@ describe('Storefront copy integrity & manifest guard', () => {
         if (ts.isIdentifier(fn) && APPROVED_FORMATTERS.has(fn.text)) {
           const name = fn.text;
           if (name !== 'formatCommunityDeliveryNote' && unwrapped.arguments.length === 0) {
+            return false;
+          }
+          const formatterViolations = checkFormatterDefinitions();
+          if (formatterViolations.some((res) => res.formatter === name)) {
             return false;
           }
           const relPath = (
@@ -1461,5 +1676,105 @@ export default async function ShopPage`,
     expect(unauthorized.some((u) => u.includes('Every order includes a complimentary gift.'))).toBe(
       true,
     );
+  });
+
+  test('approved formatter definitions in copy-manifest.ts are strictly built only from parameters, manifest references, and allowed static pieces', () => {
+    const results = checkFormatterDefinitions();
+    expect(
+      results,
+      `Approved formatters in copy-manifest.ts contain unauthorized expressions or unapproved string literals:\n${results
+        .map((r) => `${r.formatter}: ${r.violations.join(', ')}`)
+        .join('\n')}`,
+    ).toEqual([]);
+  });
+
+  test('Oscar bypass probe rejection: unauthorized hardcoded string added inside formatter body fails definition AST scanner (Round 18)', () => {
+    // Oscar Round 17 evidence mutant:
+    // agents/oscar-reviewer-mtolwvnc/evidence/pr46-round17-formatter-body-bypass.txt
+    // Prepending 'Every order includes a complimentary gift. ' inside formatShopSubtitle body in copy-manifest.ts
+    const manifestPath = path.join(storefrontDir, 'copy-manifest.ts');
+    const originalSource = fs.readFileSync(manifestPath, 'utf-8');
+
+    const probeSource = originalSource.replace(
+      '`${STOREFRONT_COPY_MANIFEST.cart.scheduledSlotBadge} · Delivery ${deliveryFeeFormatted} · Min order ${minOrderFormatted}`',
+      '`Every order includes a complimentary gift. ${STOREFRONT_COPY_MANIFEST.cart.scheduledSlotBadge} · Delivery ${deliveryFeeFormatted} · Min order ${minOrderFormatted}`',
+    );
+
+    expect(probeSource).not.toEqual(originalSource);
+
+    const results = checkFormatterDefinitions(probeSource);
+    const shopSubtitleViolations = results.find((r) => r.formatter === 'formatShopSubtitle');
+    expect(shopSubtitleViolations).toBeDefined();
+    expect(
+      shopSubtitleViolations?.violations.some((v) =>
+        v.includes('Every order includes a complimentary gift.'),
+      ),
+    ).toBe(true);
+  });
+
+  test('Oscar bypass probe rejection: unauthorized hardcoded suffix string inside formatter body fails definition AST scanner (Round 18)', () => {
+    const manifestPath = path.join(storefrontDir, 'copy-manifest.ts');
+    const originalSource = fs.readFileSync(manifestPath, 'utf-8');
+
+    const probeSource = originalSource.replace(
+      '`${STOREFRONT_COPY_MANIFEST.cart.scheduledSlotBadge} · Delivery ${deliveryFeeFormatted} · Min order ${minOrderFormatted}`',
+      '`${STOREFRONT_COPY_MANIFEST.cart.scheduledSlotBadge} · Delivery ${deliveryFeeFormatted} · Min order ${minOrderFormatted} — guaranteed fresh!`',
+    );
+
+    expect(probeSource).not.toEqual(originalSource);
+
+    const results = checkFormatterDefinitions(probeSource);
+    const shopSubtitleViolations = results.find((r) => r.formatter === 'formatShopSubtitle');
+    expect(shopSubtitleViolations).toBeDefined();
+    expect(shopSubtitleViolations?.violations.some((v) => v.includes('guaranteed fresh!'))).toBe(
+      true,
+    );
+  });
+
+  test('Oscar bypass probe rejection: unauthorized internal variable inside formatter body fails definition AST scanner (Round 18)', () => {
+    const manifestPath = path.join(storefrontDir, 'copy-manifest.ts');
+    const originalSource = fs.readFileSync(manifestPath, 'utf-8');
+
+    const probeSource = originalSource.replace(
+      'return `${STOREFRONT_COPY_MANIFEST.cart.scheduledSlotBadge} · Delivery ${deliveryFeeFormatted} · Min order ${minOrderFormatted}`;',
+      `const extraPerk = 'Complimentary gift with purchase.';\n  return \`\${extraPerk} \${STOREFRONT_COPY_MANIFEST.cart.scheduledSlotBadge} · Delivery \${deliveryFeeFormatted} · Min order \${minOrderFormatted}\`;`,
+    );
+
+    expect(probeSource).not.toEqual(originalSource);
+
+    const results = checkFormatterDefinitions(probeSource);
+    const shopSubtitleViolations = results.find((r) => r.formatter === 'formatShopSubtitle');
+    expect(shopSubtitleViolations).toBeDefined();
+    expect(
+      shopSubtitleViolations?.violations.some((v) =>
+        v.includes('Complimentary gift with purchase.'),
+      ),
+    ).toBe(true);
+  });
+
+  test('Oscar bypass probe rejection: corrupted formatter definition in copy-manifest causes call site in shop/page.tsx to reject the reference (Round 18)', () => {
+    const manifestPath = path.join(storefrontDir, 'copy-manifest.ts');
+    const originalManifest = fs.readFileSync(manifestPath, 'utf-8');
+
+    const corruptedManifest = originalManifest.replace(
+      '`${STOREFRONT_COPY_MANIFEST.cart.scheduledSlotBadge} · Delivery ${deliveryFeeFormatted} · Min order ${minOrderFormatted}`',
+      '`Every order includes a complimentary gift. ${STOREFRONT_COPY_MANIFEST.cart.scheduledSlotBadge} · Delivery ${deliveryFeeFormatted} · Min order ${minOrderFormatted}`',
+    );
+
+    // Write the corrupted manifest temporarily to test end-to-end call site rejection
+    fs.writeFileSync(manifestPath, corruptedManifest, 'utf-8');
+    try {
+      const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+      const literals = extractJsxLiterals(shopPath);
+      const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+      const unauthorized = literals.filter((lit) => !allowed.has(lit));
+
+      // With formatShopSubtitle corrupted in copy-manifest.ts, isManifestReference returns false,
+      // flagging formatShopSubtitle at the call site!
+      expect(unauthorized.length).toBeGreaterThan(0);
+    } finally {
+      // Restore original manifest immediately
+      fs.writeFileSync(manifestPath, originalManifest, 'utf-8');
+    }
   });
 });
