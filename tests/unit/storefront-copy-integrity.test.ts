@@ -551,28 +551,183 @@ describe('Storefront copy integrity & manifest guard', () => {
       return null;
     }
 
-    function collectStaticStrings(expr: ts.Expression): string[] {
+    function isManifestReference(expr: ts.Expression): boolean {
       const unwrapped = unwrapStaticExpression(expr);
-      if (ts.isStringLiteral(unwrapped) || ts.isNoSubstitutionTemplateLiteral(unwrapped)) {
-        return [unwrapped.text];
+      if (ts.isPropertyAccessExpression(unwrapped)) {
+        let curr: ts.Expression = unwrapped;
+        while (ts.isPropertyAccessExpression(curr)) {
+          curr = curr.expression;
+        }
+        if (ts.isIdentifier(curr) && curr.text === 'STOREFRONT_COPY_MANIFEST') {
+          return true;
+        }
       }
+      if (ts.isCallExpression(unwrapped)) {
+        const fn = unwrapped.expression;
+        if (ts.isIdentifier(fn)) {
+          const name = fn.text;
+          if (
+            [
+              'formatActiveWelcomeTitle',
+              'formatActiveWelcomeTerms',
+              'formatShopSubtitle',
+              'formatHubCardDescription',
+              'formatCommunityDeliveryNote',
+              'formatCommunitySubtitle',
+              'formatContactHubDescription',
+            ].includes(name)
+          ) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function collectSubtreeStrings(node: ts.Node): string[] {
+      const found: string[] = [];
+      function scan(n: ts.Node) {
+        if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
+          found.push(n.text);
+        }
+        ts.forEachChild(n, scan);
+      }
+      scan(node);
+      return found;
+    }
+
+    function inspectExpression(
+      expr: ts.Expression,
+      isClaimAttribute: boolean,
+      propName?: string,
+    ): { sanctioned: boolean; extractedStrings: string[] } {
+      const unwrapped = unwrapStaticExpression(expr);
+
+      // 1. Manifest reference: sanctioned
+      if (isManifestReference(unwrapped)) {
+        return { sanctioned: true, extractedStrings: [] };
+      }
+
+      // 2. Direct string / static concatenation: sanctioned shape, collect string to verify against allowed list
+      const staticStr = resolveStaticString(unwrapped);
+      if (staticStr !== null) {
+        return {
+          sanctioned: true,
+          extractedStrings: [
+            isClaimAttribute && propName ? `${propName}="${staticStr}"` : staticStr,
+          ],
+        };
+      }
+
+      if (isClaimAttribute && propName) {
+        // Allowed dynamic claim-bearing attribute initializers (e.g. notice={moved}, notice={cart.notice}, title={`...`})
+        if (
+          (propName.toLowerCase() === 'notice' &&
+            (ts.isIdentifier(unwrapped) || ts.isPropertyAccessExpression(unwrapped))) ||
+          ts.isTemplateExpression(unwrapped)
+        ) {
+          return { sanctioned: true, extractedStrings: [] };
+        }
+        // Unsanctioned claim-bearing attribute!
+        const subtree = collectSubtreeStrings(unwrapped);
+        const strings = subtree.map((s) => `${propName}="${s}"`);
+        strings.push(`${propName}={${unwrapped.getText(sf).trim().replace(/\s+/g, ' ')}}`);
+        return { sanctioned: false, extractedStrings: strings };
+      }
+
+      // JSX Child Expressions:
+      // 3. JSX Element, Self-Closing Element, Fragment (inner nodes visited by visitor)
+      if (
+        ts.isJsxElement(unwrapped) ||
+        ts.isJsxSelfClosingElement(unwrapped) ||
+        ts.isJsxFragment(unwrapped)
+      ) {
+        return { sanctioned: true, extractedStrings: [] };
+      }
+
+      // 4. Approved mapper returning JSX elements (e.g. list.map(...))
+      if (
+        ts.isCallExpression(unwrapped) &&
+        ts.isPropertyAccessExpression(unwrapped.expression) &&
+        unwrapped.expression.name.text === 'map'
+      ) {
+        return { sanctioned: true, extractedStrings: [] };
+      }
+
+      // 5. Conditional expression (ternary): collect static strings from branches
+      if (ts.isConditionalExpression(unwrapped)) {
+        const strings: string[] = [];
+        for (const branch of [unwrapped.whenTrue, unwrapped.whenFalse]) {
+          const b = unwrapStaticExpression(branch);
+          const str = resolveStaticString(b);
+          if (str !== null) {
+            strings.push(str);
+          }
+        }
+        return { sanctioned: true, extractedStrings: strings };
+      }
+
+      // 6. Safe dynamic identifiers
+      if (ts.isIdentifier(unwrapped)) {
+        const name = unwrapped.text;
+        if (
+          ['children', 'communityName', 'basketCount', 'sentence', 'title', 'subtitle'].includes(
+            name,
+          )
+        ) {
+          return { sanctioned: true, extractedStrings: [] };
+        }
+      }
+
+      // 7. Safe dynamic formatting calls: rupees, String, getFullYear, join
+      if (ts.isCallExpression(unwrapped)) {
+        const fn = unwrapped.expression;
+        if (ts.isIdentifier(fn) && ['rupees', 'String'].includes(fn.text)) {
+          return { sanctioned: true, extractedStrings: [] };
+        }
+        if (
+          ts.isPropertyAccessExpression(fn) &&
+          (fn.name.text === 'getFullYear' || fn.name.text === 'join')
+        ) {
+          return { sanctioned: true, extractedStrings: [] };
+        }
+      }
+
+      // 8. Safe model property access
+      if (ts.isPropertyAccessExpression(unwrapped)) {
+        let curr: ts.Expression = unwrapped;
+        while (ts.isPropertyAccessExpression(curr)) {
+          curr = curr.expression;
+        }
+        if (ts.isIdentifier(curr)) {
+          if (
+            ['community', 'line', 'area', 'notice', 'totals', 'issue', 'shop', 'settings'].includes(
+              curr.text,
+            )
+          ) {
+            return { sanctioned: true, extractedStrings: [] };
+          }
+        }
+      }
+
+      // 9. Nullish coalescing: extract fallback string if static
       if (
         ts.isBinaryExpression(unwrapped) &&
-        unwrapped.operatorToken.kind === ts.SyntaxKind.PlusToken
+        unwrapped.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
       ) {
-        const combined = resolveStaticString(unwrapped);
-        if (combined !== null) {
-          return [combined];
-        }
-        return [...collectStaticStrings(unwrapped.left), ...collectStaticStrings(unwrapped.right)];
+        const right = unwrapStaticExpression(unwrapped.right);
+        const str = resolveStaticString(right);
+        const strings = str !== null ? [str] : [];
+        return { sanctioned: true, extractedStrings: strings };
       }
-      if (ts.isConditionalExpression(unwrapped)) {
-        return [
-          ...collectStaticStrings(unwrapped.whenTrue),
-          ...collectStaticStrings(unwrapped.whenFalse),
-        ];
-      }
-      return [];
+
+      // Unsanctioned shape! Treat as violation outright.
+      const subtree = collectSubtreeStrings(unwrapped);
+      const exprText = unwrapped.getText(sf).trim().replace(/\s+/g, ' ');
+      return {
+        sanctioned: false,
+        extractedStrings: subtree.length > 0 ? [...subtree, exprText] : [exprText],
+      };
     }
 
     function visit(node: ts.Node) {
@@ -582,9 +737,9 @@ describe('Storefront copy integrity & manifest guard', () => {
       } else if (ts.isJsxExpression(node)) {
         if (!node.parent || !ts.isJsxAttribute(node.parent)) {
           if (node.expression) {
-            const strings = collectStaticStrings(node.expression);
-            for (const str of strings) {
-              const text = str.trim().replace(/\s+/g, ' ');
+            const res = inspectExpression(node.expression, false);
+            for (const s of res.extractedStrings) {
+              const text = s.trim().replace(/\s+/g, ' ');
               if (text) literals.push(text);
             }
           }
@@ -600,9 +755,10 @@ describe('Storefront copy integrity & manifest guard', () => {
             if (ts.isStringLiteral(node.initializer)) {
               literals.push(`${propName}="${node.initializer.text}"`);
             } else if (ts.isJsxExpression(node.initializer) && node.initializer.expression) {
-              const strings = collectStaticStrings(node.initializer.expression);
-              for (const str of strings) {
-                literals.push(`${propName}="${str}"`);
+              const res = inspectExpression(node.initializer.expression, true, propName);
+              for (const s of res.extractedStrings) {
+                const text = s.trim().replace(/\s+/g, ' ');
+                if (text) literals.push(text);
               }
             }
           }
@@ -672,6 +828,7 @@ describe('Storefront copy integrity & manifest guard', () => {
       '— your basket uses the new price.',
     ]),
     'community-selector.tsx': new Set([
+      'Local Store Hub',
       'Open',
       'Paused',
       'Primary Hub:',
@@ -820,5 +977,28 @@ describe('Storefront copy integrity & manifest guard', () => {
     expect(unauthorized).toContain('Every order includes a complimentary gift.');
     expect(unauthorized).toContain('Freshly harvested daily.');
     expect(unauthorized).toContain('No hidden fees ever.');
+  });
+
+  test('Oscar bypass probe rejection: logical &&, function call, and property access expressions are rejected by allowlist-by-default guard (Round 12)', () => {
+    // Oscar Round 12 probe: logical AND conditional rendering:
+    // <p>{true && 'Every order includes a complimentary gift.'}</p>
+    // plus function call producing a string and unapproved property access
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const shopSource = fs.readFileSync(shopPath, 'utf-8');
+
+    const simulatedOscarShop = shopSource.replace(
+      '</Card>',
+      `<p>{true && 'Every order includes a complimentary gift.'}</p>
+<p>{getPromotionalGuarantee()}</p>
+<p>{promotions.orderGuarantee}</p></Card>`,
+    );
+
+    const literals = extractJsxLiterals(shopPath, simulatedOscarShop);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+
+    expect(unauthorized).toContain('Every order includes a complimentary gift.');
+    expect(unauthorized).toContain('getPromotionalGuarantee()');
+    expect(unauthorized).toContain('promotions.orderGuarantee');
   });
 });
