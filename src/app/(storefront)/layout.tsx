@@ -242,14 +242,13 @@ export default async function StorefrontLayout({
                 </span>
               </div>
               <p className="mt-2 text-xs text-slate-500 leading-relaxed">
-                Dedicated hyperlocal grocery shopping for residential communities. Scheduled slot
-                delivery of fresh vegetables, fruits, dairy, staples, and daily household needs.
+                {STOREFRONT_COPY_MANIFEST.footer.brandDescription}
               </p>
             </div>
 
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                Communities Served
+                {STOREFRONT_COPY_MANIFEST.footer.communitiesHeading}
               </h3>
               <ul className="mt-3 space-y-2 text-xs text-slate-600">
                 {STORE_COMMUNITIES.map((community) => (
@@ -264,7 +263,7 @@ export default async function StorefrontLayout({
                     href="/unserviceable"
                     className="text-emerald-700 font-medium hover:underline"
                   >
-                    Living elsewhere? Request delivery →
+                    {STOREFRONT_COPY_MANIFEST.footer.unserviceableLink}
                   </Link>
                 </li>
               </ul>

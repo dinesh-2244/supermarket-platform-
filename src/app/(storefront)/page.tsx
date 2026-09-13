@@ -10,12 +10,15 @@ import { CommunitySelector } from './community-selector';
 import { CategoryTiles } from './category-tiles';
 import { communityNameForStore } from './communities';
 import { getCartQuantities } from './cart-quantities';
-import { STOREFRONT_COPY_MANIFEST } from './copy-manifest';
+import {
+  STOREFRONT_COPY_MANIFEST,
+  formatActiveWelcomeTitle,
+  formatActiveWelcomeTerms,
+} from './copy-manifest';
 
 export const metadata: Metadata = {
-  title: 'Munder Fresh | Hyperlocal Grocery Platform',
-  description:
-    'Groceries, daily essentials, dairy, staples, and fruits delivered to your community in scheduled slots.',
+  title: STOREFRONT_COPY_MANIFEST.home.meta.title,
+  description: STOREFRONT_COPY_MANIFEST.home.meta.description,
 };
 
 /**
@@ -167,14 +170,16 @@ export default async function StorefrontHome({
       <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-emerald-50/90 border border-emerald-200/80 px-4 py-3.5 sm:px-6">
         <div>
           <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">
-            Delivering from your local hub
+            {STOREFRONT_COPY_MANIFEST.home.activeWelcome.badge}
           </span>
           <h1 className="text-lg sm:text-xl font-black text-slate-900">
-            Shopping at {communityName}
+            {formatActiveWelcomeTitle(communityName)}
           </h1>
           <p className="text-xs text-slate-600 mt-0.5">
-            Delivery {rupees(settings.deliveryFeePaise)} · Minimum order{' '}
-            {rupees(settings.minOrderPaise)}
+            {formatActiveWelcomeTerms(
+              rupees(settings.deliveryFeePaise),
+              rupees(settings.minOrderPaise),
+            )}
           </p>
         </div>
 
@@ -183,21 +188,20 @@ export default async function StorefrontHome({
             href="/shop"
             className="inline-flex items-center rounded-xl bg-emerald-700 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-800 transition min-h-[44px]"
           >
-            Browse Full Shop →
+            {STOREFRONT_COPY_MANIFEST.home.activeWelcome.browseShopButton}
           </Link>
           <Link
             href="/store/select"
             className="inline-flex items-center rounded-xl border border-emerald-600 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 shadow-xs hover:bg-emerald-50 min-h-[44px]"
           >
-            Change Community
+            {STOREFRONT_COPY_MANIFEST.home.activeWelcome.changeCommunityButton}
           </Link>
         </div>
       </section>
 
       {settings.isAcceptingOrders ? null : (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-medium text-amber-900">
-          This community hub has paused order taking for now. You can still browse and add to
-          basket.
+          {STOREFRONT_COPY_MANIFEST.home.activeWelcome.pausedNotice}
         </div>
       )}
 
@@ -205,33 +209,37 @@ export default async function StorefrontHome({
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 p-5 text-white shadow-xs">
           <span className="rounded-md bg-white/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
-            Daily Essentials
+            {STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.badge}
           </span>
-          <h2 className="mt-2 text-xl font-black">Fruits, Vegetables &amp; Dairy</h2>
+          <h2 className="mt-2 text-xl font-black">
+            {STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.title}
+          </h2>
           <p className="mt-1 text-xs text-amber-50">
-            Vegetables, milk &amp; bakery goods for your breakfast slot.
+            {STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.description}
           </p>
           <Link
             href="/c/fruits-vegetables"
             className="mt-4 inline-block rounded-xl bg-white px-3.5 py-1.5 text-xs font-bold text-amber-900 shadow-xs hover:bg-amber-50 min-h-[44px] flex items-center"
           >
-            Shop Fresh Produce →
+            {STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.buttonText}
           </Link>
         </div>
 
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-teal-600 to-emerald-600 p-5 text-white shadow-xs">
           <span className="rounded-md bg-white/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
-            Super Saver
+            {STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.badge}
           </span>
-          <h2 className="mt-2 text-xl font-black">Kitchen Staples &amp; Grains</h2>
+          <h2 className="mt-2 text-xl font-black">
+            {STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.title}
+          </h2>
           <p className="mt-1 text-xs text-teal-50">
-            Rice, atta, edible oils &amp; dals at your community's everyday prices.
+            {STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.description}
           </p>
           <Link
             href="/c/staples"
             className="mt-4 inline-block rounded-xl bg-white px-3.5 py-1.5 text-xs font-bold text-teal-900 shadow-xs hover:bg-teal-50 min-h-[44px] flex items-center"
           >
-            Shop Pantry Staples →
+            {STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.buttonText}
           </Link>
         </div>
       </section>

@@ -14,6 +14,11 @@
 
 export const STOREFRONT_COPY_MANIFEST = {
   home: {
+    meta: {
+      title: 'Munder Fresh | Hyperlocal Grocery Platform',
+      description:
+        'Groceries, daily essentials, dairy, staples, and fruits delivered to your community in scheduled slots.',
+    },
     hero: {
       badge: 'Hyperlocal Residential Delivery',
       titlePrefix: 'Fresh Groceries Delivered in ',
@@ -36,6 +41,30 @@ export const STOREFRONT_COPY_MANIFEST = {
       doorstepTitle: 'Direct to Door',
       doorstepDescription: 'Delivery straight to your flat or home',
     },
+    activeWelcome: {
+      badge: 'Delivering from your local hub',
+      titlePrefix: 'Shopping at ',
+      feeDeliveryPrefix: 'Delivery ',
+      minOrderPrefix: ' · Minimum order ',
+      pausedNotice:
+        'This community hub has paused order taking for now. You can still browse and add to basket.',
+      browseShopButton: 'Browse Full Shop →',
+      changeCommunityButton: 'Change Community',
+    },
+    promoBanners: {
+      dailyEssentials: {
+        badge: 'Daily Essentials',
+        title: 'Fruits, Vegetables & Dairy',
+        description: 'Vegetables, milk & bakery goods for your breakfast slot.',
+        buttonText: 'Shop Fresh Produce →',
+      },
+      superSaver: {
+        badge: 'Super Saver',
+        title: 'Kitchen Staples & Grains',
+        description: "Rice, atta, edible oils & dals at your community's everyday prices.",
+        buttonText: 'Shop Pantry Staples →',
+      },
+    },
     aboutPreview: {
       badge: 'About Our Model',
       title: 'Hyperlocal Grocery Built for Residential Communities',
@@ -48,6 +77,15 @@ export const STOREFRONT_COPY_MANIFEST = {
       description:
         "We partner directly with residential societies to fulfill orders from dedicated local hubs. Choose a scheduled delivery window that fits your day, with catalogue listings and prices scoped to your community's store-recorded availability.",
     },
+  },
+  shop: {
+    meta: {
+      title: 'All Products | Munder Fresh Hyperlocal Grocery',
+      description:
+        'Shop fresh groceries, daily staples, fruits, vegetables, dairy, and household essentials.',
+    },
+    pausedNotice:
+      'This store has temporarily paused orders. You can still browse products and plan your basket.',
   },
   about: {
     meta: {
@@ -101,17 +139,90 @@ export const STOREFRONT_COPY_MANIFEST = {
         'Because we operate dedicated store hubs paired with specific residential partners, we only accept orders from addresses within our serviceable zones.',
     },
   },
+  contact: {
+    meta: {
+      title: 'Contact Us | Munder Fresh Hyperlocal Grocery',
+      description:
+        'Get in touch with Munder Fresh community store hubs. Contact information and resident support.',
+    },
+    hero: {
+      badge: 'Customer Support & Inquiries',
+      title: 'Contact Us',
+      subtitle:
+        'Have a question about your order, delivery schedule, or community service? We are here to help.',
+    },
+    appNotice: {
+      badge: 'Resident Orders & Inquiries',
+      title: 'In-App Support for Active Orders',
+      description:
+        'For current orders, order modifications, or immediate delivery updates, please reach out directly through your resident application or order receipt page.',
+      aboutLinkText: 'Learn more about our community hub delivery model on our About page',
+    },
+    communityHubs: {
+      badge: 'Community Store Hubs',
+      title: 'Our Dedicated Store Hubs',
+      description:
+        'Munder Fresh operates dedicated store hubs paired directly with our partner residential communities.',
+      hubCardTemplate:
+        'Dedicated store hub serving {hubName}. Contact channels and operating hours will be listed here once assigned.',
+    },
+    channels: {
+      phoneLabel: 'Phone Support',
+      phonePlaceholder: 'Assigned per community hub in resident app',
+      emailLabel: 'Email Support',
+      emailPlaceholder: 'Assigned per community hub in resident app',
+      hoursLabel: 'Operating Hours',
+      hoursPlaceholder: 'Aligned with active delivery slot windows',
+      addressLabel: 'Hub Location',
+      addressPlaceholder: 'On-premises community fulfillment facility',
+    },
+    helpCard: {
+      title: 'Need Help with Your Order?',
+      description:
+        'Check your past orders and status updates in your account, or review our operational principles.',
+      viewOrdersText: 'View Past Orders',
+      aboutUsText: 'About Munder Fresh',
+    },
+  },
   cart: {
+    meta: {
+      title: 'Your basket',
+      description: 'What you have chosen, priced by the shop that delivers to you.',
+    },
+    heading: {
+      title: 'Your basket',
+      subtitle: 'Prices and availability are checked against the shop every time you look.',
+    },
+    continueShopping: '← Continue shopping',
+    changeArea: '· Change area →',
+    checkoutNotice: 'No account needed. You pay when your order is delivered.',
+    scheduledSlotBadge: 'Scheduled slot delivery',
     trustBadges: {
       storeVerified: 'Store-verified prices and availability',
       doorstepPayment: 'Pay with Cash or UPI on delivery',
     },
   },
   communities: {
+    subtitleTemplate: '{shortName} · Scheduled Slot Delivery',
     deliveryNoteBase: 'Scheduled Slots · Dedicated Hub',
     deliveryNoteWithMinOrderPrefix: 'Scheduled Slots · Dedicated Hub · Min Order ',
+    selector: {
+      badge: 'Hyperlocal Community Delivery',
+      titleDefault: 'Select Your Store Community',
+      subtitleDefault:
+        'Fresh groceries, dairy, produce & daily essentials delivered to your doorstep in convenient scheduled slots.',
+      unserviceablePrompt: 'Living outside these communities? ',
+      unserviceableLinkText: 'Request delivery to your locality',
+    },
+  },
+  mobileCartBar: {
+    slotNotice: 'Scheduled slot delivery',
   },
   footer: {
+    brandDescription:
+      'Dedicated hyperlocal grocery shopping for residential communities. Scheduled slot delivery of fresh vegetables, fruits, dairy, staples, and daily household needs.',
+    communitiesHeading: 'Communities Served',
+    unserviceableLink: 'Living elsewhere? Request delivery →',
     commitmentsTitle: 'Store Commitments',
     commitmentsDescription:
       "Prices and availability are verified from your community's dedicated store. Free delivery options available on meeting order thresholds. Pay via Cash or UPI on delivery.",
@@ -120,6 +231,35 @@ export const STOREFRONT_COPY_MANIFEST = {
 
 export function formatHubCardDescription(hubName: string): string {
   return STOREFRONT_COPY_MANIFEST.about.hubSystem.hubCardTemplate.replace('{hubName}', hubName);
+}
+
+export function formatCommunitySubtitle(shortName: string): string {
+  return STOREFRONT_COPY_MANIFEST.communities.subtitleTemplate.replace('{shortName}', shortName);
+}
+
+export function formatActiveWelcomeTitle(communityName: string): string {
+  return `${STOREFRONT_COPY_MANIFEST.home.activeWelcome.titlePrefix}${communityName}`;
+}
+
+export function formatActiveWelcomeTerms(
+  deliveryFeeFormatted: string,
+  minOrderFormatted: string,
+): string {
+  return `${STOREFRONT_COPY_MANIFEST.home.activeWelcome.feeDeliveryPrefix}${deliveryFeeFormatted}${STOREFRONT_COPY_MANIFEST.home.activeWelcome.minOrderPrefix}${minOrderFormatted}`;
+}
+
+export function formatShopSubtitle(
+  deliveryFeeFormatted: string,
+  minOrderFormatted: string,
+): string {
+  return `${STOREFRONT_COPY_MANIFEST.cart.scheduledSlotBadge} · Delivery ${deliveryFeeFormatted} · Min order ${minOrderFormatted}`;
+}
+
+export function formatContactHubDescription(hubName: string): string {
+  return STOREFRONT_COPY_MANIFEST.contact.communityHubs.hubCardTemplate.replace(
+    '{hubName}',
+    hubName,
+  );
 }
 
 export function formatCommunityDeliveryNote(minOrderFormatted?: string): string {
