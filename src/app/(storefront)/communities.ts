@@ -5,7 +5,7 @@ import {
   type StorefrontArea,
   type StoreRecord,
 } from '@/modules/stores';
-import { formatCommunityDeliveryNote } from './copy-manifest';
+import { formatCommunityDeliveryNote, formatCommunitySubtitle } from './copy-manifest';
 
 function formatRupees(paise: number): string {
   const sign = paise < 0 ? '-' : '';
@@ -32,7 +32,7 @@ export const STORE_COMMUNITIES: readonly CommunityConfig[] = [
     storeCode: 'S1',
     name: 'Store 1 Community',
     shortName: 'Store 1',
-    subtitle: 'Store 1 · Scheduled Slot Delivery',
+    subtitle: formatCommunitySubtitle('Store 1'),
     hubName: 'Store 1 Hub',
   },
   {
@@ -40,7 +40,7 @@ export const STORE_COMMUNITIES: readonly CommunityConfig[] = [
     storeCode: 'S2',
     name: 'Store 2 Community',
     shortName: 'Store 2',
-    subtitle: 'Store 2 · Scheduled Slot Delivery',
+    subtitle: formatCommunitySubtitle('Store 2'),
     hubName: 'Store 2 Hub',
   },
 ] as const;
@@ -135,7 +135,7 @@ const DEFAULT_COMMUNITY: CommunityConfig = {
   storeCode: 'S1',
   name: 'Store 1 Community',
   shortName: 'Store 1',
-  subtitle: 'Store 1 · Scheduled Slot Delivery',
+  subtitle: formatCommunitySubtitle('Store 1'),
   hubName: 'Store 1 Hub',
 };
 
@@ -169,7 +169,7 @@ export function getCommunityConfigForStore(
     storeCode: store.code ?? '',
     name: store.name ?? 'Store Community',
     shortName: store.code ?? 'Store',
-    subtitle: `${store.name ?? 'Store'} · Scheduled Slot Delivery`,
+    subtitle: formatCommunitySubtitle(store.name ?? 'Store'),
     hubName: `${store.name ?? 'Store'} Hub`,
   };
 }

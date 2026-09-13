@@ -27,8 +27,8 @@ import { ActionForm } from '../form';
 import { rupees, Card, PageHeading } from '../ui';
 
 export const metadata: Metadata = {
-  title: 'Your basket',
-  description: 'What you have chosen, priced by the shop that delivers to you.',
+  title: STOREFRONT_COPY_MANIFEST.cart.meta.title,
+  description: STOREFRONT_COPY_MANIFEST.cart.meta.description,
 };
 
 /**
@@ -121,11 +121,11 @@ export default async function CartPage(): Promise<React.ReactElement> {
             href="/shop"
             className="inline-flex min-h-[44px] items-center gap-1.5 py-2 text-xs font-semibold text-emerald-800 hover:text-emerald-900 transition mb-2"
           >
-            ← Continue shopping
+            {STOREFRONT_COPY_MANIFEST.cart.continueShopping}
           </Link>
           <PageHeading
-            title="Your basket"
-            subtitle="Prices and availability are checked against the shop every time you look."
+            title={STOREFRONT_COPY_MANIFEST.cart.heading.title}
+            subtitle={STOREFRONT_COPY_MANIFEST.cart.heading.subtitle}
           />
         </div>
         <Link
@@ -136,7 +136,9 @@ export default async function CartPage(): Promise<React.ReactElement> {
         >
           <span className="h-2 w-2 rounded-full bg-emerald-600 animate-pulse" aria-hidden="true" />
           <span className="font-semibold">{community.name}</span>
-          <span className="text-emerald-700 text-[11px]">· Change area →</span>
+          <span className="text-emerald-700 text-[11px]">
+            {STOREFRONT_COPY_MANIFEST.cart.changeArea}
+          </span>
         </Link>
       </div>
 
@@ -211,7 +213,7 @@ export default async function CartPage(): Promise<React.ReactElement> {
                 Proceed to checkout
               </Link>
               <p className="mt-2.5 text-center text-xs text-slate-500">
-                No account needed. You pay when your order is delivered.
+                {STOREFRONT_COPY_MANIFEST.cart.checkoutNotice}
               </p>
             </div>
 
@@ -230,7 +232,7 @@ export default async function CartPage(): Promise<React.ReactElement> {
                     d="M5 13l4 4L19 7"
                   />
                 </svg>
-                <span>Scheduled slot delivery</span>
+                <span>{STOREFRONT_COPY_MANIFEST.cart.scheduledSlotBadge}</span>
               </div>
               <div className="flex items-center gap-2">
                 <svg

@@ -4,6 +4,10 @@ import { describe, expect, test } from 'vitest';
 import {
   STOREFRONT_COPY_MANIFEST,
   formatHubCardDescription,
+  formatCommunitySubtitle,
+  formatActiveWelcomeTitle,
+  formatActiveWelcomeTerms,
+  formatShopSubtitle,
   formatCommunityDeliveryNote,
 } from '../../src/app/(storefront)/copy-manifest';
 
@@ -50,6 +54,8 @@ describe('Storefront copy integrity & manifest guard', () => {
 
   test('STOREFRONT_COPY_MANIFEST covers all required customer-facing surfaces', () => {
     // Home surface
+    expect(STOREFRONT_COPY_MANIFEST.home.meta.title).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.home.meta.description).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.home.hero.badge).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.home.hero.titlePrefix).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.home.hero.titleHighlight).toBeTruthy();
@@ -60,12 +66,26 @@ describe('Storefront copy integrity & manifest guard', () => {
     expect(STOREFRONT_COPY_MANIFEST.home.highlights.produceTitle).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.home.highlights.paymentTitle).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.home.highlights.doorstepTitle).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.home.activeWelcome.badge).toBeTruthy();
+    expect(formatActiveWelcomeTitle('Store 1')).toContain('Store 1');
+    expect(formatActiveWelcomeTerms('₹40.00', '₹500.00')).toContain('₹40.00');
+    expect(STOREFRONT_COPY_MANIFEST.home.activeWelcome.pausedNotice).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.badge).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.title).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.badge).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.title).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.home.aboutPreview.badge).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.home.aboutPreview.title).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.home.aboutPreview.description).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.home.promise.badge).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.home.promise.title).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.home.promise.description).toBeTruthy();
+
+    // Shop surface
+    expect(STOREFRONT_COPY_MANIFEST.shop.meta.title).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.shop.meta.description).toBeTruthy();
+    expect(formatShopSubtitle('₹40.00', '₹500.00')).toContain('₹40.00');
+    expect(STOREFRONT_COPY_MANIFEST.shop.pausedNotice).toBeTruthy();
 
     // About surface
     expect(STOREFRONT_COPY_MANIFEST.about.meta.title).toBeTruthy();
@@ -89,10 +109,18 @@ describe('Storefront copy integrity & manifest guard', () => {
     expect(STOREFRONT_COPY_MANIFEST.about.serviceBoundary.description).toBeTruthy();
 
     // Cart surface
+    expect(STOREFRONT_COPY_MANIFEST.cart.meta.title).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.cart.meta.description).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.cart.heading.title).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.cart.heading.subtitle).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.cart.checkoutNotice).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.cart.scheduledSlotBadge).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.cart.trustBadges.storeVerified).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.cart.trustBadges.doorstepPayment).toBeTruthy();
 
     // Communities surface
+    expect(STOREFRONT_COPY_MANIFEST.communities.subtitleTemplate).toBeTruthy();
+    expect(formatCommunitySubtitle('Store 1')).toBe('Store 1 · Scheduled Slot Delivery');
     expect(STOREFRONT_COPY_MANIFEST.communities.deliveryNoteBase).toBeTruthy();
     expect(formatCommunityDeliveryNote()).toBe(
       STOREFRONT_COPY_MANIFEST.communities.deliveryNoteBase,
@@ -100,8 +128,17 @@ describe('Storefront copy integrity & manifest guard', () => {
     expect(formatCommunityDeliveryNote('₹500.00')).toBe(
       'Scheduled Slots · Dedicated Hub · Min Order ₹500.00',
     );
+    expect(STOREFRONT_COPY_MANIFEST.communities.selector.badge).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.communities.selector.titleDefault).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.communities.selector.subtitleDefault).toBeTruthy();
+
+    // Mobile bar surface
+    expect(STOREFRONT_COPY_MANIFEST.mobileCartBar.slotNotice).toBeTruthy();
 
     // Footer surface
+    expect(STOREFRONT_COPY_MANIFEST.footer.brandDescription).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.footer.communitiesHeading).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.footer.unserviceableLink).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.footer.commitmentsTitle).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.footer.commitmentsDescription).toBeTruthy();
   });
@@ -281,5 +318,107 @@ describe('Storefront copy integrity & manifest guard', () => {
         ).toBe(false);
       }
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // 3. Manifest Consumption & Exclusivity Invariants (PR #46 Round 6 Guard)
+  // ---------------------------------------------------------------------------
+
+  test('target storefront files strictly consume STOREFRONT_COPY_MANIFEST rather than inline literals', () => {
+    // 1. cart/page.tsx
+    const cartSource = fs.readFileSync(path.join(storefrontDir, 'cart/page.tsx'), 'utf-8');
+    expect(cartSource).toContain('title: STOREFRONT_COPY_MANIFEST.cart.meta.title');
+    expect(cartSource).toContain('description: STOREFRONT_COPY_MANIFEST.cart.meta.description');
+    expect(cartSource).toContain('title={STOREFRONT_COPY_MANIFEST.cart.heading.title}');
+    expect(cartSource).toContain('subtitle={STOREFRONT_COPY_MANIFEST.cart.heading.subtitle}');
+    expect(cartSource).toContain('{STOREFRONT_COPY_MANIFEST.cart.continueShopping}');
+    expect(cartSource).toContain('{STOREFRONT_COPY_MANIFEST.cart.checkoutNotice}');
+    expect(cartSource).toContain('{STOREFRONT_COPY_MANIFEST.cart.scheduledSlotBadge}');
+    // Zero hardcoded subtitle strings in cart
+    expect(cartSource).not.toMatch(/subtitle\s*=\s*["'][^"']+["']/);
+    // Zero hardcoded checkout trust notice
+    expect(cartSource).not.toContain('No account needed');
+
+    // 2. page.tsx
+    const homeSource = fs.readFileSync(path.join(storefrontDir, 'page.tsx'), 'utf-8');
+    expect(homeSource).toContain('title: STOREFRONT_COPY_MANIFEST.home.meta.title');
+    expect(homeSource).toContain('description: STOREFRONT_COPY_MANIFEST.home.meta.description');
+    expect(homeSource).toContain('{STOREFRONT_COPY_MANIFEST.home.activeWelcome.badge}');
+    expect(homeSource).toContain('formatActiveWelcomeTitle(communityName)');
+    expect(homeSource).toContain('{STOREFRONT_COPY_MANIFEST.home.activeWelcome.pausedNotice}');
+    expect(homeSource).toContain(
+      '{STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.badge}',
+    );
+    expect(homeSource).toContain(
+      '{STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.title}',
+    );
+    expect(homeSource).toContain('{STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.badge}');
+    expect(homeSource).toContain('{STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.title}');
+    // Zero hardcoded promotional or welcome strings
+    expect(homeSource).not.toContain('>Delivering from your local hub<');
+    expect(homeSource).not.toContain('>Fruits, Vegetables & Dairy<');
+    expect(homeSource).not.toContain('>Kitchen Staples & Grains<');
+
+    // 3. layout.tsx
+    const layoutSource = fs.readFileSync(path.join(storefrontDir, 'layout.tsx'), 'utf-8');
+    expect(layoutSource).toContain('{STOREFRONT_COPY_MANIFEST.footer.brandDescription}');
+    expect(layoutSource).toContain('{STOREFRONT_COPY_MANIFEST.footer.communitiesHeading}');
+    expect(layoutSource).toContain('{STOREFRONT_COPY_MANIFEST.footer.unserviceableLink}');
+    expect(layoutSource).not.toContain(
+      'Dedicated hyperlocal grocery shopping for residential communities.',
+    );
+
+    // 4. communities.ts
+    const communitiesSource = fs.readFileSync(path.join(storefrontDir, 'communities.ts'), 'utf-8');
+    expect(communitiesSource).toContain('formatCommunitySubtitle');
+    expect(communitiesSource).not.toContain("'· Scheduled Slot Delivery'");
+    expect(communitiesSource).not.toContain('"· Scheduled Slot Delivery"');
+
+    // 5. mobile-cart-bar.tsx
+    const mobileBarSource = fs.readFileSync(
+      path.join(storefrontDir, 'mobile-cart-bar.tsx'),
+      'utf-8',
+    );
+    expect(mobileBarSource).toContain('{STOREFRONT_COPY_MANIFEST.mobileCartBar.slotNotice}');
+    expect(mobileBarSource).not.toMatch(/>\s*Scheduled slot delivery\s*</);
+
+    // 6. shop/page.tsx
+    const shopSource = fs.readFileSync(path.join(storefrontDir, 'shop/page.tsx'), 'utf-8');
+    expect(shopSource).toContain('title: STOREFRONT_COPY_MANIFEST.shop.meta.title');
+    expect(shopSource).toContain('formatShopSubtitle');
+    expect(shopSource).toContain('{STOREFRONT_COPY_MANIFEST.shop.pausedNotice}');
+  });
+
+  test('Oscar bypass probe rejection: an inline string edit to PageHeading subtitle is caught and rejected', () => {
+    // Oscar proved in Round 6 that a reviewer could edit cart/page.tsx directly to say
+    // `subtitle="Your order arrives when promised"` and pass tests that only check manifest population.
+    // This consumption guard strictly verifies that such an edit causes immediate test failure.
+    function validateCartSourceConsumption(source: string): { valid: boolean; error?: string } {
+      if (/subtitle\s*=\s*["'][^"']+["']/.test(source)) {
+        return {
+          valid: false,
+          error: 'Forbidden inline string literal found on PageHeading subtitle',
+        };
+      }
+      if (!source.includes('subtitle={STOREFRONT_COPY_MANIFEST.cart.heading.subtitle}')) {
+        return {
+          valid: false,
+          error: 'Missing required binding to STOREFRONT_COPY_MANIFEST.cart.heading.subtitle',
+        };
+      }
+      return { valid: true };
+    }
+
+    const actualCartSource = fs.readFileSync(path.join(storefrontDir, 'cart/page.tsx'), 'utf-8');
+    expect(validateCartSourceConsumption(actualCartSource).valid).toBe(true);
+
+    // Simulated Oscar probe: developer puts raw unbacked claim string directly into JSX
+    const simulatedOscarProbe = actualCartSource.replace(
+      'subtitle={STOREFRONT_COPY_MANIFEST.cart.heading.subtitle}',
+      'subtitle="Your order arrives when promised"',
+    );
+    const probeResult = validateCartSourceConsumption(simulatedOscarProbe);
+    expect(probeResult.valid).toBe(false);
+    expect(probeResult.error).toContain('Forbidden inline string literal');
   });
 });

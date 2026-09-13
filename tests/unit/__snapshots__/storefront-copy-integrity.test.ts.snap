@@ -46,6 +46,18 @@ exports[`Storefront copy integrity & manifest guard > STOREFRONT_COPY_MANIFEST m
     },
   },
   "cart": {
+    "changeArea": "· Change area →",
+    "checkoutNotice": "No account needed. You pay when your order is delivered.",
+    "continueShopping": "← Continue shopping",
+    "heading": {
+      "subtitle": "Prices and availability are checked against the shop every time you look.",
+      "title": "Your basket",
+    },
+    "meta": {
+      "description": "What you have chosen, priced by the shop that delivers to you.",
+      "title": "Your basket",
+    },
+    "scheduledSlotBadge": "Scheduled slot delivery",
     "trustBadges": {
       "doorstepPayment": "Pay with Cash or UPI on delivery",
       "storeVerified": "Store-verified prices and availability",
@@ -54,16 +66,36 @@ exports[`Storefront copy integrity & manifest guard > STOREFRONT_COPY_MANIFEST m
   "communities": {
     "deliveryNoteBase": "Scheduled Slots · Dedicated Hub",
     "deliveryNoteWithMinOrderPrefix": "Scheduled Slots · Dedicated Hub · Min Order ",
+    "selector": {
+      "badge": "Hyperlocal Community Delivery",
+      "subtitleDefault": "Fresh groceries, dairy, produce & daily essentials delivered to your doorstep in convenient scheduled slots.",
+      "titleDefault": "Select Your Store Community",
+      "unserviceableLinkText": "Request delivery to your locality",
+      "unserviceablePrompt": "Living outside these communities? ",
+    },
+    "subtitleTemplate": "{shortName} · Scheduled Slot Delivery",
   },
   "footer": {
+    "brandDescription": "Dedicated hyperlocal grocery shopping for residential communities. Scheduled slot delivery of fresh vegetables, fruits, dairy, staples, and daily household needs.",
     "commitmentsDescription": "Prices and availability are verified from your community's dedicated store. Free delivery options available on meeting order thresholds. Pay via Cash or UPI on delivery.",
     "commitmentsTitle": "Store Commitments",
+    "communitiesHeading": "Communities Served",
+    "unserviceableLink": "Living elsewhere? Request delivery →",
   },
   "home": {
     "aboutPreview": {
       "badge": "About Our Model",
       "description": "We operate dedicated store hubs for partner residential societies. Learn how our two-community model delivers scheduled morning and evening slots.",
       "title": "Hyperlocal Grocery Built for Residential Communities",
+    },
+    "activeWelcome": {
+      "badge": "Delivering from your local hub",
+      "browseShopButton": "Browse Full Shop →",
+      "changeCommunityButton": "Change Community",
+      "feeDeliveryPrefix": "Delivery ",
+      "minOrderPrefix": " · Minimum order ",
+      "pausedNotice": "This community hub has paused order taking for now. You can still browse and add to basket.",
+      "titlePrefix": "Shopping at ",
     },
     "communitySelector": {
       "subtitle": "Choose your residential community to see accurate local stock, current store pricing, and booking slots.",
@@ -85,11 +117,39 @@ exports[`Storefront copy integrity & manifest guard > STOREFRONT_COPY_MANIFEST m
       "slotsDescription": "Pick your preferred delivery window",
       "slotsTitle": "Scheduled Slots",
     },
+    "meta": {
+      "description": "Groceries, daily essentials, dairy, staples, and fruits delivered to your community in scheduled slots.",
+      "title": "Munder Fresh | Hyperlocal Grocery Platform",
+    },
     "promise": {
       "badge": "The Munder Fresh Promise",
       "description": "We partner directly with residential societies to fulfill orders from dedicated local hubs. Choose a scheduled delivery window that fits your day, with catalogue listings and prices scoped to your community's store-recorded availability.",
       "title": "Why Hyperlocal Residential Delivery?",
     },
+    "promoBanners": {
+      "dailyEssentials": {
+        "badge": "Daily Essentials",
+        "buttonText": "Shop Fresh Produce →",
+        "description": "Vegetables, milk & bakery goods for your breakfast slot.",
+        "title": "Fruits, Vegetables & Dairy",
+      },
+      "superSaver": {
+        "badge": "Super Saver",
+        "buttonText": "Shop Pantry Staples →",
+        "description": "Rice, atta, edible oils & dals at your community's everyday prices.",
+        "title": "Kitchen Staples & Grains",
+      },
+    },
+  },
+  "mobileCartBar": {
+    "slotNotice": "Scheduled slot delivery",
+  },
+  "shop": {
+    "meta": {
+      "description": "Shop fresh groceries, daily staples, fruits, vegetables, dairy, and household essentials.",
+      "title": "All Products | Munder Fresh Hyperlocal Grocery",
+    },
+    "pausedNotice": "This store has temporarily paused orders. You can still browse products and plan your basket.",
   },
 }
 `;
