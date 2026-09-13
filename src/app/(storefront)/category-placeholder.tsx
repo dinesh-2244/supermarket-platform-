@@ -178,6 +178,7 @@ export function CategoryPlaceholder({
   if (size === 'sm') {
     return (
       <div
+        data-testid="category-placeholder"
         className={`flex h-full w-full items-center justify-center rounded-xl ${config.bgClass} ${config.iconClass} ${className}`}
         aria-label={`Category illustration: ${config.label}`}
         role="img"
@@ -190,6 +191,7 @@ export function CategoryPlaceholder({
   if (size === 'lg') {
     return (
       <div
+        data-testid="category-placeholder"
         className={`flex min-h-[260px] sm:min-h-[340px] w-full flex-col items-center justify-center rounded-2xl p-6 text-center ${config.bgClass} ${className}`}
         aria-label={`Category illustration: ${config.label}`}
         role="img"
@@ -203,28 +205,25 @@ export function CategoryPlaceholder({
           {config.label}
         </span>
         <p className="mt-2 text-xs text-slate-500 max-w-xs leading-relaxed">
-          Generic placeholder for {name ? `"${name}"` : 'this product'}. Photography will appear
+          Generic placeholder for {name ? `"${name}"` : 'this product'}. Product image will appear
           once added to catalogue.
         </p>
       </div>
     );
   }
 
-  // Default 'md' size: used in ProductCard (compact card slot)
+  // Default 'md' size: used in ProductCard (compact card slot).
+  // Render clean illustration icon without child text nodes so parent product link textContent / accessible name is not polluted.
   return (
     <div
-      className={`flex h-full w-full flex-col items-center justify-center rounded-xl p-3 ${config.bgClass} ${className}`}
+      data-testid="category-placeholder"
+      className={`flex h-full w-full items-center justify-center rounded-xl p-3 ${config.bgClass} ${className}`}
       aria-label={`Category illustration: ${config.label}`}
       role="img"
     >
       <div className="transition duration-200 group-hover:scale-105">
-        {config.renderIcon(`h-10 w-10 sm:h-12 sm:w-12 ${config.iconClass}`)}
+        {config.renderIcon(`h-12 w-12 sm:h-14 sm:w-14 ${config.iconClass}`)}
       </div>
-      <span
-        className={`mt-1.5 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold tracking-tight uppercase ${config.badgeClass}`}
-      >
-        {config.label}
-      </span>
     </div>
   );
 }
