@@ -13,7 +13,7 @@ export const metadata: Metadata = {
  *
  * Structural-only display for Munder Fresh customer support:
  * - Accurately presents the two community store hubs (STORE_COMMUNITIES).
- * - Guides active order inquiries to the resident app and links to /about.
+ * - Informs customers that a live order support channel is not yet active and links to /about.
  * - Provides structural placeholders for phone, email, hours, and hub location
  *   ready for future operator contact details without needing layout redesigns.
  * - Zero fabricated phone numbers, emails, addresses, hours, or SLA promises.

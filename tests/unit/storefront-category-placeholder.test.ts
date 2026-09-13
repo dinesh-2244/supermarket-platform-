@@ -51,7 +51,9 @@ describe('Contact Us configuration and copy integrity', () => {
     expect(contact.meta.description).toBeTruthy();
     expect(contact.hero.title).toBe('Contact Us');
     expect(contact.appNotice.title).toBeTruthy();
-    expect(contact.appNotice.description).toContain('resident application');
+    expect(contact.appNotice.description).toContain(
+      'live order-support channel is not currently active',
+    );
     expect(contact.channels.phoneLabel).toBeTruthy();
     expect(contact.channels.emailLabel).toBeTruthy();
     expect(contact.channels.hoursLabel).toBeTruthy();
