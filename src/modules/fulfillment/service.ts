@@ -538,7 +538,10 @@ export async function dispatch(
 ): Promise<TransitionOutcome> {
   const assignee = (options.assigneeName ?? '').trim() || null;
   const outcome = await withTransaction(async (tx) => {
-    await lockForActor(tx, actor, orderId, ['PACKED']);
+    // PACKED the first time; DELIVERY_FAILED when it goes out again. Both are
+    // the same edge into OUT_FOR_DELIVERY, and `markOut` upserts, so the one
+    // DeliveryRecord is reused rather than duplicated (OSCAR M1 on PR #53).
+    await lockForActor(tx, actor, orderId, ['PACKED', 'DELIVERY_FAILED']);
     const moved = await transition(tx, orderId, 'OUT_FOR_DELIVERY', actor, assignee);
     await repo.markOut(tx, orderId, assignee, new Date());
     return moved;
@@ -553,20 +556,26 @@ export interface DispatchQueueRow extends QueueRow {
 }
 
 /**
- * The store's `BILLED_IN_POS` and `PACKED` orders, each saying whether the
- * variance guard would block its dispatch — asked of the state machine, so the
- * screen's "blocked" badge and the refusal it would get agree by construction.
+ * The store's `BILLED_IN_POS`, `PACKED` and `DELIVERY_FAILED` orders, each
+ * saying why a dispatch would be refused right now — not packed yet, or the
+ * variance guard — asked of the state machine from the row's own status, so
+ * the screen's "blocked" badge and the refusal it would get agree by
+ * construction.
  */
 export async function dispatchQueue(
   actor: Principal,
   storeId: string,
 ): Promise<DispatchQueueRow[]> {
-  const rows = await queueForStore(actor, storeId, { statuses: ['BILLED_IN_POS', 'PACKED'] });
+  const rows = await queueForStore(actor, storeId, {
+    statuses: ['BILLED_IN_POS', 'PACKED', 'DELIVERY_FAILED'],
+  });
   const orders = await Promise.all(rows.map((row) => staffOrder(actor, row.id)));
   return rows.map((row, i) => {
     const order = orders[i];
     if (order === null || order === undefined) return { ...row, dispatchBlockedBy: null };
-    const check = checkTransition('PACKED', 'OUT_FOR_DELIVERY', {
+    // Judged from the row's *own* status: a BILLED_IN_POS order is blocked by
+    // not being packed yet, and says so, rather than reading as ready.
+    const check = checkTransition(row.status, 'OUT_FOR_DELIVERY', {
       priceVarianceFlagged: order.priceVarianceFlagged,
       customerConfirmedRevisedAmount: order.customerConfirmedRevisedAmount,
     });

@@ -3,9 +3,11 @@ import {
   clearEventHandlersForTests,
   getPrisma,
   on,
+  withTransaction,
   type DomainEventName,
   type Principal,
 } from '@/modules/platform';
+import { transition } from '@/modules/orders';
 import { confirmRevisedAmount, dispatch, dispatchQueue, markPacked } from '@/modules/fulfillment';
 import { createCustomer, createStoreWithProduct, createUser } from '../factories/index';
 import { placeOrder, walkTo } from './helpers/fulfillment-walk';
@@ -155,19 +157,28 @@ describe('dispatch and the variance guard, driven for real', () => {
     expect(await status(id)).toBe('PACKED');
   });
 
-  it('keeps one delivery record per order across a re-dispatch', async () => {
-    // A failed delivery re-dispatched (D4) reuses the record; here, prove
-    // dispatch itself is idempotent on the row by dispatching once and checking
-    // the row count — the re-dispatch edge is exercised in the delivery suite.
+  it('sends a failed delivery out again, reusing its one delivery record', async () => {
+    // The state machine allows DELIVERY_FAILED → OUT_FOR_DELIVERY; the
+    // dispatch action must too (OSCAR M1 on PR #53). The failure itself is
+    // D4's to record; here the order is put into DELIVERY_FAILED directly.
     const id = await billedOrder();
     await markPacked(staffA, id);
-    await dispatch(staffA, id);
+    await dispatch(staffA, id, { assigneeName: 'Ravi' });
+    await withTransaction((tx) => transition(tx, id, 'DELIVERY_FAILED', staffA, 'Nobody home'));
+    expect(await status(id)).toBe('DELIVERY_FAILED');
+
+    const outcome = await dispatch(staffA, id, { assigneeName: 'Meena' });
+    expect(outcome).toMatchObject({ from: 'DELIVERY_FAILED', to: 'OUT_FOR_DELIVERY' });
+    expect(await status(id)).toBe('OUT_FOR_DELIVERY');
     expect(await prisma.deliveryRecord.count({ where: { orderId: id } })).toBe(1);
+    expect(await prisma.deliveryRecord.findUniqueOrThrow({ where: { orderId: id } })).toMatchObject(
+      { status: 'OUT', assigneeName: 'Meena' },
+    );
   });
 });
 
 describe('the dispatch queue', () => {
-  it('lists the store’s BILLED_IN_POS and PACKED orders, flagging which are blocked', async () => {
+  it('lists the store’s BILLED_IN_POS, PACKED and DELIVERY_FAILED orders, saying why each cannot go yet', async () => {
     const billed = await billedOrder();
     const packedClear = await billedOrder();
     await markPacked(staffA, packedClear);
@@ -178,14 +189,22 @@ describe('the dispatch queue', () => {
     const out = await billedOrder();
     await markPacked(staffA, out);
     await dispatch(staffA, out);
+    const failed = await billedOrder();
+    await markPacked(staffA, failed);
+    await dispatch(staffA, failed);
+    await withTransaction((tx) => transition(tx, failed, 'DELIVERY_FAILED', staffA, 'Refused'));
     const other = await placeOrder(storeB, productB, customerId);
     await walkTo(managerB, other, 'PACKED');
 
     const queue = await dispatchQueue(staffA, storeA);
     const byId = new Map(queue.map((q) => [q.id, q]));
-    expect(byId.get(billed)).toMatchObject({ status: 'BILLED_IN_POS', dispatchBlockedBy: null });
+    // Still to pack: the row says so, rather than reading as ready (OSCAR M2).
+    expect(byId.get(billed)).toMatchObject({ status: 'BILLED_IN_POS' });
+    expect(byId.get(billed)?.dispatchBlockedBy).toMatch(/BILLED_IN_POS/);
     expect(byId.get(packedClear)).toMatchObject({ status: 'PACKED', dispatchBlockedBy: null });
     expect(byId.get(packedBlocked)?.dispatchBlockedBy).toMatch(/confirm the revised amount/i);
+    // A failed delivery is waiting to go out again (OSCAR M1).
+    expect(byId.get(failed)).toMatchObject({ status: 'DELIVERY_FAILED', dispatchBlockedBy: null });
     expect(byId.has(out)).toBe(false);
     expect(byId.has(other)).toBe(false);
     await expect(dispatchQueue(managerB, storeA)).rejects.toThrow(/permission/i);
