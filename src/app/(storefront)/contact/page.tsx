@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { STORE_COMMUNITIES } from '../communities';
 import { STOREFRONT_COPY_MANIFEST, formatContactHubDescription } from '../copy-manifest';
+import { WaveHorizonGraphic } from '../promo-banner';
 
 export const metadata: Metadata = {
   title: STOREFRONT_COPY_MANIFEST.contact.meta.title,
@@ -16,7 +17,8 @@ export const metadata: Metadata = {
  * - Informs customers that a live order support channel is not yet active and links to /about.
  * - Provides structural placeholders for phone, email, hours, and hub location
  *   ready for future operator contact details without needing layout redesigns.
- * - Zero fabricated phone numbers, emails, addresses, hours, or SLA promises.
+ * - Zero fabricated phone numbers, emails, addresses, or SLA promises.
+ * - Displays stated daily operating hours (10:00 AM - 8:00 PM).
  * - Strictly display-only (no backend form submissions).
  */
 export default function ContactPage(): React.ReactElement {
@@ -25,28 +27,26 @@ export default function ContactPage(): React.ReactElement {
   return (
     <div className="mx-auto max-w-4xl space-y-10 py-2 sm:py-6">
       {/* Hero Header */}
-      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-800 via-emerald-700 to-teal-800 px-6 py-12 sm:px-12 sm:py-16 text-white shadow-md">
+      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 px-6 py-12 sm:px-12 sm:py-16 text-white shadow-lg border border-slate-800">
+        <WaveHorizonGraphic className="text-sky-400/10" />
         <div className="relative z-10 max-w-2xl">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold backdrop-blur">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur text-sky-200 border border-sky-400/20">
             {contact.hero.badge}
           </span>
           <h1 className="mt-4 text-3xl sm:text-5xl font-black tracking-tight leading-tight">
             {contact.hero.title}
           </h1>
-          <p className="mt-3 text-sm sm:text-base text-emerald-100 leading-relaxed">
+          <p className="mt-3 text-sm sm:text-base text-slate-300 leading-relaxed">
             {contact.hero.subtitle}
           </p>
-        </div>
-        <div className="absolute -right-8 -bottom-8 opacity-15 pointer-events-none text-9xl">
-          📞
         </div>
       </section>
 
       {/* Primary In-App Support Guidance */}
-      <section className="rounded-3xl border border-emerald-200/80 bg-emerald-50/60 p-6 sm:p-8 shadow-xs">
+      <section className="rounded-3xl border border-slate-200 bg-slate-50/70 p-6 sm:p-8 shadow-xs">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="max-w-2xl">
-            <span className="inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-emerald-800">
+            <span className="inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-slate-700">
               {contact.appNotice.badge}
             </span>
             <h2 className="mt-1 text-xl sm:text-2xl font-black text-slate-900">
@@ -58,7 +58,7 @@ export default function ContactPage(): React.ReactElement {
           </div>
           <Link
             href="/about"
-            className="shrink-0 inline-flex items-center justify-center rounded-xl bg-emerald-700 px-4 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-emerald-800 transition min-h-[44px]"
+            className="shrink-0 inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-slate-800 transition min-h-[44px]"
           >
             {contact.helpCard.aboutUsText} →
           </Link>
@@ -68,7 +68,7 @@ export default function ContactPage(): React.ReactElement {
       {/* Community Store Hubs & Structured Contact Placeholders */}
       <section className="space-y-6">
         <div>
-          <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
             {contact.communityHubs.badge}
           </span>
           <h2 className="mt-1 text-2xl sm:text-3xl font-black text-slate-900">
@@ -88,12 +88,10 @@ export default function ContactPage(): React.ReactElement {
               <div>
                 {/* Header: Store Code & Name */}
                 <div className="flex items-center justify-between">
-                  <span className="inline-flex items-center rounded-md bg-emerald-700 px-2 py-0.5 text-[11px] font-bold text-white">
+                  <span className="inline-flex items-center rounded-md bg-slate-900 px-2 py-0.5 text-[11px] font-bold text-white">
                     {community.storeCode}
                   </span>
-                  <span className="text-xs font-semibold text-emerald-800">
-                    {community.hubName}
-                  </span>
+                  <span className="text-xs font-semibold text-slate-700">{community.hubName}</span>
                 </div>
                 <h3 className="mt-3 text-lg font-bold text-slate-900">{community.name}</h3>
                 <p className="mt-1 text-xs text-slate-600 leading-relaxed">
@@ -134,7 +132,7 @@ export default function ContactPage(): React.ReactElement {
               <div className="mt-6 border-t border-slate-100 pt-4">
                 <Link
                   href="/store/select"
-                  className="inline-flex min-h-[44px] items-center text-xs font-bold text-emerald-800 hover:text-emerald-950 transition"
+                  className="inline-flex min-h-[44px] items-center text-xs font-bold text-slate-900 hover:text-sky-900 transition"
                 >
                   Shop {community.shortName} Store →
                 </Link>
@@ -162,7 +160,7 @@ export default function ContactPage(): React.ReactElement {
             </Link>
             <Link
               href="/about"
-              className="inline-flex min-h-[44px] items-center justify-center rounded-xl bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800 transition"
+              className="inline-flex min-h-[44px] items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 transition"
             >
               {contact.helpCard.aboutUsText}
             </Link>

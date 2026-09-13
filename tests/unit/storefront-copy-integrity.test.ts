@@ -3,6 +3,7 @@ import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 import {
   STOREFRONT_COPY_MANIFEST,
+  formatDeliveryFee,
   formatHubCardDescription,
   formatCommunitySubtitle,
   formatActiveWelcomeTitle,
@@ -147,14 +148,14 @@ describe('Storefront copy integrity & manifest guard', () => {
 
     // Communities surface
     expect(STOREFRONT_COPY_MANIFEST.communities.subtitleTemplate).toBeTruthy();
-    expect(formatCommunitySubtitle('Store 1')).toBe('Store 1 · Scheduled Slot Delivery');
+    expect(formatCommunitySubtitle('Store 1')).toBe('Store 1 · As early as operationally possible');
     expect(STOREFRONT_COPY_MANIFEST.communities.deliveryNoteBase).toBeTruthy();
     expect(formatCommunityDeliveryNote()).toBe(
       STOREFRONT_COPY_MANIFEST.communities.deliveryNoteBase,
     );
-    expect(formatCommunityDeliveryNote('₹500.00')).toBe(
-      'Scheduled Slots · Dedicated Hub · Min Order ₹500.00',
-    );
+    expect(formatCommunityDeliveryNote('₹200.00')).toBe('Free Delivery · Min Order ₹200.00');
+    expect(formatDeliveryFee(0)).toBe('Free');
+    expect(formatDeliveryFee(20000)).toBe('₹200.00');
     expect(STOREFRONT_COPY_MANIFEST.communities.selector.badge).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.communities.selector.titleDefault).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.communities.selector.subtitleDefault).toBeTruthy();

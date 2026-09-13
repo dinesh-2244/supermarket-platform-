@@ -14,7 +14,9 @@ import {
   STOREFRONT_COPY_MANIFEST,
   formatActiveWelcomeTitle,
   formatActiveWelcomeTerms,
+  formatDeliveryFee,
 } from './copy-manifest';
+import { WaveHorizonGraphic, PromoBannerCard, PromoBannerGrid } from './promo-banner';
 
 export const metadata: Metadata = {
   title: STOREFRONT_COPY_MANIFEST.home.meta.title,
@@ -47,23 +49,21 @@ export default async function StorefrontHome({
     return (
       <div className="space-y-12 py-4 sm:py-8">
         {/* Hero Section */}
-        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-800 via-emerald-700 to-teal-800 px-6 py-12 sm:px-12 sm:py-16 text-white shadow-md">
+        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 px-6 py-12 sm:px-12 sm:py-16 text-white shadow-lg border border-slate-800">
+          <WaveHorizonGraphic className="text-sky-400/10" />
           <div className="relative z-10 max-w-2xl">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold backdrop-blur">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur text-sky-200 border border-sky-400/20">
               {STOREFRONT_COPY_MANIFEST.home.hero.badge}
             </span>
             <h1 className="mt-4 text-3xl sm:text-5xl font-black tracking-tight leading-tight">
               {STOREFRONT_COPY_MANIFEST.home.hero.titlePrefix}
-              <span className="text-emerald-200 underline decoration-amber-400">
+              <span className="text-sky-200 underline decoration-amber-400">
                 {STOREFRONT_COPY_MANIFEST.home.hero.titleHighlight}
               </span>
             </h1>
-            <p className="mt-3 text-sm sm:text-base text-emerald-100 max-w-lg leading-relaxed">
+            <p className="mt-3 text-sm sm:text-base text-slate-300 max-w-lg leading-relaxed">
               {STOREFRONT_COPY_MANIFEST.home.hero.subtitle}
             </p>
-          </div>
-          <div className="absolute -right-12 -bottom-12 opacity-15 pointer-events-none text-9xl">
-            🥦
           </div>
         </section>
 
@@ -115,9 +115,9 @@ export default async function StorefrontHome({
         </section>
 
         {/* About Munder Fresh Preview (Requirement 3b) */}
-        <section className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-6">
           <div className="max-w-xl">
-            <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
               {STOREFRONT_COPY_MANIFEST.home.aboutPreview.badge}
             </span>
             <h2 className="mt-1 text-xl sm:text-2xl font-black text-slate-900">
@@ -126,8 +126,11 @@ export default async function StorefrontHome({
             <p className="mt-2 text-xs sm:text-sm text-slate-600 leading-relaxed">
               {STOREFRONT_COPY_MANIFEST.home.aboutPreview.description}
             </p>
+            <p className="mt-3 text-xs font-semibold italic text-slate-700 border-l-2 border-slate-300 pl-3">
+              &ldquo;{STOREFRONT_COPY_MANIFEST.home.aboutPreview.closingLine}&rdquo;
+            </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
             <Link
               href="/about"
               className="inline-flex items-center rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-800 hover:bg-slate-100 transition min-h-[44px]"
@@ -136,7 +139,7 @@ export default async function StorefrontHome({
             </Link>
             <Link
               href="/store/select"
-              className="inline-flex items-center rounded-xl bg-emerald-700 px-4 py-2.5 text-xs font-semibold text-white hover:bg-emerald-800 transition min-h-[44px]"
+              className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-slate-800 transition min-h-[44px]"
             >
               Select Community →
             </Link>
@@ -167,17 +170,17 @@ export default async function StorefrontHome({
   return (
     <div className="space-y-8">
       {/* Active Community Welcome Bar */}
-      <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-emerald-50/90 border border-emerald-200/80 px-4 py-3.5 sm:px-6">
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-900 text-white border border-slate-800 px-4 py-3.5 sm:px-6 shadow-sm">
         <div>
-          <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-sky-300">
             {STOREFRONT_COPY_MANIFEST.home.activeWelcome.badge}
           </span>
-          <h1 className="text-lg sm:text-xl font-black text-slate-900">
+          <h1 className="text-lg sm:text-xl font-black text-white">
             {formatActiveWelcomeTitle(communityName)}
           </h1>
-          <p className="text-xs text-slate-600 mt-0.5">
+          <p className="text-xs text-slate-300 mt-0.5">
             {formatActiveWelcomeTerms(
-              rupees(settings.deliveryFeePaise),
+              formatDeliveryFee(settings.deliveryFeePaise),
               rupees(settings.minOrderPaise),
             )}
           </p>
@@ -186,13 +189,13 @@ export default async function StorefrontHome({
         <div className="flex flex-wrap items-center gap-2">
           <Link
             href="/shop"
-            className="inline-flex items-center rounded-xl bg-emerald-700 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-800 transition min-h-[44px]"
+            className="inline-flex items-center rounded-xl bg-white px-3.5 py-2 text-xs font-bold text-slate-900 shadow-xs hover:bg-sky-50 transition min-h-[44px]"
           >
             {STOREFRONT_COPY_MANIFEST.home.activeWelcome.browseShopButton}
           </Link>
           <Link
             href="/store/select"
-            className="inline-flex items-center rounded-xl border border-emerald-600 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 shadow-xs hover:bg-emerald-50 min-h-[44px]"
+            className="inline-flex items-center rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 shadow-xs hover:bg-slate-700 min-h-[44px]"
           >
             {STOREFRONT_COPY_MANIFEST.home.activeWelcome.changeCommunityButton}
           </Link>
@@ -206,43 +209,24 @@ export default async function StorefrontHome({
       )}
 
       {/* Promotional Banners Carousel/Grid */}
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 p-5 text-white shadow-xs">
-          <span className="rounded-md bg-white/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
-            {STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.badge}
-          </span>
-          <h2 className="mt-2 text-xl font-black">
-            {STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.title}
-          </h2>
-          <p className="mt-1 text-xs text-amber-50">
-            {STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.description}
-          </p>
-          <Link
-            href="/c/fruits-vegetables"
-            className="mt-4 inline-block rounded-xl bg-white px-3.5 py-1.5 text-xs font-bold text-amber-900 shadow-xs hover:bg-amber-50 min-h-[44px] flex items-center"
-          >
-            {STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.buttonText}
-          </Link>
-        </div>
-
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-teal-600 to-emerald-600 p-5 text-white shadow-xs">
-          <span className="rounded-md bg-white/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
-            {STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.badge}
-          </span>
-          <h2 className="mt-2 text-xl font-black">
-            {STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.title}
-          </h2>
-          <p className="mt-1 text-xs text-teal-50">
-            {STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.description}
-          </p>
-          <Link
-            href="/c/staples"
-            className="mt-4 inline-block rounded-xl bg-white px-3.5 py-1.5 text-xs font-bold text-teal-900 shadow-xs hover:bg-teal-50 min-h-[44px] flex items-center"
-          >
-            {STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.buttonText}
-          </Link>
-        </div>
-      </section>
+      <PromoBannerGrid>
+        <PromoBannerCard
+          badge={STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.badge}
+          title={STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.title}
+          description={STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.description}
+          buttonText={STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.buttonText}
+          href="/c/fruits-vegetables"
+          variant="navy"
+        />
+        <PromoBannerCard
+          badge={STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.badge}
+          title={STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.title}
+          description={STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.description}
+          buttonText={STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.buttonText}
+          href="/c/staples"
+          variant="ocean"
+        />
+      </PromoBannerGrid>
 
       {/* Category Visual Tiles (D4) */}
       <CategoryTiles categories={categories} />

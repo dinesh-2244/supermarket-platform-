@@ -9,7 +9,7 @@ import { rupees, Card, Empty, PageHeading } from '../ui';
 import { CategoryTiles } from '../category-tiles';
 import { communityNameForStore } from '../communities';
 import { getCartQuantities } from '../cart-quantities';
-import { STOREFRONT_COPY_MANIFEST, formatShopSubtitle } from '../copy-manifest';
+import { STOREFRONT_COPY_MANIFEST, formatShopSubtitle, formatDeliveryFee } from '../copy-manifest';
 
 export const metadata: Metadata = {
   title: STOREFRONT_COPY_MANIFEST.shop.meta.title,
@@ -48,7 +48,7 @@ export default async function ShopPage({
       <PageHeading
         title={`Shopping at ${communityName}`}
         subtitle={formatShopSubtitle(
-          rupees(settings.deliveryFeePaise),
+          formatDeliveryFee(settings.deliveryFeePaise),
           rupees(settings.minOrderPaise),
         )}
       />

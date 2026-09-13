@@ -15,34 +15,34 @@
 export const STOREFRONT_COPY_MANIFEST = {
   home: {
     meta: {
-      title: 'Munder Fresh | Hyperlocal Grocery Platform',
+      title: 'Munder Fresh | Serving Navy Quarters Communities',
       description:
-        'Groceries, daily essentials, dairy, staples, and fruits delivered to your community in scheduled slots.',
+        'Groceries, daily essentials, and fresh staples delivered to Navy Quarters communities as early as operationally possible.',
     },
     hero: {
-      badge: 'Hyperlocal Residential Delivery',
-      titlePrefix: 'Fresh Groceries Delivered in ',
-      titleHighlight: 'Scheduled Slots',
+      badge: 'PROUD TO SERVE THOSE WHO SERVE THE NATION',
+      titlePrefix: 'Serving Those Who Serve India — ',
+      titleHighlight: 'Proudly, Every Day',
       subtitle:
-        'Doorstep delivery of fruits & vegetables, dairy, pulses, staples, and daily home essentials — stocked and delivered by your dedicated community store hub.',
+        'Groceries, daily staples, dairy, and household essentials for Navy Quarters families. Operating daily 10:00 AM – 8:00 PM, delivered to your doorstep as early as operationally possible.',
     },
     communitySelector: {
-      title: 'Select Your Community to Start Shopping',
+      title: 'Select Your Navy Quarters Community',
       subtitle:
-        'Choose your residential community to see accurate local stock, current store pricing, and booking slots.',
+        'Choose your residential quarters to view community-scoped inventory, store pricing, and local delivery availability.',
     },
     highlights: {
-      slotsTitle: 'Scheduled Slots',
-      slotsDescription: 'Pick your preferred delivery window',
-      produceTitle: 'Fresh Produce',
-      produceDescription: 'Vegetables & fruits, stocked at your local hub',
+      slotsTitle: 'Daily 10 AM – 8 PM',
+      slotsDescription: 'Operating every day to fulfill your home essentials',
+      produceTitle: 'Everyday Essentials',
+      produceDescription: 'Fresh produce, dairy & pantry staples from your local hub',
       paymentTitle: 'Pay on Delivery',
-      paymentDescription: 'Cash or UPI accepted at doorstep',
-      doorstepTitle: 'Direct to Door',
-      doorstepDescription: 'Delivery straight to your flat or home',
+      paymentDescription: 'Cash or UPI accepted at doorstep upon handover',
+      doorstepTitle: 'Direct to Quarters',
+      doorstepDescription: 'Delivered as early as operationally possible',
     },
     activeWelcome: {
-      badge: 'Delivering from your local hub',
+      badge: 'Serving your quarters community hub',
       titlePrefix: 'Shopping at ',
       feeDeliveryPrefix: 'Delivery ',
       minOrderPrefix: ' · Minimum order ',
@@ -54,28 +54,29 @@ export const STOREFRONT_COPY_MANIFEST = {
     promoBanners: {
       dailyEssentials: {
         badge: 'Daily Essentials',
-        title: 'Fruits, Vegetables & Dairy',
-        description: 'Vegetables, milk & bakery goods for your breakfast slot.',
+        title: 'Fresh Produce & Dairy',
+        description: 'Vegetables, milk & daily provisions delivered fresh to your quarters.',
         buttonText: 'Shop Fresh Produce →',
       },
       superSaver: {
-        badge: 'Super Saver',
+        badge: 'Pantry Staples',
         title: 'Kitchen Staples & Grains',
-        description: "Rice, atta, edible oils & dals at your community's everyday prices.",
+        description: 'Atta, rice, dals & cooking essentials at steady community prices.',
         buttonText: 'Shop Pantry Staples →',
       },
     },
     aboutPreview: {
-      badge: 'About Our Model',
-      title: 'Hyperlocal Grocery Built for Residential Communities',
+      badge: 'Our Commitment to Service',
+      title: 'Proud to Serve Those Who Serve the Nation',
       description:
-        'We operate dedicated store hubs for partner residential societies. Learn how our two-community model delivers scheduled morning and evening slots.',
+        'Every day, the men and women of the Indian Navy serve with discipline, courage and commitment. Serving two Navy Quarters communities is a privilege for us. Our role may be simple -- groceries, everyday essentials and dependable delivery -- but we are proud to make daily life a little easier for the families of those who dedicate themselves to the country.',
+      closingLine: 'Their duty is to the nation. Our privilege is to serve their everyday needs.',
     },
     promise: {
       badge: 'The Munder Fresh Promise',
-      title: 'Why Hyperlocal Residential Delivery?',
+      title: 'Dependable Hyperlocal Service for Quarters Families',
       description:
-        "We partner directly with residential societies to fulfill orders from dedicated local hubs. Choose a scheduled delivery window that fits your day, with catalogue listings and prices scoped to your community's store-recorded availability.",
+        'We partner directly with your residential quarters to fulfill orders from dedicated local hubs. Enjoy free doorstep delivery on orders meeting the minimum order, fulfilled daily from 10:00 AM to 8:00 PM as early as operationally possible.',
     },
   },
   shop: {
@@ -89,21 +90,21 @@ export const STOREFRONT_COPY_MANIFEST = {
   },
   about: {
     meta: {
-      title: 'About Us | Munder Fresh Hyperlocal Grocery',
+      title: 'About Us | Munder Fresh — Serving Navy Quarters',
       description:
-        'Learn about Munder Fresh: our dedicated two-community hyperlocal grocery model and scheduled slot delivery.',
+        'Learn about Munder Fresh: serving Navy Quarters communities with groceries, daily essentials, and dependable delivery.',
     },
     hero: {
-      badge: 'Our Hyperlocal Model',
-      title: 'Dedicated Grocery for Residential Communities',
+      badge: 'PROUD TO SERVE THOSE WHO SERVE THE NATION',
+      title: 'Serving Those Who Serve India — Proudly, Every Day',
       description:
-        "Munder Fresh was built to serve residential communities with daily groceries delivered in scheduled time windows, with stock and pricing scoped directly to each community's dedicated store hub.",
+        'Every day, the men and women of the Indian Navy serve with discipline, courage and commitment. Serving two Navy Quarters communities is a privilege for us. Our role may be simple -- groceries, everyday essentials and dependable delivery -- but we are proud to make daily life a little easier for the families of those who dedicate themselves to the country.',
     },
     hubSystem: {
-      badge: 'How Munder Fresh Operates',
+      badge: 'Dedicated Quarters Hubs',
       title: 'The Two-Community Hub System',
       description:
-        'Munder Fresh pairs dedicated community store hubs directly with residential societies, organizing inventory and delivery scheduling around local service areas.',
+        'Munder Fresh pairs dedicated community store hubs directly with Navy Quarters residences, organizing inventory and fulfillment exclusively around local service areas.',
       hubCardTemplate:
         "Dedicated local inventory managed by {hubName}. Items in the catalogue are drawn from this community hub's store records, updating with local stock levels.",
     },
@@ -112,36 +113,39 @@ export const STOREFRONT_COPY_MANIFEST = {
       title: 'Real Operational Facts, No Fabrications',
       cards: {
         scheduledSlots: {
-          title: 'Scheduled Slots',
+          title: 'Daily 10 AM – 8 PM',
           description:
-            'We deliver in scheduled one-hour time windows so you know when your order is expected to arrive.',
+            'Our hubs operate daily from 10:00 AM to 8:00 PM, delivering orders as early as operationally possible without artificial delays.',
         },
         oneHubOneCommunity: {
           title: 'One Hub, One Community',
           description:
-            "Each community is served by a dedicated store hub, so the catalogue reflects that hub's own store-recorded availability and pricing.",
+            'Each quarters community is served by its dedicated store hub, ensuring stock reflects local shelf availability.',
         },
         liveInventoryPricing: {
           title: 'Live Inventory & Price',
           description:
-            "What you see in your community catalogue reflects your hub's own recorded availability and prices, not a shared or estimated figure. If prices change, you are notified upfront.",
+            "What you see in your quarters catalogue reflects your hub's own recorded availability and prices, not shared estimates. If prices change, you are notified upfront.",
         },
         payAtDoorstep: {
           title: 'Pay at Doorstep',
           description:
-            'Pay via Cash on Delivery or UPI once your order is handed over — no prepayment required.',
+            'Pay via Cash on Delivery or UPI once your order is handed over at your quarters — no prepayment required.',
         },
       },
     },
+    quoteCallout: {
+      quote: 'Their duty is to the nation. Our privilege is to serve their everyday needs.',
+    },
     serviceBoundary: {
-      title: 'Living Outside Our Current Communities?',
+      title: 'Living Outside Our Current Quarters Communities?',
       description:
-        'Because we operate dedicated store hubs paired with specific residential partners, we only accept orders from addresses within our serviceable zones.',
+        'Because we operate dedicated store hubs paired specifically with partner residential communities, we only accept orders from addresses within our serviceable zones.',
     },
   },
   contact: {
     meta: {
-      title: 'Contact Us | Munder Fresh Hyperlocal Grocery',
+      title: 'Contact Us | Munder Fresh — Community Store Hubs',
       description:
         'Community store hub directory and support channel status for Munder Fresh. Dedicated live order-support channels are not yet active.',
     },
@@ -149,20 +153,20 @@ export const STOREFRONT_COPY_MANIFEST = {
       badge: 'Community Store Hub Directory',
       title: 'Contact Us',
       subtitle:
-        'Community store hub directory and channel status. Dedicated live order-support channels are not currently active.',
+        'Community store hub directory and operating status for Navy Quarters locations. Dedicated live order-support channels are not currently active.',
     },
     appNotice: {
       badge: 'Order Support Status',
       title: 'No Live Order Support Channel',
       description:
-        'A dedicated live order-support channel is not currently active. For details on how our community hubs fulfill orders and schedule delivery slots, please visit our About page.',
+        'A dedicated live order-support channel is not currently active. For details on how our community hubs fulfill orders and operating commitments, please visit our About page.',
       aboutLinkText: 'Learn more about our community hub delivery model on our About page',
     },
     communityHubs: {
       badge: 'Community Store Hubs',
-      title: 'Our Dedicated Store Hubs',
+      title: 'Our Dedicated Quarters Hubs',
       description:
-        'Munder Fresh operates dedicated store hubs paired directly with our partner residential communities.',
+        'Munder Fresh operates dedicated store hubs paired directly with our partner Navy Quarters communities.',
       hubCardTemplate:
         'Dedicated store hub serving {hubName}. Contact channels and operating hours will be listed here once assigned.',
     },
@@ -172,7 +176,7 @@ export const STOREFRONT_COPY_MANIFEST = {
       emailLabel: 'Email Support',
       emailPlaceholder: 'Not yet published',
       hoursLabel: 'Operating Hours',
-      hoursPlaceholder: 'Not yet published',
+      hoursPlaceholder: 'Daily, 10:00 AM – 8:00 PM',
       addressLabel: 'Hub Location',
       addressPlaceholder: 'Not yet published',
     },
@@ -236,38 +240,45 @@ export const STOREFRONT_COPY_MANIFEST = {
     continueShopping: '← Continue shopping',
     changeArea: '· Change area →',
     checkoutNotice: 'No account needed. You pay when your order is delivered.',
-    scheduledSlotBadge: 'Scheduled slot delivery',
+    scheduledSlotBadge: 'As early as operationally possible',
     trustBadges: {
       storeVerified: 'Store-verified prices and availability',
       doorstepPayment: 'Pay with Cash or UPI on delivery',
     },
   },
   communities: {
-    subtitleTemplate: '{shortName} · Scheduled Slot Delivery',
-    deliveryNoteBase: 'Scheduled Slots · Dedicated Hub',
-    deliveryNoteWithMinOrderPrefix: 'Scheduled Slots · Dedicated Hub · Min Order ',
+    subtitleTemplate: '{shortName} · As early as operationally possible',
+    deliveryNoteBase: 'Free Delivery · Daily 10 AM – 8 PM',
+    deliveryNoteWithMinOrderPrefix: 'Free Delivery · Min Order ',
     selector: {
-      badge: 'Hyperlocal Community Delivery',
-      titleDefault: 'Select Your Store Community',
+      badge: 'Navy Quarters Delivery',
+      titleDefault: 'Select Your Quarters Community',
       subtitleDefault:
-        'Fresh groceries, dairy, produce & daily essentials delivered to your doorstep in convenient scheduled slots.',
-      unserviceablePrompt: 'Living outside these communities? ',
+        'Fresh groceries, dairy, produce & daily essentials delivered to your quarters as early as operationally possible.',
+      unserviceablePrompt: 'Living outside these quarters communities? ',
       unserviceableLinkText: 'Request delivery to your locality',
     },
   },
   mobileCartBar: {
-    slotNotice: 'Scheduled slot delivery',
+    slotNotice: 'As early as operationally possible',
   },
   footer: {
     brandDescription:
-      'Dedicated hyperlocal grocery shopping for residential communities. Scheduled slot delivery of fresh vegetables, fruits, dairy, staples, and daily household needs.',
-    communitiesHeading: 'Communities Served',
+      'Dedicated grocery delivery for Navy Quarters communities. Groceries, everyday essentials, fresh produce, and dairy delivered to your quarters as early as operationally possible.',
+    communitiesHeading: 'Navy Quarters Communities',
     unserviceableLink: 'Living elsewhere? Request delivery →',
     commitmentsTitle: 'Store Commitments',
     commitmentsDescription:
-      "Prices and availability are verified from your community's dedicated store. Free delivery options available on meeting order thresholds. Pay via Cash or UPI on delivery.",
+      "Prices and availability are verified from your community's dedicated store. Free delivery on all orders meeting the minimum order threshold. Pay via Cash or UPI on delivery.",
   },
 } as const;
+
+export function formatDeliveryFee(deliveryFeePaise: number): string {
+  if (deliveryFeePaise === 0) return 'Free';
+  const sign = deliveryFeePaise < 0 ? '-' : '';
+  const abs = Math.abs(deliveryFeePaise);
+  return `${sign}₹${String(Math.floor(abs / 100))}.${String(abs % 100).padStart(2, '0')}`;
+}
 
 export function formatHubCardDescription(hubName: string): string {
   return STOREFRONT_COPY_MANIFEST.about.hubSystem.hubCardTemplate.replace('{hubName}', hubName);
