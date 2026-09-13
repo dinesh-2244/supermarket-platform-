@@ -184,6 +184,46 @@ export const STOREFRONT_COPY_MANIFEST = {
       aboutUsText: 'About Munder Fresh',
     },
   },
+  productRequest: {
+    meta: {
+      title: 'Request a Product | Munder Fresh Hyperlocal Grocery',
+      description:
+        'Tell us what grocery items, brands, or daily essentials you would like to see in your community store.',
+    },
+    hero: {
+      badge: 'Resident Catalogue Requests',
+      title: 'Request a Product',
+      subtitle:
+        "Can't find an item in your store catalogue? Tell us what you'd like to see, and our store team will review it.",
+    },
+    form: {
+      productNameLabel: 'Product Name',
+      productNamePlaceholder: 'e.g. Sona Masoori Rice, Greek Yogurt, Basil Leaves...',
+      brandLabel: 'Brand (Optional)',
+      brandPlaceholder: 'e.g. Nandini, Fortune, Tata...',
+      packSizeLabel: 'Pack Size or Weight (Optional)',
+      packSizePlaceholder: 'e.g. 500g, 1kg, 1L, Pack of 4...',
+      noteLabel: 'Additional Notes or Details (Optional)',
+      notePlaceholder: 'Any specific variety, preference, or detail...',
+      customerNameLabel: 'Your Name (Optional)',
+      customerNamePlaceholder: 'e.g. Priya Sharma',
+      customerPhoneLabel: 'Mobile Number (Optional)',
+      customerPhonePlaceholder: '10-digit Indian mobile number',
+      submitButton: 'Submit Request',
+      noStoreSelectedPrompt: 'Choose your delivery area first so we know which store to ask.',
+      chooseAreaLinkText: 'Choose Community Area →',
+    },
+    success: {
+      title: "Thanks, we've received your request",
+      description: "We've recorded your product request for your community store team to review.",
+      actionText: 'Browse Store Catalogue →',
+      submitAnotherText: 'Request Another Product',
+    },
+    searchPrompt: {
+      text: "Can't find what you're looking for?",
+      linkText: 'Request a product for your store →',
+    },
+  },
   cart: {
     meta: {
       title: 'Your basket',
