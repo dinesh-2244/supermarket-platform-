@@ -32,6 +32,7 @@ describe('validateLineOutcome — what each outcome must look like', () => {
       qtyPicked: 4,
       substituteProductId: null,
       restores: false,
+      restoreBasis: 4,
     });
     expect(() => validateLineOutcome(ordered, { outcome: 'PICKED', qtyPicked: 3 })).toThrow(
       /short/i,
@@ -46,6 +47,7 @@ describe('validateLineOutcome — what each outcome must look like', () => {
       lineStatus: 'SHORT',
       qtyPicked: 1,
       restores: true,
+      restoreBasis: 1,
     });
     expect(() => validateLineOutcome(ordered, { outcome: 'SHORT', qtyPicked: 0 })).toThrow(
       /unavailable/i,
@@ -60,13 +62,16 @@ describe('validateLineOutcome — what each outcome must look like', () => {
       lineStatus: 'UNAVAILABLE',
       qtyPicked: 0,
       restores: true,
+      restoreBasis: 0,
     });
     expect(() => validateLineOutcome(ordered, { outcome: 'UNAVAILABLE', qtyPicked: 1 })).toThrow(
       /none/i,
     );
   });
 
-  it('SUBSTITUTED names the substitute and how many of it went in; no restore in this phase', () => {
+  it('SUBSTITUTED names the substitute and how many of it went in, and restores the ordered product', () => {
+    // None of the *ordered* product left the shelf, so all of it goes back —
+    // `restoredQty` is what the restore counts, not the substitute's quantity.
     expect(
       validateLineOutcome(ordered, {
         outcome: 'SUBSTITUTED',
@@ -77,7 +82,8 @@ describe('validateLineOutcome — what each outcome must look like', () => {
       lineStatus: 'SUBSTITUTED',
       qtyPicked: 4,
       substituteProductId: 'p-sub',
-      restores: false,
+      restores: true,
+      restoreBasis: 0,
     });
     expect(() => validateLineOutcome(ordered, { outcome: 'SUBSTITUTED', qtyPicked: 4 })).toThrow(
       /substitute/i,

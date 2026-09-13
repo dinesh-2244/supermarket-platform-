@@ -131,8 +131,8 @@ export async function startPicking(
 /**
  * Record what the shelf had for one line, while the order is `PICKING`.
  *
- * A `SHORT` or `UNAVAILABLE` line gives `qtyOrdered − qtyPicked −
- * stockRestoredQty` back to `websiteStock` through `applyMovement` — so the
+ * A `SHORT`, `UNAVAILABLE` or `SUBSTITUTED` line gives `qtyOrdered − (units of
+ * the ordered product picked) − stockRestoredQty` back to `websiteStock` through `applyMovement` — so the
  * `StockLedger` row with its `balanceAfter` lands in this same transaction —
  * and bumps `stockRestoredQty` by the same amount, which is what stops a later
  * `cancelByStore` from restoring those units a second time. A line is recorded
@@ -172,7 +172,7 @@ export async function recordLinePick(
     if (outcome.restores) {
       restored = restoreQuantity({
         qtyOrdered: line.qtyOrdered,
-        qtyPicked: outcome.qtyPicked,
+        qtyPicked: outcome.restoreBasis,
         stockRestoredQty: line.stockRestoredQty,
       });
       if (restored > 0) {

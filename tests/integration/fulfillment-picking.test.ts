@@ -294,10 +294,14 @@ describe('recording a line', () => {
     expect(await stockOf(storeA, productA)).toBe(before);
   });
 
-  it('a substitution records the substitute and moves no stock in this phase', async () => {
+  it('a substitution restores the ordered product in full and leaves the substitute’s stock alone', async () => {
+    // None of the ordered product left the shelf — the substitute went in its
+    // place — so its reservation goes back. The substitute's own decrement is
+    // a separate stock path, deliberately not part of this phase.
     const beforeA = await stockOf(storeA, productA);
     const beforeA2 = await stockOf(storeA, productA2);
     const { id, lineIds } = await inPicking([{ productId: productA, qty: 2 }]);
+    expect(await stockOf(storeA, productA)).toBe(beforeA - 2);
     const line = await recordLinePick(staffA, id, lineIds[productA]!, {
       outcome: 'SUBSTITUTED',
       qtyPicked: 2,
@@ -307,10 +311,18 @@ describe('recording a line', () => {
       lineStatus: 'SUBSTITUTED',
       qtyPicked: 2,
       substituteProductId: productA2,
-      stockRestoredQty: 0,
+      stockRestoredQty: 2,
     });
-    expect(await stockOf(storeA, productA)).toBe(beforeA - 2);
+    expect(await stockOf(storeA, productA)).toBe(beforeA);
     expect(await stockOf(storeA, productA2)).toBe(beforeA2);
+    const ledger = await prisma.stockLedger.findFirst({
+      where: { storeId: storeA, productId: productA, reason: 'PICK_SHORT_RESTORE', refId: id },
+    });
+    expect(ledger).toMatchObject({ delta: 2, balanceAfter: beforeA });
+    // And a later correction has nothing left to restore for this line.
+    const result = await correctOrder(managerA, id, 'Customer changed their mind');
+    expect(result.restored).toEqual([]);
+    expect(await stockOf(storeA, productA)).toBe(beforeA);
   });
 
   it('refuses a substitute the store does not list', async () => {

@@ -39,6 +39,13 @@ export interface LineOutcome {
   readonly substituteProductId: string | null;
   /** Whether the unpicked remainder goes back to website stock. */
   readonly restores: boolean;
+  /**
+   * How many units of the **ordered** product went into the basket — what the
+   * restore is measured against. Equal to `qtyPicked` except for a
+   * substitution, where `qtyPicked` counts the substitute and none of the
+   * ordered product left the shelf.
+   */
+  readonly restoreBasis: number;
 }
 
 /**
@@ -64,10 +71,12 @@ export function restoreQuantity(line: {
  * - `PICKED` — the whole quantity, no substitute.
  * - `SHORT` — some but not all; the rest is restored.
  * - `UNAVAILABLE` — none; all of it is restored.
- * - `SUBSTITUTED` — a named substitute, at least one of it. **No stock moves**
- *   in this phase: the ordered product's reservation stays as it is and the
- *   substitute is not decremented. That is the Phase 5 plan's scope, recorded
- *   here so the gap is a decision and not an oversight.
+ * - `SUBSTITUTED` — a named substitute, at least one of it. The **ordered**
+ *   product is restored in full, exactly as if it were unavailable: none of it
+ *   left the shelf, and leaving its `websiteStock` understated would hide real
+ *   stock from future orders (decision 2026-09-13). The substitute's own
+ *   decrement is a different stock path — crediting a product for an order it
+ *   was not ordered on — and is deliberately not part of this phase.
  */
 export function validateLineOutcome(qtyOrdered: number, input: LinePickInput): LineOutcome {
   const qty = input.qtyPicked;
@@ -98,7 +107,13 @@ export function validateLineOutcome(qtyOrdered: number, input: LinePickInput): L
           },
         );
       }
-      return { lineStatus: 'PICKED', qtyPicked: qty, substituteProductId: null, restores: false };
+      return {
+        lineStatus: 'PICKED',
+        qtyPicked: qty,
+        substituteProductId: null,
+        restores: false,
+        restoreBasis: qty,
+      };
     case 'SHORT':
       if (qty === 0) {
         throw new ValidationError('Nothing picked is an unavailable line, not a short one', {});
@@ -109,12 +124,24 @@ export function validateLineOutcome(qtyOrdered: number, input: LinePickInput): L
           {},
         );
       }
-      return { lineStatus: 'SHORT', qtyPicked: qty, substituteProductId: null, restores: true };
+      return {
+        lineStatus: 'SHORT',
+        qtyPicked: qty,
+        substituteProductId: null,
+        restores: true,
+        restoreBasis: qty,
+      };
     case 'UNAVAILABLE':
       if (qty !== 0) {
         throw new ValidationError('An unavailable line has none picked', { qtyPicked: qty });
       }
-      return { lineStatus: 'UNAVAILABLE', qtyPicked: 0, substituteProductId: null, restores: true };
+      return {
+        lineStatus: 'UNAVAILABLE',
+        qtyPicked: 0,
+        substituteProductId: null,
+        restores: true,
+        restoreBasis: 0,
+      };
     case 'SUBSTITUTED':
       if (substitute.length === 0) {
         throw new ValidationError('A substitution names the substitute product', {});
@@ -126,7 +153,8 @@ export function validateLineOutcome(qtyOrdered: number, input: LinePickInput): L
         lineStatus: 'SUBSTITUTED',
         qtyPicked: qty,
         substituteProductId: substitute,
-        restores: false,
+        restores: true,
+        restoreBasis: 0,
       };
   }
 }
