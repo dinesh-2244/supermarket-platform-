@@ -42,8 +42,8 @@ async function addOne(page: Page, slug?: string): Promise<void> {
 /**
  * Build a basket that clears whichever shop the first area resolved to.
  *
- * The two seeded shops have different minimums (₹250 and ₹300) and different
- * catalogues, so no fixed quantity of a fixed product clears both. Rather than
+ * The two seeded shops share a ₹200 minimum but have different catalogues, so
+ * no fixed quantity of a fixed product clears both. Rather than
  * hard-code a price the seed is free to change, this adds one unit of successive
  * staples until checkout stops objecting — spreading the draw across products so
  * the suite does not empty one shelf, and reading the answer from the page that
@@ -143,7 +143,7 @@ test.describe.serial('checkout', () => {
 
   test('a basket under the shop’s minimum cannot be checked out', async ({ page }) => {
     await pickFirstArea(page);
-    // Toned milk is ₹24.70 against a ₹300 minimum.
+    // Toned milk is ₹24.70 against a ₹200 minimum.
     await addOne(page, 'toned-milk-500ml');
 
     await page.goto('/checkout');

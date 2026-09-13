@@ -22,7 +22,10 @@ import { expect, test } from '@playwright/test';
  * config whether or not a developer has a `.env` on disk. Same Zod failure, same
  * code path.
  */
-const STANDALONE = join(process.cwd(), '.next', 'standalone', 'server.js');
+const repoRoot = existsSync(join(process.cwd(), '.next', 'standalone', 'server.js'))
+  ? process.cwd()
+  : new URL('../../', import.meta.url).pathname;
+const STANDALONE = join(repoRoot, '.next', 'standalone', 'server.js');
 
 test('the production launcher exits non-zero on invalid configuration', async () => {
   test.setTimeout(90_000);
@@ -32,7 +35,7 @@ test('the production launcher exits non-zero on invalid configuration', async ()
   ).toBe(true);
 
   const child = spawn('node', ['server.js'], {
-    cwd: join(process.cwd(), '.next', 'standalone'),
+    cwd: join(repoRoot, '.next', 'standalone'),
     env: {
       ...process.env,
       APP_ENV: 'local',

@@ -54,6 +54,7 @@ export {
   type ErrorResponseBody,
   isAppError,
   NotFoundError,
+  RateLimitError,
   toErrorResponse,
   ValidationError,
 } from './errors/index';

@@ -3,7 +3,13 @@
  * handler or server action — maps them to HTTP/UI via `toErrorResponse`.
  */
 export type AppErrorCode =
-  'VALIDATION' | 'NOT_FOUND' | 'CONFLICT' | 'FORBIDDEN' | 'DOMAIN_RULE' | 'INTERNAL';
+  | 'VALIDATION'
+  | 'NOT_FOUND'
+  | 'CONFLICT'
+  | 'FORBIDDEN'
+  | 'DOMAIN_RULE'
+  | 'RATE_LIMITED'
+  | 'INTERNAL';
 
 export abstract class AppError extends Error {
   abstract readonly code: AppErrorCode;
@@ -40,6 +46,12 @@ export class ConflictError extends AppError {
 export class AuthzError extends AppError {
   override readonly code = 'FORBIDDEN' as const;
   override readonly httpStatus = 403;
+}
+
+/** Too many of something in too short a time — the caller should wait, not retry at once. */
+export class RateLimitError extends AppError {
+  override readonly code = 'RATE_LIMITED' as const;
+  override readonly httpStatus = 429;
 }
 
 /** A business rule said no — e.g. an illegal order-status transition. */

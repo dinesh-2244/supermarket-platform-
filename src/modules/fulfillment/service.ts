@@ -41,6 +41,7 @@ import {
   type VarianceResult,
 } from '../orders/index';
 import { applyMovement } from '../inventory/index';
+import { principalForUserId } from '../identity/index';
 import { getListing } from '../pricing/index';
 import { getSettings } from '../stores/index';
 import { posBillingGatewayFor } from './pos/pos-billing-gateway';
@@ -123,6 +124,12 @@ export async function acceptOrder(actor: Principal, orderId: string): Promise<Tr
 /**
  * Start picking: the task is claimed for `assignedUserId` (the actor, unless
  * a manager assigns somebody else) and the order moves to `PICKING`.
+ *
+ * Staff take a task themselves and nobody else: handing it to another account
+ * is `order:assign-picker`, a manager's grant. The assignee must be an active
+ * account (`principalForUserId` is null for a disabled or unknown one) and a
+ * staff member or manager *of the order's store* — a foreign key proves only
+ * that some user exists, which is not the same thing.
  */
 export async function startPicking(
   actor: Principal,
@@ -130,7 +137,7 @@ export async function startPicking(
   assignedUserId?: string | null,
 ): Promise<TransitionOutcome> {
   const outcome = await withTransaction(async (tx) => {
-    await lockForActor(tx, actor, orderId, ['ACCEPTED']);
+    const order = await lockForActor(tx, actor, orderId, ['ACCEPTED']);
     const task = await repo.findPickTask(tx, orderId);
     if (task === null) {
       throw new ConflictError('That order has no pick task — it was not accepted here', {
@@ -138,6 +145,9 @@ export async function startPicking(
       });
     }
     const picker = assignedUserId ?? (actor.kind === 'user' ? actor.userId : null);
+    if (picker !== null && !(actor.kind === 'user' && picker === actor.userId)) {
+      await assertAssignablePicker(actor, order, picker);
+    }
     const moved = await transition(tx, orderId, 'PICKING', actor);
     await repo.startPickTask(tx, orderId, picker, new Date());
     return moved;
@@ -146,14 +156,44 @@ export async function startPicking(
   return outcome;
 }
 
+async function assertAssignablePicker(
+  actor: Principal,
+  order: LockedOrderRow,
+  userId: string,
+): Promise<void> {
+  assertAuthorized(actor, 'order:assign-picker', {
+    type: 'Order',
+    id: order.id,
+    storeId: order.storeId,
+  });
+  const target = await principalForUserId(userId);
+  if (target === null) {
+    throw new ValidationError('That user is not an active account', { assignedUserId: userId });
+  }
+  const picksHere =
+    target.kind === 'user' &&
+    (target.role === 'STORE_STAFF' || target.role === 'STORE_MANAGER') &&
+    target.storeId === order.storeId;
+  if (!picksHere) {
+    throw new ValidationError('That user is not a picker at that store', {
+      assignedUserId: userId,
+      storeId: order.storeId,
+    });
+  }
+}
+
 /**
  * Record what the shelf had for one line, while the order is `PICKING`.
  *
- * A `SHORT` or `UNAVAILABLE` line gives `qtyOrdered − qtyPicked −
- * stockRestoredQty` back to `websiteStock` through `applyMovement` — so the
+ * A `SHORT`, `UNAVAILABLE` or `SUBSTITUTED` line gives `qtyOrdered − (units of
+ * the ordered product picked) − stockRestoredQty` back to `websiteStock` through `applyMovement` — so the
  * `StockLedger` row with its `balanceAfter` lands in this same transaction —
  * and bumps `stockRestoredQty` by the same amount, which is what stops a later
- * `cancelByStore` from restoring those units a second time. A line is recorded
+ * `cancelByStore` from restoring those units a second time. A `SUBSTITUTED`
+ * line also takes `qtyPicked` of the **substitute** off `websiteStock` in the
+ * same transaction: `applyMovement` locks that inventory row and refuses to go
+ * below zero, so two pickers reaching for the last unit at once get one
+ * substitution and one conflict, never an oversold shelf. A line is recorded
  * once: reversing a recorded outcome would mean taking stock back off the
  * shelf, which is a different operation than this one and not in this phase.
  */
@@ -176,6 +216,11 @@ export async function recordLinePick(
 
     const outcome = validateLineOutcome(line.qtyOrdered, input);
     if (outcome.substituteProductId !== null) {
+      if (outcome.substituteProductId === line.productId) {
+        throw new ValidationError('A product cannot substitute for itself', {
+          productId: line.productId,
+        });
+      }
       const listing = await getListing(actor, order.storeId, outcome.substituteProductId);
       if (!listing?.isListed) {
         throw new ValidationError('That substitute is not listed at this store', {
@@ -190,7 +235,7 @@ export async function recordLinePick(
     if (outcome.restores) {
       restored = restoreQuantity({
         qtyOrdered: line.qtyOrdered,
-        qtyPicked: outcome.qtyPicked,
+        qtyPicked: outcome.restoreBasis,
         stockRestoredQty: line.stockRestoredQty,
       });
       if (restored > 0) {
@@ -206,6 +251,18 @@ export async function recordLinePick(
         balanceAfter = movement.balanceAfter;
         await addStockRestored(tx, line.id, restored);
       }
+    }
+
+    let substituteBalanceAfter: number | null = null;
+    if (outcome.substituteProductId !== null) {
+      substituteBalanceAfter = await takeSubstitute(
+        tx,
+        actor,
+        order.storeId,
+        outcome.substituteProductId,
+        outcome.qtyPicked,
+        { orderId, lineId: line.id },
+      );
     }
 
     const updated = await setLineOutcome(tx, line.id, {
@@ -226,11 +283,51 @@ export async function recordLinePick(
         substituteProductId: outcome.substituteProductId,
         restored,
         balanceAfter,
+        substituteBalanceAfter,
         note,
       },
     });
     return updated;
   });
+}
+
+/**
+ * Commit `qty` of the substitute to the order: its `websiteStock` drops under
+ * the inventory row lock, with a ledger row against the order. There is no
+ * dedicated ledger reason for a substitution and Phase 5 adds no schema, so it
+ * is recorded as `ORDER_PLACED` — which is what it is: units leaving the shelf
+ * for an order — with the line named in the note. Too little stock is a
+ * conflict with the shelf, not a bad request.
+ */
+async function takeSubstitute(
+  tx: Tx,
+  actor: Principal,
+  storeId: string,
+  productId: string,
+  qty: number,
+  ref: { orderId: string; lineId: string },
+): Promise<number> {
+  try {
+    const taken = await applyMovement(tx, actor, {
+      storeId,
+      productId,
+      delta: -qty,
+      reason: 'ORDER_PLACED',
+      refType: 'Order',
+      refId: ref.orderId,
+      note: `substitute on line ${ref.lineId}`,
+    });
+    return taken.balanceAfter;
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      throw new ConflictError('Not enough website stock of the substitute', {
+        substituteProductId: productId,
+        qtyPicked: qty,
+        ...error.details,
+      });
+    }
+    throw error;
+  }
 }
 
 /** The `PICKING` precondition, worded for the line-recording screen. */

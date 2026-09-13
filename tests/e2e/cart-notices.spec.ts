@@ -373,9 +373,8 @@ test.describe.serial('R1 — the shopper is told what the revalidation found', (
       // the *only* response that can tell them, because it is the one whose
       // revalidation consumed the difference — the re-render behind it finds an
       // already-updated snapshot and has nothing left to say.
-      const qtyForm = row.locator('form').filter({ hasText: 'Update' });
-      await qtyForm.getByLabel('Qty').fill('3');
-      await qtyForm.getByRole('button', { name: 'Update' }).click();
+      const incBtn = row.getByRole('button', { name: /increase quantity/i });
+      await incBtn.click();
 
       // Basket level, not the row's own form. Every mutation's notices go to the
       // same place, because the remove button's form does not survive its own
