@@ -117,8 +117,14 @@ export async function transition(
   };
 }
 
-/** Emit what a committed transition owes the bus. Never called before commit. */
-function announce(outcome: TransitionOutcome, reason?: string): void {
+/**
+ * Emit what a committed transition owes the bus. **Never called before commit.**
+ *
+ * Exported for `fulfillment`, whose use-cases run `transition` inside their own
+ * transactions and announce the outcome after those commit — the same rule the
+ * wrappers below follow, in the one place that knows each event's payload.
+ */
+export function announceTransition(outcome: TransitionOutcome, reason?: string): void {
   switch (outcome.emits) {
     // Id-only, which is every edge except the two that predate Phase 4 and
     // carry a field. The bus names identifiers; a subscriber that needs the
@@ -764,6 +770,6 @@ export async function applyTransition(
     return transition(tx, orderId, to, actor, note);
   });
 
-  announce(outcome, note ?? undefined);
+  announceTransition(outcome, note ?? undefined);
   return outcome;
 }
