@@ -517,6 +517,17 @@ describe('Storefront copy integrity & manifest guard', () => {
       if (ts.isJsxText(node)) {
         const text = node.text.trim().replace(/\s+/g, ' ');
         if (text) literals.push(text);
+      } else if (ts.isJsxExpression(node)) {
+        if (
+          node.expression &&
+          (ts.isStringLiteral(node.expression) ||
+            ts.isNoSubstitutionTemplateLiteral(node.expression))
+        ) {
+          if (!node.parent || !ts.isJsxAttribute(node.parent)) {
+            const text = node.expression.text.trim().replace(/\s+/g, ' ');
+            if (text) literals.push(text);
+          }
+        }
       } else if (ts.isJsxAttribute(node)) {
         const propName = node.name.getText(sf);
         if (
@@ -524,8 +535,17 @@ describe('Storefront copy integrity & manifest guard', () => {
             propName.toLowerCase(),
           )
         ) {
-          if (node.initializer && ts.isStringLiteral(node.initializer)) {
-            literals.push(`${propName}="${node.initializer.text}"`);
+          if (node.initializer) {
+            if (ts.isStringLiteral(node.initializer)) {
+              literals.push(`${propName}="${node.initializer.text}"`);
+            } else if (
+              ts.isJsxExpression(node.initializer) &&
+              node.initializer.expression &&
+              (ts.isStringLiteral(node.initializer.expression) ||
+                ts.isNoSubstitutionTemplateLiteral(node.initializer.expression))
+            ) {
+              literals.push(`${propName}="${node.initializer.expression.text}"`);
+            }
           }
         }
       }
@@ -698,5 +718,23 @@ describe('Storefront copy integrity & manifest guard', () => {
     const allowed = STOREFRONT_ALLOWED_LITERALS['cart/page.tsx'] ?? new Set<string>();
     const unauthorized = literals.filter((lit) => !allowed.has(lit));
     expect(unauthorized).toContain('Free same-day delivery guaranteed on every order.');
+  });
+
+  test('God bypass probe rejection: an unauthorized JSX-expression-wrapped claim in shop/page.tsx fails the AST scanner', () => {
+    // God Round 10 probe: injecting an unauthorized claim wrapped in a JSX expression:
+    // <p>{'All orders include a complimentary gift.'}</p> into shop/page.tsx
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const shopSource = fs.readFileSync(shopPath, 'utf-8');
+
+    const simulatedGodShop = shopSource.replace(
+      '</Card>',
+      "<p>{'All orders include a complimentary gift.'}</p>\n<p>{`Every item is handpicked with care.`}</p></Card>",
+    );
+
+    const literals = extractJsxLiterals(shopPath, simulatedGodShop);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+    expect(unauthorized).toContain('All orders include a complimentary gift.');
+    expect(unauthorized).toContain('Every item is handpicked with care.');
   });
 });
