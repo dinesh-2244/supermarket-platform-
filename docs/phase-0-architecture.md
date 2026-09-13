@@ -257,7 +257,7 @@ One PostgreSQL 16 database, Prisma-only access (raw SQL only for the stock
 | `cart` | Cart, CartItem, revalidation against price/stock | platform, catalog, pricing, inventory, stores | — |
 | `checkout` | serviceability check, store binding, **`placeOrder()`** (decrements stock in-tx) | platform, cart, orders, inventory, stores, customers | `order.placed` |
 | `orders` | Order, OrderLine, OrderStatusHistory, **state machine**, admin correction | platform, inventory | `order.<transition>` |
-| `fulfillment` | PickTask, PosBillingHandoff (+ variance calc), DeliveryRecord | platform, orders, inventory, notifications | `order.picked`, `order.billed`, `order.delivered` |
+| `fulfillment` | PickTask, PosBillingHandoff (+ variance calc), DeliveryRecord | platform, orders, inventory, pricing, notifications | `order.picked`, `order.billed`, `order.delivered` |
 | `notifications` | provider interface + SMS/email/no-op impls, outbound log | platform | — |
 | `admin` | read-models / BFF for the admin UI (no domain rules) | all of the above via `index.ts` | — |
 

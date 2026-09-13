@@ -125,6 +125,15 @@ export default defineConfig({
           lines: 100,
           statements: 100,
         },
+        // Phase 5's restore arithmetic — what a short or unavailable line gives
+        // back to the shelf — is the one place in that phase where real stock
+        // can be created or lost, and phase-5-plan D1 asks for the same bar.
+        'src/modules/fulfillment/domain/index.ts': {
+          branches: 100,
+          functions: 100,
+          lines: 100,
+          statements: 100,
+        },
       },
     },
   },
