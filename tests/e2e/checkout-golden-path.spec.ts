@@ -49,7 +49,13 @@ async function basketOverMinimum(page: Page): Promise<void> {
   const hrefs = await page
     .locator('article a[href^="/p/"]')
     .evaluateAll((nodes) =>
-      nodes.map((node) => (node as HTMLAnchorElement).getAttribute('href') ?? ''),
+      Array.from(
+        new Set(
+          nodes
+            .map((node) => (node as HTMLAnchorElement).getAttribute('href') ?? '')
+            .filter(Boolean),
+        ),
+      ),
     );
 
   for (const href of hrefs.slice(0, 6)) {

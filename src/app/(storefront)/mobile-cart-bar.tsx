@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { STOREFRONT_COPY_MANIFEST } from './copy-manifest';
 
 /**
  * Mobile-first sticky bottom cart bar (D7).
@@ -33,7 +34,7 @@ export function MobileCartBar({ basketCount }: { basketCount: number }): React.R
               {basketCount} {basketCount === 1 ? 'item' : 'items'} added
             </span>
             <span className="block text-[10px] text-emerald-200 font-medium">
-              Scheduled slot delivery
+              {STOREFRONT_COPY_MANIFEST.mobileCartBar.slotNotice}
             </span>
           </div>
         </div>

@@ -2,10 +2,11 @@ import Link from 'next/link';
 import { chooseAreaAction } from './actions';
 import { ActionForm } from './form';
 import { getCommunityCards, type CommunityCardData } from './communities';
+import { STOREFRONT_COPY_MANIFEST } from './copy-manifest';
 
 export async function CommunitySelector({
-  title = 'Select Your Store Community',
-  subtitle = 'Fresh groceries, dairy, produce & daily essentials delivered to your doorstep in convenient scheduled slots.',
+  title = STOREFRONT_COPY_MANIFEST.communities.selector.titleDefault,
+  subtitle = STOREFRONT_COPY_MANIFEST.communities.selector.subtitleDefault,
   showAreaSublist = true,
 }: {
   title?: string;
@@ -18,7 +19,7 @@ export async function CommunitySelector({
     <section className="w-full">
       <div className="mb-6 text-center">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-600/20">
-          Hyperlocal Community Delivery
+          {STOREFRONT_COPY_MANIFEST.communities.selector.badge}
         </span>
         <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
           {title}
@@ -37,12 +38,12 @@ export async function CommunitySelector({
       </div>
 
       <div className="mt-8 text-center text-xs text-slate-500">
-        Living outside these communities?{' '}
+        {STOREFRONT_COPY_MANIFEST.communities.selector.unserviceablePrompt}
         <Link
           href="/unserviceable"
           className="font-medium text-emerald-700 underline hover:text-emerald-800"
         >
-          Request delivery to your locality
+          {STOREFRONT_COPY_MANIFEST.communities.selector.unserviceableLinkText}
         </Link>
       </div>
     </section>

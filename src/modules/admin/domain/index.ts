@@ -108,6 +108,9 @@ export function navigationFor(
     { href: '/admin/users', label: 'Users' },
     { href: '/admin/audit', label: 'Audit log' },
     { href: '/admin/reports', label: 'Reports & KPIs' },
+    // Triage of shopper product requests (Phase 5.5) is `product-request:manage`,
+    // a manager's grant; staff can still read them through the module.
+    { href: '/admin/product-requests', label: 'Product requests' },
   ];
   if (role === 'STORE_MANAGER') return managers;
 
