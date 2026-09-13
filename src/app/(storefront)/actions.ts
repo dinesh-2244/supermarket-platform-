@@ -4,11 +4,13 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { rebuildForStore } from '@/modules/cart';
 import { isAppError } from '@/modules/platform';
+import { submitProductRequest } from '@/modules/product-requests';
 import { captureServiceabilityRequest, getStore, resolveServiceability } from '@/modules/stores';
 import {
   clearCartMoveNotice,
   clearStoreContext,
   currentCartToken,
+  currentStorefrontPrincipal,
   setCartMoveNotice,
   STORE_CONTEXT_COOKIE,
   STORE_CONTEXT_MAX_AGE_SECONDS,
@@ -148,5 +150,34 @@ export async function captureInterestAction(
       ...(pincode === '' ? {} : { pincode }),
     });
     return 'Thank you — we have noted it. We will get to your area as soon as we can.';
+  });
+}
+
+/**
+ * Submit a customer product request (Phase 5.5).
+ */
+export async function requestProductAction(
+  _state: string | undefined,
+  form: FormData,
+): Promise<string> {
+  return run(async () => {
+    const { principal } = await currentStorefrontPrincipal();
+    const productName = text(form, 'productName');
+    const brand = text(form, 'brand');
+    const packSize = text(form, 'packSize');
+    const note = text(form, 'note');
+    const customerName = text(form, 'customerName');
+    const customerPhone = text(form, 'customerPhone');
+
+    await submitProductRequest(principal, {
+      productName,
+      brand: brand === '' ? null : brand,
+      packSize: packSize === '' ? null : packSize,
+      note: note === '' ? null : note,
+      customerName: customerName === '' ? null : customerName,
+      customerPhone: customerPhone === '' ? null : customerPhone,
+    });
+
+    return 'ok';
   });
 }
