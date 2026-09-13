@@ -817,11 +817,13 @@ describe('Storefront copy integrity & manifest guard', () => {
         const fn = unwrapped.expression;
         const argStrings: string[] = [];
         if (ts.isPropertyAccessExpression(fn) && fn.name.text === 'join') {
-          // .join delimiter is sanctioned formatting, but inspect the receiver
+          // Inspect receiver elements/expression and delimiter argument
+          const elemStrings: string[] = [];
+          let allSanctioned = true;
+
+          // Inspect receiver
           const receiver = unwrapStaticExpression(fn.expression);
           if (ts.isArrayLiteralExpression(receiver)) {
-            const elemStrings: string[] = [];
-            let allSanctioned = true;
             for (const elem of receiver.elements) {
               if (ts.isSpreadElement(elem)) {
                 allSanctioned = false;
@@ -843,15 +845,76 @@ describe('Storefront copy integrity & manifest guard', () => {
               }
               elemStrings.push(...res.extractedStrings);
             }
-            if (!allSanctioned || elemStrings.length > 0) {
-              return { sanctioned: allSanctioned, extractedStrings: elemStrings };
-            }
           } else {
             const receiverRes = inspectExpression(receiver, false);
-            if (!receiverRes.sanctioned || receiverRes.extractedStrings.length > 0) {
-              return receiverRes;
+            if (!receiverRes.sanctioned) {
+              allSanctioned = false;
+            }
+            elemStrings.push(...receiverRes.extractedStrings);
+          }
+
+          // Inspect delimiter argument(s)
+          const SANCTIONED_JOIN_DELIMITERS = new Set([
+            '',
+            ' ',
+            ', ',
+            ',',
+            ' · ',
+            '; ',
+            ' - ',
+            '-',
+            '\n',
+          ]);
+
+          if (unwrapped.arguments.length > 0) {
+            const firstArg = unwrapped.arguments[0];
+            if (firstArg) {
+              const delimArg = unwrapStaticExpression(firstArg);
+              if (!isManifestReference(delimArg)) {
+                const delimStr = resolveStaticString(delimArg);
+                if (delimStr !== null) {
+                  if (!SANCTIONED_JOIN_DELIMITERS.has(delimStr)) {
+                    allSanctioned = false;
+                    elemStrings.push(delimStr);
+                  }
+                } else {
+                  const delimRes = inspectExpression(delimArg, false);
+                  if (!delimRes.sanctioned) {
+                    allSanctioned = false;
+                  }
+                  for (const s of delimRes.extractedStrings) {
+                    if (!SANCTIONED_JOIN_DELIMITERS.has(s)) {
+                      allSanctioned = false;
+                      elemStrings.push(s);
+                    }
+                  }
+                  if (!delimRes.sanctioned && delimRes.extractedStrings.length === 0) {
+                    elemStrings.push(delimArg.getText(sf));
+                  }
+                }
+              }
+            }
+            // Any unexpected extra arguments to .join() are treated as unsanctioned
+            for (let i = 1; i < unwrapped.arguments.length; i++) {
+              const extraArg = unwrapped.arguments[i];
+              if (!extraArg) continue;
+              allSanctioned = false;
+              const extra = collectSubtreeStrings(extraArg);
+              if (extra.length > 0) {
+                elemStrings.push(...extra);
+              } else {
+                elemStrings.push(extraArg.getText(sf));
+              }
             }
           }
+
+          if (!allSanctioned || elemStrings.length > 0) {
+            if (elemStrings.length === 0) {
+              elemStrings.push(unwrapped.getText(sf));
+            }
+            return { sanctioned: false, extractedStrings: elemStrings };
+          }
+          return { sanctioned: true, extractedStrings: [] };
         } else {
           for (const arg of unwrapped.arguments) {
             argStrings.push(...collectSubtreeStrings(arg));
@@ -864,10 +927,7 @@ describe('Storefront copy integrity & manifest guard', () => {
         if (ts.isIdentifier(fn) && ['rupees', 'String'].includes(fn.text)) {
           return { sanctioned: true, extractedStrings: [] };
         }
-        if (
-          ts.isPropertyAccessExpression(fn) &&
-          (fn.name.text === 'getFullYear' || fn.name.text === 'join')
-        ) {
+        if (ts.isPropertyAccessExpression(fn) && fn.name.text === 'getFullYear') {
           return { sanctioned: true, extractedStrings: [] };
         }
       }
@@ -1272,6 +1332,27 @@ export default async function ShopPage`,
     const probeSource = shopSource.replace(
       '</Card>',
       `<p>{['Every order includes a complimentary gift.'].join('')}</p></Card>`,
+    );
+
+    const literals = extractJsxLiterals(shopPath, probeSource);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+    expect(unauthorized).toContain('Every order includes a complimentary gift.');
+  });
+
+  test('Oscar bypass probe rejection: .join() delimiter trusts arbitrary string content (Round 16)', () => {
+    // Oscar Round 16 probe:
+    // Two sanctioned manifest references joined with an unauthorized delimiter string.
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const shopSource = fs.readFileSync(shopPath, 'utf-8');
+
+    const probeSource = shopSource.replace(
+      '</Card>',
+      `<p>
+        {[STOREFRONT_COPY_MANIFEST.shop.pausedNotice, STOREFRONT_COPY_MANIFEST.shop.pausedNotice].join(
+          ' Every order includes a complimentary gift. ',
+        )}
+      </p></Card>`,
     );
 
     const literals = extractJsxLiterals(shopPath, probeSource);
