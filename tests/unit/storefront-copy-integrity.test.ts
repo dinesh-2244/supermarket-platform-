@@ -493,7 +493,7 @@ describe('Storefront copy integrity & manifest guard', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 4. Reverse-Direction AST Literal Guard & God Probe Rejection
+  // 4. Reverse-Direction AST Literal Guard & Dynamic Discovery (PR #46 Round 8 & 9 Guard)
   // ---------------------------------------------------------------------------
 
   /**
@@ -504,11 +504,12 @@ describe('Storefront copy integrity & manifest guard', () => {
    *
    * Completes the two-way architectural guarantee:
    * - Forward: every manifest leaf is consumed (Section 3)
-   * - Reverse: every customer-facing literal in designated files is either in
-   *   STOREFRONT_COPY_MANIFEST or on an explicit, reviewed allowlist of functional labels.
+   * - Reverse: every customer-facing literal in any storefront TSX file consuming
+   *   STOREFRONT_COPY_MANIFEST is either in STOREFRONT_COPY_MANIFEST or on an explicit,
+   *   reviewed allowlist of functional/structural UI labels.
    */
-  function extractJsxLiterals(filePath: string): string[] {
-    const content = fs.readFileSync(filePath, 'utf-8');
+  function extractJsxLiterals(filePath: string, sourceOverride?: string): string[] {
+    const content = sourceOverride ?? fs.readFileSync(filePath, 'utf-8');
     const sf = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
     const literals: string[] = [];
 
@@ -535,63 +536,136 @@ describe('Storefront copy integrity & manifest guard', () => {
     return literals;
   }
 
-  const ABOUT_PAGE_ALLOWED_LITERALS = new Set([
-    '🌱',
-    'Dedicated Store Hub',
-    'Shop',
-    'Store →',
-    '⚡',
-    '🥦',
-    '🏷️',
-    '🛡️',
-    'Request Delivery to Your Society →',
-    'Browse Product Catalogue →',
-  ]);
+  /**
+   * Strict per-file allowlist for functional, structural, and navigation UI literals
+   * in storefront components that consume STOREFRONT_COPY_MANIFEST.
+   *
+   * Any marketing claim, delivery promise, or business guarantee MUST be declared
+   * in STOREFRONT_COPY_MANIFEST rather than inlined.
+   */
+  const STOREFRONT_ALLOWED_LITERALS: Record<string, Set<string>> = {
+    'about/page.tsx': new Set([
+      '🌱',
+      'Dedicated Store Hub',
+      'Shop',
+      'Store →',
+      '⚡',
+      '🥦',
+      '🏷️',
+      '🛡️',
+      'Request Delivery to Your Society →',
+      'Browse Product Catalogue →',
+    ]),
+    'cart/page.tsx': new Set([
+      ', and is now priced there.',
+      '.',
+      'Add',
+      'Came with you:',
+      'Delivery',
+      'Estimated total',
+      'Explore fresh fruits, vegetables, dairy & daily staples from your community store.',
+      'Items in Basket',
+      'Minimum order',
+      'Not sold or not in stock there, so removed:',
+      'Only',
+      'Out of stock at your shop right now.',
+      'Price changed from',
+      'Proceed to checkout',
+      'Start shopping',
+      'Subtotal (',
+      'We had to take',
+      'Your basket is empty.',
+      'Your basket moved to',
+      'available — reduce the quantity to continue.',
+      'each',
+      'item(s))',
+      'more to reach the minimum order for your area.',
+      'out:',
+      'title="Change delivery area"',
+      'title="Total"',
+      'title="Your basket"',
+      'to',
+      '·',
+      '— your basket uses the new price.',
+    ]),
+    'community-selector.tsx': new Set([
+      'Open',
+      'Paused',
+      'Primary Hub:',
+      'View all',
+      'serviceable sectors / blocks',
+      '⚡',
+      '🏪',
+      '📍',
+    ]),
+    'layout.tsx': new Set([
+      'About',
+      'About Munder Fresh',
+      'Account & Past Orders',
+      'Basket',
+      'Browse All Products',
+      'Choose ▼',
+      'Delivering to:',
+      'Fresh',
+      'M',
+      'Munder',
+      'Munder Fresh Supermarket Platform. All rights reserved.',
+      'Search',
+      'Select Community',
+      'Shop',
+      'Shopping & Orders',
+      'Your Basket',
+      'title="Click to switch community or store"',
+      '©',
+      '▼',
+      '📍',
+    ]),
+    'mobile-cart-bar.tsx': new Set(['View Basket', 'added', '→']),
+    'page.tsx': new Set([
+      'Browse all',
+      'Explore the Full Catalogue',
+      'Learn More About Us →',
+      'Open Full Shop Catalogue →',
+      'Select Community →',
+      'This shop has nothing listed yet.',
+      'products across categories with search, filters, and complete listings in our Shop.',
+      '⚡',
+      '🏠',
+      '🛡️',
+      '🥦',
+    ]),
+    'shop/page.tsx': new Set(['This store has no items listed currently.']),
+  };
 
-  const MOBILE_BAR_ALLOWED_LITERALS = new Set(['added', 'View Basket', '→']);
+  test('all storefront components importing STOREFRONT_COPY_MANIFEST strictly forbid unauthorized inline literals via dynamic AST scan', () => {
+    // Dynamically discover every .tsx file under src/app/(storefront) that imports STOREFRONT_COPY_MANIFEST
+    const manifestConsumerFiles = storefrontFiles.filter((filePath) => {
+      if (!filePath.endsWith('.tsx') || filePath.endsWith('copy-manifest.ts')) return false;
+      const content = fs.readFileSync(filePath, 'utf-8');
+      return (
+        /import\s+.*STOREFRONT_COPY_MANIFEST.*from/s.test(content) ||
+        content.includes('STOREFRONT_COPY_MANIFEST')
+      );
+    });
 
-  const HOME_PAGE_ALLOWED_LITERALS = new Set([
-    '🥦',
-    '⚡',
-    '🛡️',
-    '🏠',
-    'Learn More About Us →',
-    'Select Community →',
-    'This shop has nothing listed yet.',
-    'Explore the Full Catalogue',
-    'Browse all',
-    'products across categories with search, filters, and complete listings in our Shop.',
-    'Open Full Shop Catalogue →',
-  ]);
+    // Ensure comprehensive coverage across the storefront surface (at least 7 TSX files)
+    expect(manifestConsumerFiles.length).toBeGreaterThanOrEqual(7);
 
-  test('designated customer-facing pages strictly forbid unauthorized inline literals via AST scan', () => {
-    // 1. about/page.tsx: 100% of customer commitments route through STOREFRONT_COPY_MANIFEST.about
-    const aboutLiterals = extractJsxLiterals(path.join(storefrontDir, 'about/page.tsx'));
-    const unauthorizedAbout = aboutLiterals.filter(
-      (literal) => !ABOUT_PAGE_ALLOWED_LITERALS.has(literal),
-    );
-    expect(
-      unauthorizedAbout,
-      `Unauthorized inline literals found in about/page.tsx:\n${unauthorizedAbout.join('\n')}\nMarketing and operational commitments MUST be defined in STOREFRONT_COPY_MANIFEST.`,
-    ).toEqual([]);
+    for (const filePath of manifestConsumerFiles) {
+      const relPath = path.relative(storefrontDir, filePath).replace(/\\/g, '/');
+      const allowed = STOREFRONT_ALLOWED_LITERALS[relPath] ?? new Set<string>();
+      const literals = extractJsxLiterals(filePath);
+      const unauthorized = literals.filter((lit) => !allowed.has(lit));
 
-    // 2. mobile-cart-bar.tsx
-    const mobileLiterals = extractJsxLiterals(path.join(storefrontDir, 'mobile-cart-bar.tsx'));
-    const unauthorizedMobile = mobileLiterals.filter(
-      (literal) => !MOBILE_BAR_ALLOWED_LITERALS.has(literal),
-    );
-    expect(unauthorizedMobile).toEqual([]);
-
-    // 3. page.tsx (Home)
-    const homeLiterals = extractJsxLiterals(path.join(storefrontDir, 'page.tsx'));
-    const unauthorizedHome = homeLiterals.filter(
-      (literal) => !HOME_PAGE_ALLOWED_LITERALS.has(literal),
-    );
-    expect(unauthorizedHome).toEqual([]);
+      expect(
+        unauthorized,
+        `Unauthorized inline literals found in ${relPath}:\n${unauthorized.join('\n')}\nMarketing, claims, and operational commitments MUST be defined in STOREFRONT_COPY_MANIFEST.`,
+      ).toEqual([]);
+    }
   });
 
   test('God bypass probe rejection: an unauthorized inline guarantee in about/page.tsx fails the AST scanner', () => {
-    // God's probe: adding a brand-new unmodeled claim:
+    // God Round 8 probe: adding a brand-new unmodeled claim:
     // 'Every order is backed by our 100% satisfaction guarantee.' to about/page.tsx
     // without touching or removing any existing manifest leaf.
     const aboutPath = path.join(storefrontDir, 'about/page.tsx');
@@ -602,23 +676,27 @@ describe('Storefront copy integrity & manifest guard', () => {
       '<p>Every order is backed by our 100% satisfaction guarantee.</p></section>',
     );
 
-    const sf = ts.createSourceFile(
-      'simulated-about.tsx',
-      simulatedGodAbout,
-      ts.ScriptTarget.Latest,
-      true,
-    );
-    const literals: string[] = [];
-    function visit(node: ts.Node) {
-      if (ts.isJsxText(node)) {
-        const text = node.text.trim().replace(/\s+/g, ' ');
-        if (text) literals.push(text);
-      }
-      ts.forEachChild(node, visit);
-    }
-    visit(sf);
-
-    const unauthorized = literals.filter((lit) => !ABOUT_PAGE_ALLOWED_LITERALS.has(lit));
+    const literals = extractJsxLiterals(aboutPath, simulatedGodAbout);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['about/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
     expect(unauthorized).toContain('Every order is backed by our 100% satisfaction guarantee.');
+  });
+
+  test('God bypass probe rejection: an unauthorized inline guarantee in cart/page.tsx fails the AST scanner', () => {
+    // God Round 9 probe: adding a brand-new unmodeled claim:
+    // 'Free same-day delivery guaranteed on every order.' to cart/page.tsx
+    // without touching or removing any existing manifest leaf.
+    const cartPath = path.join(storefrontDir, 'cart/page.tsx');
+    const cartSource = fs.readFileSync(cartPath, 'utf-8');
+
+    const simulatedGodCart = cartSource.replace(
+      '</Card>',
+      '<p>Free same-day delivery guaranteed on every order.</p></Card>',
+    );
+
+    const literals = extractJsxLiterals(cartPath, simulatedGodCart);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['cart/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+    expect(unauthorized).toContain('Free same-day delivery guaranteed on every order.');
   });
 });
