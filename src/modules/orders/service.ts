@@ -124,7 +124,11 @@ export async function transition(
  * transactions and announce the outcome after those commit — the same rule the
  * wrappers below follow, in the one place that knows each event's payload.
  */
-export function announceTransition(outcome: TransitionOutcome, reason?: string): void {
+export function announceTransition(
+  outcome: TransitionOutcome,
+  reason?: string,
+  billed?: { readonly priceVarianceFlagged: boolean },
+): void {
   switch (outcome.emits) {
     // Id-only, which is every edge except the two that predate Phase 4 and
     // carry a field. The bus names identifiers; a subscriber that needs the
@@ -141,7 +145,10 @@ export function announceTransition(outcome: TransitionOutcome, reason?: string):
       emit(outcome.emits, { orderId: outcome.orderId });
       return;
     case 'order.billed':
-      emit(outcome.emits, { orderId: outcome.orderId, priceVarianceFlagged: false });
+      emit(outcome.emits, {
+        orderId: outcome.orderId,
+        priceVarianceFlagged: billed?.priceVarianceFlagged ?? false,
+      });
       return;
     case 'order.cancelled_by_store':
       emit(outcome.emits, { orderId: outcome.orderId, reason: reason ?? '' });

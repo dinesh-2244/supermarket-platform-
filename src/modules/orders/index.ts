@@ -49,6 +49,7 @@ export {
   lockOrder,
   lockPickLine,
   setLineOutcome,
+  setPosBill,
   type LockedOrderRow,
   type OrderLineStatus,
   type PickLineRow,
