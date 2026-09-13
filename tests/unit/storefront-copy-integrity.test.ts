@@ -321,104 +321,170 @@ describe('Storefront copy integrity & manifest guard', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 3. Manifest Consumption & Exclusivity Invariants (PR #46 Round 6 Guard)
+  // 3. Exhaustive Manifest Consumption & Exclusivity Invariants (PR #46 Round 7 Guard)
   // ---------------------------------------------------------------------------
 
-  test('target storefront files strictly consume STOREFRONT_COPY_MANIFEST rather than inline literals', () => {
-    // 1. cart/page.tsx
+  /**
+   * Programmatically extracts every dot-separated leaf string expression path from
+   * STOREFRONT_COPY_MANIFEST (e.g. 'STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.description').
+   *
+   * This ensures that ANY leaf added or modified in the manifest is automatically
+   * guarded without requiring hand-written per-component probe tests.
+   */
+  function getManifestLeafPaths(obj: unknown, prefix = 'STOREFRONT_COPY_MANIFEST'): string[] {
+    if (typeof obj === 'string') {
+      return [prefix];
+    }
+    if (typeof obj === 'object' && obj !== null) {
+      return Object.entries(obj).flatMap(([key, val]) =>
+        getManifestLeafPaths(val, `${prefix}.${key}`),
+      );
+    }
+    return [];
+  }
+
+  test('every single leaf string in STOREFRONT_COPY_MANIFEST programmatically appears as a consumed reference in storefront source files', () => {
+    const leafPaths = getManifestLeafPaths(STOREFRONT_COPY_MANIFEST);
+    // Sanity check that manifest contains substantial copy (>80 leaves)
+    expect(leafPaths.length).toBeGreaterThanOrEqual(80);
+
+    const combinedSource = storefrontFiles
+      .map((file) => fs.readFileSync(file, 'utf-8'))
+      .join('\n');
+
+    const unconsumedLeaves: string[] = [];
+    for (const leafPath of leafPaths) {
+      if (!combinedSource.includes(leafPath)) {
+        unconsumedLeaves.push(leafPath);
+      }
+    }
+
+    expect(
+      unconsumedLeaves,
+      `The following manifest leaf properties are defined in STOREFRONT_COPY_MANIFEST but never referenced in storefront source code:\n${unconsumedLeaves.join('\n')}`,
+    ).toEqual([]);
+  });
+
+  test('all copy manifest helper functions are actively consumed across storefront components', () => {
+    const helperFunctions = [
+      'formatHubCardDescription',
+      'formatCommunitySubtitle',
+      'formatActiveWelcomeTitle',
+      'formatActiveWelcomeTerms',
+      'formatShopSubtitle',
+      'formatCommunityDeliveryNote',
+    ];
+
+    const nonManifestFiles = storefrontFiles.filter(
+      (file) => !file.endsWith('copy-manifest.ts'),
+    );
+    const nonManifestCombinedSource = nonManifestFiles
+      .map((file) => fs.readFileSync(file, 'utf-8'))
+      .join('\n');
+
+    for (const helper of helperFunctions) {
+      expect(
+        nonManifestCombinedSource.includes(helper),
+        `Exported copy helper function "${helper}" is defined in copy-manifest.ts but never called in any storefront component`,
+      ).toBe(true);
+    }
+  });
+
+  test('designated storefront components strictly forbid raw hardcoded marketing literals', () => {
+    // 1. cart/page.tsx: subtitle and checkout notice
     const cartSource = fs.readFileSync(path.join(storefrontDir, 'cart/page.tsx'), 'utf-8');
-    expect(cartSource).toContain('title: STOREFRONT_COPY_MANIFEST.cart.meta.title');
-    expect(cartSource).toContain('description: STOREFRONT_COPY_MANIFEST.cart.meta.description');
-    expect(cartSource).toContain('title={STOREFRONT_COPY_MANIFEST.cart.heading.title}');
-    expect(cartSource).toContain('subtitle={STOREFRONT_COPY_MANIFEST.cart.heading.subtitle}');
-    expect(cartSource).toContain('{STOREFRONT_COPY_MANIFEST.cart.continueShopping}');
-    expect(cartSource).toContain('{STOREFRONT_COPY_MANIFEST.cart.checkoutNotice}');
-    expect(cartSource).toContain('{STOREFRONT_COPY_MANIFEST.cart.scheduledSlotBadge}');
-    // Zero hardcoded subtitle strings in cart
     expect(cartSource).not.toMatch(/subtitle\s*=\s*["'][^"']+["']/);
-    // Zero hardcoded checkout trust notice
     expect(cartSource).not.toContain('No account needed');
 
-    // 2. page.tsx
+    // 2. page.tsx: promotional banners & welcome strings
     const homeSource = fs.readFileSync(path.join(storefrontDir, 'page.tsx'), 'utf-8');
-    expect(homeSource).toContain('title: STOREFRONT_COPY_MANIFEST.home.meta.title');
-    expect(homeSource).toContain('description: STOREFRONT_COPY_MANIFEST.home.meta.description');
-    expect(homeSource).toContain('{STOREFRONT_COPY_MANIFEST.home.activeWelcome.badge}');
-    expect(homeSource).toContain('formatActiveWelcomeTitle(communityName)');
-    expect(homeSource).toContain('{STOREFRONT_COPY_MANIFEST.home.activeWelcome.pausedNotice}');
-    expect(homeSource).toContain(
-      '{STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.badge}',
-    );
-    expect(homeSource).toContain(
-      '{STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.title}',
-    );
-    expect(homeSource).toContain('{STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.badge}');
-    expect(homeSource).toContain('{STOREFRONT_COPY_MANIFEST.home.promoBanners.superSaver.title}');
-    // Zero hardcoded promotional or welcome strings
     expect(homeSource).not.toContain('>Delivering from your local hub<');
     expect(homeSource).not.toContain('>Fruits, Vegetables & Dairy<');
     expect(homeSource).not.toContain('>Kitchen Staples & Grains<');
 
-    // 3. layout.tsx
+    // 3. layout.tsx: footer brand description
     const layoutSource = fs.readFileSync(path.join(storefrontDir, 'layout.tsx'), 'utf-8');
-    expect(layoutSource).toContain('{STOREFRONT_COPY_MANIFEST.footer.brandDescription}');
-    expect(layoutSource).toContain('{STOREFRONT_COPY_MANIFEST.footer.communitiesHeading}');
-    expect(layoutSource).toContain('{STOREFRONT_COPY_MANIFEST.footer.unserviceableLink}');
     expect(layoutSource).not.toContain(
       'Dedicated hyperlocal grocery shopping for residential communities.',
     );
 
-    // 4. communities.ts
+    // 4. communities.ts: delivery suffix
     const communitiesSource = fs.readFileSync(path.join(storefrontDir, 'communities.ts'), 'utf-8');
-    expect(communitiesSource).toContain('formatCommunitySubtitle');
     expect(communitiesSource).not.toContain("'· Scheduled Slot Delivery'");
     expect(communitiesSource).not.toContain('"· Scheduled Slot Delivery"');
 
-    // 5. mobile-cart-bar.tsx
+    // 5. mobile-cart-bar.tsx: slot notice
     const mobileBarSource = fs.readFileSync(
       path.join(storefrontDir, 'mobile-cart-bar.tsx'),
       'utf-8',
     );
-    expect(mobileBarSource).toContain('{STOREFRONT_COPY_MANIFEST.mobileCartBar.slotNotice}');
     expect(mobileBarSource).not.toMatch(/>\s*Scheduled slot delivery\s*</);
-
-    // 6. shop/page.tsx
-    const shopSource = fs.readFileSync(path.join(storefrontDir, 'shop/page.tsx'), 'utf-8');
-    expect(shopSource).toContain('title: STOREFRONT_COPY_MANIFEST.shop.meta.title');
-    expect(shopSource).toContain('formatShopSubtitle');
-    expect(shopSource).toContain('{STOREFRONT_COPY_MANIFEST.shop.pausedNotice}');
   });
 
-  test('Oscar bypass probe rejection: an inline string edit to PageHeading subtitle is caught and rejected', () => {
-    // Oscar proved in Round 6 that a reviewer could edit cart/page.tsx directly to say
-    // `subtitle="Your order arrives when promised"` and pass tests that only check manifest population.
-    // This consumption guard strictly verifies that such an edit causes immediate test failure.
-    function validateCartSourceConsumption(source: string): { valid: boolean; error?: string } {
-      if (/subtitle\s*=\s*["'][^"']+["']/.test(source)) {
-        return {
-          valid: false,
-          error: 'Forbidden inline string literal found on PageHeading subtitle',
-        };
-      }
-      if (!source.includes('subtitle={STOREFRONT_COPY_MANIFEST.cart.heading.subtitle}')) {
-        return {
-          valid: false,
-          error: 'Missing required binding to STOREFRONT_COPY_MANIFEST.cart.heading.subtitle',
-        };
-      }
-      return { valid: true };
-    }
+  test('Oscar bypass probe rejection: non-heading leaf replacement fails programmatic leaf consumption guard', () => {
+    // Oscar Round 7 probe (finding M4):
+    // In src/app/(storefront)/page.tsx, replacing STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.description
+    // with inline claim 'Vegetables harvested at dawn from nearby farms.'
+    const pageSource = fs.readFileSync(path.join(storefrontDir, 'page.tsx'), 'utf-8');
+    const leafTarget = 'STOREFRONT_COPY_MANIFEST.home.promoBanners.dailyEssentials.description';
+    expect(pageSource).toContain(leafTarget);
 
-    const actualCartSource = fs.readFileSync(path.join(storefrontDir, 'cart/page.tsx'), 'utf-8');
-    expect(validateCartSourceConsumption(actualCartSource).valid).toBe(true);
-
-    // Simulated Oscar probe: developer puts raw unbacked claim string directly into JSX
-    const simulatedOscarProbe = actualCartSource.replace(
-      'subtitle={STOREFRONT_COPY_MANIFEST.cart.heading.subtitle}',
-      'subtitle="Your order arrives when promised"',
+    const simulatedOscarPage = pageSource.replace(
+      leafTarget,
+      "'Vegetables harvested at dawn from nearby farms.'",
     );
-    const probeResult = validateCartSourceConsumption(simulatedOscarProbe);
-    expect(probeResult.valid).toBe(false);
-    expect(probeResult.error).toContain('Forbidden inline string literal');
+
+    const combinedSourceWithMutation = storefrontFiles
+      .map((file) => (file.endsWith('page.tsx') ? simulatedOscarPage : fs.readFileSync(file, 'utf-8')))
+      .join('\n');
+
+    const leafPaths = getManifestLeafPaths(STOREFRONT_COPY_MANIFEST);
+    const unconsumed = leafPaths.filter((lp) => !combinedSourceWithMutation.includes(lp));
+
+    expect(unconsumed).toContain(leafTarget);
+  });
+
+  test('Oscar bypass probe rejection: cart subtitle heading replacement fails programmatic leaf consumption guard', () => {
+    // Oscar Round 6 probe:
+    // In src/app/(storefront)/cart/page.tsx, replacing STOREFRONT_COPY_MANIFEST.cart.heading.subtitle
+    // with inline claim 'Your order arrives when promised'
+    const cartSource = fs.readFileSync(path.join(storefrontDir, 'cart/page.tsx'), 'utf-8');
+    const leafTarget = 'STOREFRONT_COPY_MANIFEST.cart.heading.subtitle';
+    expect(cartSource).toContain(leafTarget);
+
+    const simulatedOscarCart = cartSource.replace(
+      `subtitle={${leafTarget}}`,
+      `subtitle="Your order arrives when promised"`,
+    );
+
+    const combinedSourceWithMutation = storefrontFiles
+      .map((file) => (file.endsWith('cart/page.tsx') ? simulatedOscarCart : fs.readFileSync(file, 'utf-8')))
+      .join('\n');
+
+    const leafPaths = getManifestLeafPaths(STOREFRONT_COPY_MANIFEST);
+    const unconsumed = leafPaths.filter((lp) => !combinedSourceWithMutation.includes(lp));
+
+    expect(unconsumed).toContain(leafTarget);
+  });
+
+  test('Oscar bypass probe rejection: about commitment description replacement fails programmatic leaf consumption guard', () => {
+    // About surface non-heading probe:
+    const aboutSource = fs.readFileSync(path.join(storefrontDir, 'about/page.tsx'), 'utf-8');
+    const leafTarget = 'STOREFRONT_COPY_MANIFEST.about.commitments.cards.scheduledSlots.description';
+    expect(aboutSource).toContain(leafTarget);
+
+    const simulatedOscarAbout = aboutSource.replace(
+      `{${leafTarget}}`,
+      `{"We deliver faster than anyone else"}`,
+    );
+
+    const combinedSourceWithMutation = storefrontFiles
+      .map((file) => (file.endsWith('about/page.tsx') ? simulatedOscarAbout : fs.readFileSync(file, 'utf-8')))
+      .join('\n');
+
+    const leafPaths = getManifestLeafPaths(STOREFRONT_COPY_MANIFEST);
+    const unconsumed = leafPaths.filter((lp) => !combinedSourceWithMutation.includes(lp));
+
+    expect(unconsumed).toContain(leafTarget);
   });
 });
