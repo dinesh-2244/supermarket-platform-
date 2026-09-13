@@ -364,6 +364,16 @@ test.describe.serial('storefront', () => {
     await expect(page.getByRole('heading', { name: /Store 1 Community/i })).toBeVisible();
     await expect(page.getByRole('heading', { name: /Store 2 Community/i })).toBeVisible();
     await expect(page.getByText(/No Live Order Support Channel/i)).toBeVisible();
+    await expect(
+      page.getByText(/A dedicated live order-support channel is not currently active/i),
+    ).toBeVisible();
+
+    // Assert all 4 contact channel slots (phone, email, hours, address) are rendered with unpublished placeholders
+    await expect(page.getByText('Phone Support').first()).toBeVisible();
+    await expect(page.getByText('Email Support').first()).toBeVisible();
+    await expect(page.getByText('Operating Hours').first()).toBeVisible();
+    await expect(page.getByText('Hub Location').first()).toBeVisible();
+    await expect(page.getByText('Not yet published')).toHaveCount(8);
   });
 
   test('the storefront does not scroll sideways on a small phone', async ({ page }) => {

@@ -143,13 +143,13 @@ export const STOREFRONT_COPY_MANIFEST = {
     meta: {
       title: 'Contact Us | Munder Fresh Hyperlocal Grocery',
       description:
-        'Get in touch with Munder Fresh community store hubs. Contact information and resident support.',
+        'Community store hub directory and support channel status for Munder Fresh. Dedicated live order-support channels are not yet active.',
     },
     hero: {
-      badge: 'Customer Support & Inquiries',
+      badge: 'Community Store Hub Directory',
       title: 'Contact Us',
       subtitle:
-        'Have a question about your order, delivery schedule, or community service? We are here to help.',
+        'Community store hub directory and channel status. Dedicated live order-support channels are not currently active.',
     },
     appNotice: {
       badge: 'Order Support Status',
@@ -172,12 +172,12 @@ export const STOREFRONT_COPY_MANIFEST = {
       emailLabel: 'Email Support',
       emailPlaceholder: 'Not yet published',
       hoursLabel: 'Operating Hours',
-      hoursPlaceholder: 'Aligned with active delivery slot windows',
+      hoursPlaceholder: 'Not yet published',
       addressLabel: 'Hub Location',
-      addressPlaceholder: 'On-premises community fulfillment facility',
+      addressPlaceholder: 'Not yet published',
     },
     helpCard: {
-      title: 'Need Help with Your Order?',
+      title: 'Order Status & Operational Information',
       description:
         'Check your past orders and status updates in your account, or review our operational principles.',
       viewOrdersText: 'View Past Orders',
