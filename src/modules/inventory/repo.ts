@@ -139,6 +139,29 @@ export interface LedgerRow {
   readonly note?: string | null;
 }
 
+/** What one reference's ledger rows add up to — see `outstandingFor`. */
+export interface LedgerRef {
+  readonly storeId: string;
+  readonly productId: string;
+  readonly refType: string;
+  readonly refId: string;
+  readonly note: string;
+}
+
+export async function sumDeltaFor(tx: Tx, ref: LedgerRef): Promise<number> {
+  const agg = await auditedExecutor(tx).stockLedger.aggregate({
+    where: {
+      storeId: ref.storeId,
+      productId: ref.productId,
+      refType: ref.refType,
+      refId: ref.refId,
+      note: ref.note,
+    },
+    _sum: { delta: true },
+  });
+  return agg._sum.delta ?? 0;
+}
+
 /** Append-only. Written in the same transaction as the balance it records. */
 export async function insertLedger(tx: Tx, row: LedgerRow): Promise<LedgerRecord> {
   return auditedExecutor(tx).stockLedger.create({

@@ -38,7 +38,7 @@ export function moduleDescriptor(): ModuleDescriptor {
   return descriptor;
 }
 
-export type { InventoryRecord, LedgerQuery, LedgerRecord } from './repo';
+export type { InventoryRecord, LedgerQuery, LedgerRecord, LedgerRef } from './repo';
 
 /** What one applied movement did, for the caller to report and emit from. */
 export interface MovementResult {
@@ -141,6 +141,19 @@ export async function applyMovement(
     ledgerId: ledger.id,
     crossedLow: crossedLowThresholdDownward(balanceBefore, item.websiteStock, threshold),
   };
+}
+
+/**
+ * How many units the ledger says are still *out* for one reference — the
+ * negative of the sum of every row keyed (store, product, refType, refId,
+ * note), floored at zero. The ledger is the record: a unit that already came
+ * back under the same key (by whatever reason) is not counted as out, so a
+ * caller restoring "whatever is still out" cannot credit it twice, whatever
+ * else it has stored. Takes a `Tx` so the answer is read in the transaction
+ * that acts on it; authorizes nothing, like `applyMovement`.
+ */
+export async function outstandingFor(tx: Tx, ref: repo.LedgerRef): Promise<number> {
+  return Math.max(0, -(await repo.sumDeltaFor(tx, ref)));
 }
 
 /**
