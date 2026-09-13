@@ -361,8 +361,8 @@ test.describe.serial('storefront', () => {
     await page.getByRole('link', { name: 'Contact' }).first().click();
     await expect(page).toHaveURL(/\/contact/);
     await expect(page.getByRole('heading', { level: 1, name: /contact us/i })).toBeVisible();
-    await expect(page.getByText(/Store 1 Community/i)).toBeVisible();
-    await expect(page.getByText(/Store 2 Community/i)).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Store 1 Community/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Store 2 Community/i })).toBeVisible();
     await expect(page.getByText(/In-App Support for Active Orders/i)).toBeVisible();
   });
 
