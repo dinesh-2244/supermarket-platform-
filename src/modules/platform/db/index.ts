@@ -248,6 +248,12 @@ export const LOCK_NAMESPACE = {
    * the same N and each commit the N+1st. The key is `(storeId, slotStart)`.
    */
   deliverySlot: 0x0_11_5a,
+  /**
+   * One store's product-request intake: how many requests it took lately, and
+   * from whom. Again a rule about a set that the new row is about to join, so
+   * counted and inserted under one key — `storeId`.
+   */
+  productRequestIntake: 0x0_11_5b,
 } as const;
 
 export type LockNamespace = (typeof LOCK_NAMESPACE)[keyof typeof LOCK_NAMESPACE];

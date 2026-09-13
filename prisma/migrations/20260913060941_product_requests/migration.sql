@@ -11,6 +11,8 @@ CREATE TABLE "ProductRequest" (
     "note" TEXT,
     "customerName" TEXT,
     "customerPhone" TEXT,
+    "productKey" TEXT NOT NULL,
+    "submitterKey" TEXT NOT NULL,
     "status" "ProductRequestStatus" NOT NULL DEFAULT 'NEW',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -34,6 +36,12 @@ CREATE TABLE "ProductRequestStatusHistory" (
 
 -- CreateIndex
 CREATE INDEX "ProductRequest_storeId_status_createdAt_idx" ON "ProductRequest"("storeId", "status", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "ProductRequest_storeId_createdAt_idx" ON "ProductRequest"("storeId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "ProductRequest_storeId_submitterKey_createdAt_idx" ON "ProductRequest"("storeId", "submitterKey", "createdAt");
 
 -- CreateIndex
 CREATE INDEX "ProductRequestStatusHistory_requestId_createdAt_idx" ON "ProductRequestStatusHistory"("requestId", "createdAt");

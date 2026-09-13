@@ -73,6 +73,13 @@ export function assertRequestTransition(
 }
 
 export interface SubmissionInput {
+  /**
+   * An opaque, stable identifier for the *client* — the storefront passes a
+   * hash of its basket cookie, or failing that the request address. Required
+   * for a guest who gives no phone: it is the only handle the intake caps have
+   * on them. Never the raw cookie, and never shown to anyone.
+   */
+  readonly clientKey?: string | null;
   readonly productName: string;
   readonly brand?: string | null;
   readonly packSize?: string | null;
@@ -149,4 +156,47 @@ function normalizeIndianMobile(phone: string): string {
     throw new ValidationError('Enter a 10-digit Indian mobile number', { field: 'customerPhone' });
   }
   return digits.replace(/^\+91/, '');
+}
+
+/**
+ * Intake caps. A public write endpoint with no login needs a ceiling, and this
+ * is the whole of it: one submitter gets a handful a day, one store gets a
+ * bounded trickle per window, and the same ask twice from the same person in a
+ * day is a double-submit rather than a new row. Small numbers on purpose — a
+ * shop hears about a few missing products a day, not hundreds.
+ */
+export const INTAKE_LIMITS = {
+  perSubmitter: { max: 5, windowMs: 24 * 60 * 60 * 1000 },
+  perStore: { max: 30, windowMs: 10 * 60 * 1000 },
+  duplicate: { windowMs: 24 * 60 * 60 * 1000 },
+} as const;
+
+/**
+ * Who is submitting, as one string the caps can count by: the account when
+ * there is one, else the phone they gave, else the client key the storefront
+ * supplied. A guest with none of these has nothing to bound them and is
+ * refused — that is a storefront wiring mistake, not a shopper's.
+ */
+export function submitterKeyOf(who: {
+  readonly customerId: string | null;
+  readonly customerPhone: string | null;
+  readonly clientKey: string | null | undefined;
+}): string {
+  if (who.customerId !== null) return `customer:${who.customerId}`;
+  if (who.customerPhone !== null) return `phone:${who.customerPhone}`;
+  const key = (who.clientKey ?? '').trim();
+  if (key.length === 0) {
+    throw new ValidationError(
+      'A product request needs a client key when the shopper is anonymous',
+      {
+        field: 'clientKey',
+      },
+    );
+  }
+  return `client:${key}`;
+}
+
+/** The product name folded for duplicate detection: case and spacing do not make a new ask. */
+export function productKeyOf(productName: string): string {
+  return productName.trim().toLowerCase().replace(/\s+/g, ' ');
 }

@@ -86,10 +86,11 @@ export async function insertRequest(
   tx: Tx,
   storeId: string,
   submission: Submission,
+  keys: { productKey: string; submitterKey: string },
   actor: { actorType: 'CUSTOMER'; actorId: string | null },
 ): Promise<ProductRequestRow> {
   const row = await auditedExecutor(tx).productRequest.create({
-    data: { storeId, ...submission },
+    data: { storeId, ...submission, ...keys },
     select: requestSelect,
   });
   await insertHistory(tx, {
@@ -195,4 +196,40 @@ export async function countByStatus(
     _count: { _all: true },
   });
   return rows.map((row) => ({ status: row.status, count: row._count._all }));
+}
+
+// ---------------------------------------------------------------------------
+// Intake caps — read inside the store's intake lock, so the count and the
+// insert that follows it cannot interleave with another submission's.
+// ---------------------------------------------------------------------------
+
+export async function countRecentForStore(tx: Tx, storeId: string, since: Date): Promise<number> {
+  return auditedExecutor(tx).productRequest.count({
+    where: { storeId, createdAt: { gte: since } },
+  });
+}
+
+export async function countRecentForSubmitter(
+  tx: Tx,
+  storeId: string,
+  submitterKey: string,
+  since: Date,
+): Promise<number> {
+  return auditedExecutor(tx).productRequest.count({
+    where: { storeId, submitterKey, createdAt: { gte: since } },
+  });
+}
+
+export async function hasRecentDuplicate(
+  tx: Tx,
+  storeId: string,
+  submitterKey: string,
+  productKey: string,
+  since: Date,
+): Promise<boolean> {
+  const row = await auditedExecutor(tx).productRequest.findFirst({
+    where: { storeId, submitterKey, productKey, createdAt: { gte: since } },
+    select: { id: true },
+  });
+  return row !== null;
 }
