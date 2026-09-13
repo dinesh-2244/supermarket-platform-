@@ -874,6 +874,239 @@ describe('Storefront copy integrity & manifest guard', () => {
     const sf = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
     const literals: string[] = [];
 
+    const isCopyManifestFile = filePath.endsWith('copy-manifest.ts');
+
+    function isCopyManifestModule(specText: string): boolean {
+      if (
+        specText === './copy-manifest' ||
+        specText === '../copy-manifest' ||
+        specText === '@/app/(storefront)/copy-manifest' ||
+        specText.endsWith('/copy-manifest') ||
+        specText === 'copy-manifest'
+      ) {
+        return true;
+      }
+      try {
+        const dir = path.dirname(
+          path.isAbsolute(filePath) ? filePath : path.resolve(storefrontDir, filePath),
+        );
+        const resolved = path.resolve(dir, specText);
+        const target = path.join(storefrontDir, 'copy-manifest');
+        if (resolved === target || resolved === `${target}.ts`) {
+          return true;
+        }
+      } catch {
+        // ignore
+      }
+      return false;
+    }
+
+    interface LexicalBinding {
+      kind:
+        | 'parameter'
+        | 'destructured-parameter'
+        | 'variable'
+        | 'destructured-variable'
+        | 'function'
+        | 'class';
+      node: ts.Node;
+      name: string;
+      initializer?: ts.Expression | undefined;
+      scope: ts.Node;
+    }
+
+    // Resolve local lexical binding (parameter, destructured binding, variable declaration, function, or class)
+    function resolveLexicalBinding(ident: ts.Identifier): LexicalBinding | null {
+      const name = ident.text;
+      let curr: ts.Node | undefined = ident.parent;
+
+      function checkBindingElement(
+        elem: ts.BindingElement,
+        kind: 'destructured-parameter' | 'destructured-variable',
+        parentInit?: ts.Expression,
+      ): LexicalBinding | null {
+        if (ts.isIdentifier(elem.name) && elem.name.text === name) {
+          return {
+            kind,
+            node: elem,
+            name,
+            initializer: elem.initializer ?? parentInit,
+            scope: curr!,
+          };
+        }
+        if (ts.isObjectBindingPattern(elem.name) || ts.isArrayBindingPattern(elem.name)) {
+          for (const nested of elem.name.elements) {
+            if (ts.isBindingElement(nested)) {
+              const res = checkBindingElement(nested, kind, elem.initializer ?? parentInit);
+              if (res) return res;
+            }
+          }
+        }
+        return null;
+      }
+
+      while (curr) {
+        if (
+          ts.isFunctionDeclaration(curr) ||
+          ts.isFunctionExpression(curr) ||
+          ts.isArrowFunction(curr) ||
+          ts.isMethodDeclaration(curr) ||
+          ts.isConstructorDeclaration(curr)
+        ) {
+          for (const param of curr.parameters) {
+            if (ts.isIdentifier(param.name) && param.name.text === name) {
+              return {
+                kind: 'parameter',
+                node: param,
+                name,
+                initializer: param.initializer,
+                scope: curr,
+              };
+            }
+            if (ts.isObjectBindingPattern(param.name) || ts.isArrayBindingPattern(param.name)) {
+              for (const elem of param.name.elements) {
+                if (ts.isBindingElement(elem)) {
+                  const res = checkBindingElement(
+                    elem,
+                    'destructured-parameter',
+                    param.initializer,
+                  );
+                  if (res) return res;
+                }
+              }
+            }
+          }
+        }
+
+        if (
+          ts.isBlock(curr) ||
+          ts.isSourceFile(curr) ||
+          ts.isCaseClause(curr) ||
+          ts.isDefaultClause(curr)
+        ) {
+          for (const stmt of curr.statements) {
+            if (ts.isVariableStatement(stmt)) {
+              for (const decl of stmt.declarationList.declarations) {
+                if (ts.isIdentifier(decl.name) && decl.name.text === name) {
+                  return {
+                    kind: 'variable',
+                    node: decl,
+                    name,
+                    initializer: decl.initializer,
+                    scope: curr,
+                  };
+                }
+                if (ts.isObjectBindingPattern(decl.name) || ts.isArrayBindingPattern(decl.name)) {
+                  for (const elem of decl.name.elements) {
+                    if (ts.isBindingElement(elem)) {
+                      const res = checkBindingElement(
+                        elem,
+                        'destructured-variable',
+                        decl.initializer,
+                      );
+                      if (res) return res;
+                    }
+                  }
+                }
+              }
+            }
+            if (ts.isFunctionDeclaration(stmt) && stmt.name?.text === name) {
+              return {
+                kind: 'function',
+                node: stmt,
+                name,
+                initializer: undefined,
+                scope: curr,
+              };
+            }
+            if (ts.isClassDeclaration(stmt) && stmt.name?.text === name) {
+              return {
+                kind: 'class',
+                node: stmt,
+                name,
+                initializer: undefined,
+                scope: curr,
+              };
+            }
+          }
+        }
+
+        curr = curr.parent;
+      }
+      return null;
+    }
+
+    // Verify whether an identifier actually traces to an unaliased import from copy-manifest.ts (PR #46 Round 19)
+    function isImportedApprovedFormatter(ident: ts.Identifier, sourceFile: ts.SourceFile): boolean {
+      const name = ident.text;
+      if (!APPROVED_FORMATTERS.has(name)) {
+        return false;
+      }
+      // If there is ANY local lexical binding (parameter, variable, function, etc.),
+      // then ident refers to that local declaration, NOT the import.
+      if (resolveLexicalBinding(ident) !== null) {
+        return false;
+      }
+      // Must trace to an unaliased named import from copy-manifest
+      for (const stmt of sourceFile.statements) {
+        if (!ts.isImportDeclaration(stmt)) continue;
+        const moduleSpec = stmt.moduleSpecifier;
+        if (!ts.isStringLiteral(moduleSpec)) continue;
+        if (!isCopyManifestModule(moduleSpec.text)) continue;
+
+        const bindings = stmt.importClause?.namedBindings;
+        if (!bindings || !ts.isNamedImports(bindings)) continue;
+
+        for (const spec of bindings.elements) {
+          const importedName = (spec.propertyName ?? spec.name).text;
+          const localName = spec.name.text;
+          if (importedName === name && localName === name && spec.propertyName === undefined) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function getDeclaredNames(node: ts.Node): string[] {
+      const names: string[] = [];
+      if (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node)) {
+        if (ts.isIdentifier(node.name)) {
+          names.push(node.name.text);
+        } else if (ts.isObjectBindingPattern(node.name) || ts.isArrayBindingPattern(node.name)) {
+          for (const element of node.name.elements) {
+            if (ts.isBindingElement(element)) {
+              names.push(...getDeclaredNames(element));
+            }
+          }
+        }
+      } else if (
+        (ts.isFunctionDeclaration(node) ||
+          ts.isFunctionExpression(node) ||
+          ts.isClassDeclaration(node) ||
+          ts.isTypeAliasDeclaration(node) ||
+          ts.isInterfaceDeclaration(node) ||
+          ts.isEnumDeclaration(node)) &&
+        node.name &&
+        ts.isIdentifier(node.name)
+      ) {
+        names.push(node.name.text);
+      }
+      return names;
+    }
+
+    function collectSubtreeStrings(node: ts.Node): string[] {
+      const found: string[] = [];
+      function scan(n: ts.Node) {
+        if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
+          found.push(n.text);
+        }
+        ts.forEachChild(n, scan);
+      }
+      scan(node);
+      return found;
+    }
+
     function isManifestReference(expr: ts.Expression): boolean {
       const unwrapped = unwrapStaticExpression(expr);
       if (ts.isPropertyAccessExpression(unwrapped)) {
@@ -887,7 +1120,7 @@ describe('Storefront copy integrity & manifest guard', () => {
       }
       if (ts.isCallExpression(unwrapped)) {
         const fn = unwrapped.expression;
-        if (ts.isIdentifier(fn) && APPROVED_FORMATTERS.has(fn.text)) {
+        if (ts.isIdentifier(fn) && isImportedApprovedFormatter(fn, sf)) {
           const name = fn.text;
           if (name !== 'formatCommunityDeliveryNote' && unwrapped.arguments.length === 0) {
             return false;
@@ -935,100 +1168,6 @@ describe('Storefront copy integrity & manifest guard', () => {
         }
       }
       return false;
-    }
-
-    function collectSubtreeStrings(node: ts.Node): string[] {
-      const found: string[] = [];
-      function scan(n: ts.Node) {
-        if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
-          found.push(n.text);
-        }
-        ts.forEachChild(n, scan);
-      }
-      scan(node);
-      return found;
-    }
-
-    interface LexicalBinding {
-      kind: 'parameter' | 'destructured-parameter' | 'variable' | 'destructured-variable';
-      node: ts.Node;
-      name: string;
-      initializer?: ts.Expression | undefined;
-      scope: ts.Node;
-    }
-
-    // Resolve local lexical binding (parameter, destructured binding, or variable declaration)
-    function resolveLexicalBinding(ident: ts.Identifier): LexicalBinding | null {
-      const name = ident.text;
-      let curr: ts.Node | undefined = ident.parent;
-
-      while (curr) {
-        if (
-          ts.isFunctionDeclaration(curr) ||
-          ts.isFunctionExpression(curr) ||
-          ts.isArrowFunction(curr) ||
-          ts.isMethodDeclaration(curr)
-        ) {
-          for (const param of curr.parameters) {
-            if (ts.isIdentifier(param.name) && param.name.text === name) {
-              return {
-                kind: 'parameter',
-                node: param,
-                name,
-                initializer: param.initializer,
-                scope: curr,
-              };
-            }
-            if (ts.isObjectBindingPattern(param.name)) {
-              for (const elem of param.name.elements) {
-                if (ts.isIdentifier(elem.name) && elem.name.text === name) {
-                  return {
-                    kind: 'destructured-parameter',
-                    node: elem,
-                    name,
-                    initializer: elem.initializer,
-                    scope: curr,
-                  };
-                }
-              }
-            }
-          }
-        }
-
-        if (ts.isBlock(curr) || ts.isSourceFile(curr)) {
-          for (const stmt of curr.statements) {
-            if (ts.isVariableStatement(stmt)) {
-              for (const decl of stmt.declarationList.declarations) {
-                if (ts.isIdentifier(decl.name) && decl.name.text === name) {
-                  return {
-                    kind: 'variable',
-                    node: decl,
-                    name,
-                    initializer: decl.initializer,
-                    scope: curr,
-                  };
-                }
-                if (ts.isObjectBindingPattern(decl.name)) {
-                  for (const elem of decl.name.elements) {
-                    if (ts.isIdentifier(elem.name) && elem.name.text === name) {
-                      return {
-                        kind: 'destructured-variable',
-                        node: elem,
-                        name,
-                        initializer: elem.initializer ?? decl.initializer,
-                        scope: curr,
-                      };
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        curr = curr.parent;
-      }
-      return null;
     }
 
     function inspectExpression(
@@ -1335,6 +1474,57 @@ describe('Storefront copy integrity & manifest guard', () => {
     }
 
     function visit(node: ts.Node) {
+      if (!isCopyManifestFile) {
+        // Detect local declarations shadowing approved formatters (PR #46 Round 19)
+        if (
+          ts.isVariableDeclaration(node) ||
+          ts.isParameter(node) ||
+          ts.isFunctionDeclaration(node) ||
+          ts.isFunctionExpression(node) ||
+          ts.isClassDeclaration(node)
+        ) {
+          const names = getDeclaredNames(node);
+          for (const declName of names) {
+            if (APPROVED_FORMATTERS.has(declName)) {
+              literals.push(`shadowed-formatter:${declName}`);
+              const subtree = collectSubtreeStrings(node);
+              literals.push(...subtree);
+              literals.push(node.getText(sf).trim().replace(/\s+/g, ' '));
+            }
+          }
+        } else if (ts.isImportSpecifier(node)) {
+          const importedName = (node.propertyName ?? node.name).text;
+          const localName = node.name.text;
+          if (APPROVED_FORMATTERS.has(importedName) || APPROVED_FORMATTERS.has(localName)) {
+            if (node.propertyName !== undefined && node.propertyName.text !== node.name.text) {
+              literals.push(`aliased-formatter-import:${node.getText(sf)}`);
+            }
+            let importDecl: ts.Node | undefined = node.parent;
+            while (importDecl && !ts.isImportDeclaration(importDecl)) {
+              importDecl = importDecl.parent;
+            }
+            if (
+              importDecl &&
+              ts.isImportDeclaration(importDecl) &&
+              ts.isStringLiteral(importDecl.moduleSpecifier)
+            ) {
+              const specText = importDecl.moduleSpecifier.text;
+              if (!isCopyManifestModule(specText)) {
+                literals.push(`unapproved-formatter-import:${node.getText(sf)} from ${specText}`);
+              }
+            }
+          }
+        } else if (ts.isExportSpecifier(node)) {
+          const exportedName = (node.propertyName ?? node.name).text;
+          const localName = node.name.text;
+          if (APPROVED_FORMATTERS.has(exportedName) || APPROVED_FORMATTERS.has(localName)) {
+            if (node.propertyName !== undefined && node.propertyName.text !== node.name.text) {
+              literals.push(`aliased-formatter-export:${node.getText(sf)}`);
+            }
+          }
+        }
+      }
+
       if (ts.isJsxText(node)) {
         const text = node.text.trim().replace(/\s+/g, ' ');
         if (text) literals.push(text);
@@ -1776,5 +1966,149 @@ export default async function ShopPage`,
       // Restore original manifest immediately
       fs.writeFileSync(manifestPath, originalManifest, 'utf-8');
     }
+  });
+
+  test('Oscar bypass probe rejection: shadowed approved formatter returning unauthorized copy fails import-binding resolution (Round 19)', () => {
+    // Oscar Round 18 evidence mutant:
+    // agents/oscar-reviewer-mtolwvnc/evidence/pr46-round18-shadowed-formatter-bypass.txt
+    // Local arrow function formatShopSubtitle shadowing the real import from copy-manifest.ts
+    // and returning unauthorized copy, called with a legitimate manifest argument.
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const originalSource = fs.readFileSync(shopPath, 'utf-8');
+
+    const probeSource = originalSource
+      .replace(
+        'export const metadata: Metadata = {',
+        `function Promotion(): React.ReactElement {\n  const formatShopSubtitle = (_approved: string): string =>\n    'Every order includes a complimentary gift.';\n  return <p>{formatShopSubtitle(STOREFRONT_COPY_MANIFEST.shop.pausedNotice)}</p>;\n}\n\nexport const metadata: Metadata = {`,
+      )
+      .replace('</Card>', '  <Promotion />\n      </Card>');
+
+    expect(probeSource).not.toEqual(originalSource);
+
+    const literals = extractJsxLiterals(shopPath, probeSource);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+
+    expect(unauthorized.length).toBeGreaterThan(0);
+    expect(
+      unauthorized.some((lit) => lit.includes('Every order includes a complimentary gift.')),
+    ).toBe(true);
+    expect(unauthorized.some((lit) => lit.includes('shadowed-formatter:formatShopSubtitle'))).toBe(
+      true,
+    );
+  });
+
+  test('Oscar bypass probe rejection: local function declaration shadowing approved formatter is rejected (Round 19)', () => {
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const originalSource = fs.readFileSync(shopPath, 'utf-8');
+
+    const probeSource = originalSource
+      .replace(
+        'export const metadata: Metadata = {',
+        `function Promotion(): React.ReactElement {\n  function formatShopSubtitle(_approved: string): string {\n    return 'Every order includes a complimentary gift.';\n  }\n  return <p>{formatShopSubtitle(STOREFRONT_COPY_MANIFEST.shop.pausedNotice)}</p>;\n}\n\nexport const metadata: Metadata = {`,
+      )
+      .replace('</Card>', '  <Promotion />\n      </Card>');
+
+    expect(probeSource).not.toEqual(originalSource);
+
+    const literals = extractJsxLiterals(shopPath, probeSource);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+
+    expect(unauthorized.length).toBeGreaterThan(0);
+    expect(
+      unauthorized.some((lit) => lit.includes('Every order includes a complimentary gift.')),
+    ).toBe(true);
+    expect(unauthorized.some((lit) => lit.includes('shadowed-formatter:formatShopSubtitle'))).toBe(
+      true,
+    );
+  });
+
+  test('Oscar bypass probe rejection: parameter declaration shadowing approved formatter is rejected (Round 19)', () => {
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const originalSource = fs.readFileSync(shopPath, 'utf-8');
+
+    const probeSource = originalSource
+      .replace(
+        'export const metadata: Metadata = {',
+        `function Promotion({ formatShopSubtitle }: { formatShopSubtitle: (_approved: string) => string }): React.ReactElement {\n  return <p>{formatShopSubtitle(STOREFRONT_COPY_MANIFEST.shop.pausedNotice)}</p>;\n}\n\nexport const metadata: Metadata = {`,
+      )
+      .replace(
+        '</Card>',
+        '  <Promotion formatShopSubtitle={() => "Complimentary gift."} />\n      </Card>',
+      );
+
+    expect(probeSource).not.toEqual(originalSource);
+
+    const literals = extractJsxLiterals(shopPath, probeSource);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+
+    expect(unauthorized.length).toBeGreaterThan(0);
+    expect(unauthorized.some((lit) => lit.includes('shadowed-formatter:formatShopSubtitle'))).toBe(
+      true,
+    );
+  });
+
+  test('Oscar bypass probe rejection: dead local shadow function declared without JSX invocation is rejected (Round 19)', () => {
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const originalSource = fs.readFileSync(shopPath, 'utf-8');
+
+    const probeSource = originalSource.replace(
+      'export const metadata: Metadata = {',
+      `function UncalledPromotion(): React.ReactElement {\n  const formatShopSubtitle = (_approved: string): string =>\n    'Every order includes a complimentary gift.';\n  return <p>Safe text</p>;\n}\n\nexport const metadata: Metadata = {`,
+    );
+
+    expect(probeSource).not.toEqual(originalSource);
+
+    const literals = extractJsxLiterals(shopPath, probeSource);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+
+    expect(unauthorized.length).toBeGreaterThan(0);
+    expect(unauthorized.some((lit) => lit.includes('shadowed-formatter:formatShopSubtitle'))).toBe(
+      true,
+    );
+    expect(
+      unauthorized.some((lit) => lit.includes('Every order includes a complimentary gift.')),
+    ).toBe(true);
+  });
+
+  test('Oscar bypass probe rejection: aliased import of approved formatter is rejected (Round 19)', () => {
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const originalSource = fs.readFileSync(shopPath, 'utf-8');
+
+    const probeSource = originalSource.replace(
+      "import { STOREFRONT_COPY_MANIFEST, formatShopSubtitle } from '../copy-manifest';",
+      "import { STOREFRONT_COPY_MANIFEST, formatShopSubtitle as aliasedSubtitle } from '../copy-manifest';",
+    );
+
+    expect(probeSource).not.toEqual(originalSource);
+
+    const literals = extractJsxLiterals(shopPath, probeSource);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+
+    expect(unauthorized.length).toBeGreaterThan(0);
+    expect(unauthorized.some((lit) => lit.includes('aliased-formatter-import:'))).toBe(true);
+  });
+
+  test('Oscar bypass probe rejection: import of approved formatter from unapproved module is rejected (Round 19)', () => {
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const originalSource = fs.readFileSync(shopPath, 'utf-8');
+
+    const probeSource = originalSource.replace(
+      "import { STOREFRONT_COPY_MANIFEST, formatShopSubtitle } from '../copy-manifest';",
+      "import { STOREFRONT_COPY_MANIFEST } from '../copy-manifest';\nimport { formatShopSubtitle } from './unapproved-module';",
+    );
+
+    expect(probeSource).not.toEqual(originalSource);
+
+    const literals = extractJsxLiterals(shopPath, probeSource);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+
+    expect(unauthorized.length).toBeGreaterThan(0);
+    expect(unauthorized.some((lit) => lit.includes('unapproved-formatter-import:'))).toBe(true);
   });
 });
