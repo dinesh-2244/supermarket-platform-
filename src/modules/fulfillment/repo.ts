@@ -155,3 +155,48 @@ export async function pickingQueue(
     linesResolved: order.lines.filter((line) => line.lineStatus !== 'PENDING').length,
   }));
 }
+
+// ---------------------------------------------------------------------------
+// POS billing handoff (D2)
+// ---------------------------------------------------------------------------
+
+export interface PosBillingHandoffRow {
+  readonly id: string;
+  readonly orderId: string;
+  readonly posBillNumber: string;
+  readonly posFinalTotalPaise: number;
+  readonly billedByUserId: string;
+  readonly billedAt: Date;
+  readonly discrepancyNote: string | null;
+}
+
+const handoffSelect = {
+  id: true,
+  orderId: true,
+  posBillNumber: true,
+  posFinalTotalPaise: true,
+  billedByUserId: true,
+  billedAt: true,
+  discrepancyNote: true,
+} as const;
+
+/** One handoff per order — `orderId` is unique, so a second bill is a constraint error, not a silent overwrite. */
+export async function insertHandoff(
+  tx: Tx,
+  bill: {
+    readonly orderId: string;
+    readonly posBillNumber: string;
+    readonly posFinalTotalPaise: number;
+    readonly billedByUserId: string;
+    readonly discrepancyNote: string | null;
+  },
+): Promise<PosBillingHandoffRow> {
+  return auditedExecutor(tx).posBillingHandoff.create({ data: bill, select: handoffSelect });
+}
+
+export async function findHandoff(
+  db: DbExecutor,
+  orderId: string,
+): Promise<PosBillingHandoffRow | null> {
+  return executor(db).posBillingHandoff.findUnique({ where: { orderId }, select: handoffSelect });
+}

@@ -463,6 +463,24 @@ export async function findConfirmationDetails(
 }
 
 /** Record that a customer has agreed to the revised amount (D6). */
+/**
+ * Record the POS bill on the order — the first time `posFinalTotalPaise` is
+ * ever set, and with it the variance flag the `PACKED → OUT_FOR_DELIVERY`
+ * guard reads. Written by `fulfillment` in the same transaction as the
+ * `PosBillingHandoff` row and the `BILLED_IN_POS` transition.
+ */
+export async function setPosBill(
+  tx: Tx,
+  orderId: string,
+  bill: {
+    readonly posBillNumber: string;
+    readonly posFinalTotalPaise: number;
+    readonly priceVarianceFlagged: boolean;
+  },
+): Promise<void> {
+  await auditedExecutor(tx).order.update({ where: { id: orderId }, data: bill });
+}
+
 export async function setRevisedAmountConfirmed(
   tx: Tx,
   orderId: string,
