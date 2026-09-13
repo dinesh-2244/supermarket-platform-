@@ -56,6 +56,21 @@ describe('Product Requests UI: Storefront Copy Manifest Integrity', () => {
     expect(formSource).toContain('{successCopy.description}');
     expect(formSource).toContain('{formCopy.productNameLabel}');
   });
+
+  test('request-product form handles resetting and requesting another product', () => {
+    const formSource = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        '../../src/app/(storefront)/request-product/product-request-form.tsx',
+      ),
+      'utf-8',
+    );
+
+    expect(formSource).toContain('lastDismissedCount');
+    expect(formSource).toContain('setLastDismissedCount');
+    expect(formSource).toContain('initialProductName');
+    expect(formSource).not.toMatch(/^(\s*)if\s*\(\s*state\s*===\s*['"]ok['"]\s*\)/m);
+  });
 });
 
 describe('Product Requests UI: Admin Status Styles and Transitions', () => {
