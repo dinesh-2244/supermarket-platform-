@@ -5,11 +5,11 @@ export type { CategoryGroup };
 export { resolveCategoryGroup };
 
 export interface CategoryPlaceholderProps {
-  categorySlug?: string | null;
-  productSlug?: string | null;
-  name?: string | null;
-  size?: 'sm' | 'md' | 'lg';
-  className?: string;
+  categorySlug?: string | null | undefined;
+  productSlug?: string | null | undefined;
+  name?: string | null | undefined;
+  size?: 'sm' | 'md' | 'lg' | undefined;
+  className?: string | undefined;
 }
 
 interface PlaceholderConfig {

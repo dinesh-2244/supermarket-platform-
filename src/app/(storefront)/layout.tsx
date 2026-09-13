@@ -76,10 +76,10 @@ export default async function StorefrontLayout({
               </Link>
 
               <Link
-                href="/search"
-                className="hidden sm:inline-flex text-xs font-semibold text-slate-700 hover:text-emerald-800 px-2 py-1.5 rounded-lg hover:bg-slate-100 transition min-h-[44px] items-center"
+                href="/contact"
+                className="inline-flex text-xs font-semibold text-slate-700 hover:text-emerald-800 px-1.5 sm:px-2 py-1.5 rounded-lg hover:bg-slate-100 transition min-h-[44px] items-center"
               >
-                Search
+                Contact
               </Link>
 
               <Link
@@ -292,6 +292,11 @@ export default async function StorefrontLayout({
                 <li>
                   <Link href="/account" className="hover:text-emerald-800">
                     Account & Past Orders
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/contact" className="hover:text-emerald-800">
+                    Contact Us
                   </Link>
                 </li>
               </ul>

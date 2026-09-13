@@ -6,9 +6,9 @@ export type CategoryGroup =
  * the platform's category taxonomy.
  */
 export function resolveCategoryGroup(options: {
-  categorySlug?: string | null;
-  productSlug?: string | null;
-  name?: string | null;
+  categorySlug?: string | null | undefined;
+  productSlug?: string | null | undefined;
+  name?: string | null | undefined;
 }): CategoryGroup {
   const { categorySlug, productSlug, name } = options;
 
