@@ -14,6 +14,11 @@ interface ProductRequestFormProps {
   defaultCustomerPhone?: string | undefined;
 }
 
+interface FormState {
+  outcome?: string | undefined;
+  count: number;
+}
+
 export function ProductRequestForm({
   hasStore,
   storeName,
@@ -21,13 +26,23 @@ export function ProductRequestForm({
   defaultCustomerName = '',
   defaultCustomerPhone = '',
 }: ProductRequestFormProps): React.ReactElement {
-  const [state, formAction, pending] = useActionState(requestProductAction, undefined);
+  const [actionState, formAction, pending] = useActionState(
+    async (prev: FormState, formData: FormData): Promise<FormState> => {
+      const outcome = await requestProductAction(undefined, formData);
+      return { outcome, count: prev.count + 1 };
+    },
+    { outcome: undefined, count: 0 },
+  );
+
+  const [lastDismissedCount, setLastDismissedCount] = useState(0);
   const [resetCount, setResetCount] = useState(0);
 
   const { form: formCopy, success: successCopy } = STOREFRONT_COPY_MANIFEST.productRequest;
 
+  const isSuccess = actionState.outcome === 'ok' && actionState.count > lastDismissedCount;
+
   // Clear success state on successful submission
-  if (state === 'ok') {
+  if (isSuccess) {
     return (
       <div className="rounded-3xl border border-emerald-200/80 bg-emerald-50/70 p-8 sm:p-10 text-center shadow-xs">
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-800 text-2xl font-bold shadow-xs">
@@ -48,7 +63,10 @@ export function ProductRequestForm({
           </Link>
           <button
             type="button"
-            onClick={() => setResetCount((c) => c + 1)}
+            onClick={() => {
+              setLastDismissedCount(actionState.count);
+              setResetCount((c) => c + 1);
+            }}
             className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-bold text-slate-700 shadow-2xs hover:bg-slate-50 transition"
           >
             {successCopy.submitAnotherText}
@@ -57,6 +75,9 @@ export function ProductRequestForm({
       </div>
     );
   }
+
+  const noticeMessage = actionState.outcome === 'ok' ? undefined : actionState.outcome;
+  const initialProductName = resetCount === 0 ? defaultProductName : '';
 
   return (
     <div
@@ -83,7 +104,7 @@ export function ProductRequestForm({
         </div>
       ) : null}
 
-      <Notice message={state} />
+      <Notice message={noticeMessage} />
 
       <form action={formAction} className="space-y-6">
         {/* Product Name (Required, max 120 chars) */}
@@ -97,7 +118,7 @@ export function ProductRequestForm({
             type="text"
             required
             maxLength={120}
-            defaultValue={defaultProductName}
+            defaultValue={initialProductName}
             placeholder={formCopy.productNamePlaceholder}
             className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 shadow-2xs placeholder:text-slate-400 focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-600/20 transition"
           />

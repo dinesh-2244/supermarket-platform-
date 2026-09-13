@@ -366,6 +366,45 @@ test.describe.serial('storefront', () => {
     await expect(page.getByText(/In-App Support for Active Orders/i)).toBeVisible();
   });
 
+  test('submitting a product request and clicking "Request Another Product" resets the form with empty fields', async ({
+    page,
+  }) => {
+    await page.goto('/locality');
+    await pickFirstArea(page);
+
+    await page.goto('/request-product');
+    await expect(page.getByRole('heading', { level: 1, name: /Request a Product/i })).toBeVisible();
+
+    // Fill in product request with unique name
+    const testProductName = `Organic Almond Milk ${Date.now()}`;
+    await page.getByLabel(/Product Name/i).fill(testProductName);
+    await page.getByLabel(/Brand/i).fill('Pure Harvest');
+    await page.getByLabel(/Pack Size/i).fill('1 Litre');
+    await page.getByLabel(/Note/i).fill('Unsweetened preferred');
+    await page.getByRole('button', { name: /Submit Request/i }).click();
+
+    // Success screen must appear
+    await expect(
+      page.getByRole('heading', { level: 2, name: /Thanks, we've received your request/i }),
+    ).toBeVisible();
+
+    // Click "Request Another Product"
+    await page.getByRole('button', { name: /Request Another Product/i }).click();
+
+    // Form must be visible again and fields must be empty
+    const productNameInput = page.getByLabel(/Product Name/i);
+    const brandInput = page.getByLabel(/Brand/i);
+    const packSizeInput = page.getByLabel(/Pack Size/i);
+    const noteInput = page.getByLabel(/Note/i);
+
+    await expect(productNameInput).toBeVisible();
+    await expect(productNameInput).toHaveValue('');
+    await expect(brandInput).toHaveValue('');
+    await expect(packSizeInput).toHaveValue('');
+    await expect(noteInput).toHaveValue('');
+    await expect(page.getByRole('button', { name: /Submit Request/i })).toBeVisible();
+  });
+
   test('the storefront does not scroll sideways on a small phone', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 780 });
     await page.goto('/locality');
@@ -379,6 +418,7 @@ test.describe.serial('storefront', () => {
       '/cart',
       '/about',
       '/contact',
+      '/request-product',
     ]) {
       await page.goto(path);
       const overflows = await page.evaluate(
