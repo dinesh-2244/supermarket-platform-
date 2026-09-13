@@ -562,12 +562,22 @@ export async function dispatch(
     // the same edge into OUT_FOR_DELIVERY, and `markOut` upserts, so the one
     // DeliveryRecord is reused rather than duplicated (OSCAR M1 on PR #53).
     await lockForActor(tx, actor, orderId, ['PACKED', 'DELIVERY_FAILED']);
-    const moved = await transition(tx, orderId, 'OUT_FOR_DELIVERY', actor, assignee);
-    await repo.markOut(tx, orderId, assignee, new Date());
-    return moved;
+    return sendOut(tx, actor, orderId, assignee);
   });
   announceTransition(outcome);
   return outcome;
+}
+
+/** The one way an order goes out: the edge, then the (re)used record. */
+async function sendOut(
+  tx: Tx,
+  actor: Principal,
+  orderId: string,
+  assignee: string | null,
+): Promise<TransitionOutcome> {
+  const moved = await transition(tx, orderId, 'OUT_FOR_DELIVERY', actor, assignee);
+  await repo.markOut(tx, orderId, assignee, new Date());
+  return moved;
 }
 
 export interface DispatchQueueRow extends QueueRow {
@@ -672,7 +682,13 @@ export async function recordDeliveryFailed(
   return outcome;
 }
 
-/** `DELIVERY_FAILED → OUT_FOR_DELIVERY`: the same record goes out again. */
+/**
+ * `DELIVERY_FAILED → OUT_FOR_DELIVERY`: the same record goes out again.
+ *
+ * `dispatch` accepts a failed order too (PR #53 M1); this is the same edge
+ * worded for the delivery screen, which only ever holds failed orders, so it
+ * refuses anything that is not DELIVERY_FAILED and insists the record exists.
+ */
 export async function retryDelivery(
   actor: Principal,
   orderId: string,
@@ -682,9 +698,7 @@ export async function retryDelivery(
   const outcome = await withTransaction(async (tx) => {
     await lockForActor(tx, actor, orderId, ['DELIVERY_FAILED']);
     await requireDelivery(tx, orderId);
-    const moved = await transition(tx, orderId, 'OUT_FOR_DELIVERY', actor, assignee);
-    await repo.markOut(tx, orderId, assignee, new Date());
-    return moved;
+    return sendOut(tx, actor, orderId, assignee);
   });
   announceTransition(outcome);
   return outcome;
