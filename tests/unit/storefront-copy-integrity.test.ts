@@ -596,19 +596,86 @@ describe('Storefront copy integrity & manifest guard', () => {
       return found;
     }
 
-    // Find local VariableDeclaration by identifier name in the SourceFile
-    function findLocalVariableDeclaration(name: string): ts.VariableDeclaration | null {
-      let decl: ts.VariableDeclaration | null = null;
-      function walk(n: ts.Node) {
-        if (decl) return;
-        if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === name) {
-          decl = n;
-          return;
+    interface LexicalBinding {
+      kind: 'parameter' | 'destructured-parameter' | 'variable' | 'destructured-variable';
+      node: ts.Node;
+      name: string;
+      initializer?: ts.Expression | undefined;
+      scope: ts.Node;
+    }
+
+    // Resolve local lexical binding (parameter, destructured binding, or variable declaration)
+    function resolveLexicalBinding(ident: ts.Identifier): LexicalBinding | null {
+      const name = ident.text;
+      let curr: ts.Node | undefined = ident.parent;
+
+      while (curr) {
+        if (
+          ts.isFunctionDeclaration(curr) ||
+          ts.isFunctionExpression(curr) ||
+          ts.isArrowFunction(curr) ||
+          ts.isMethodDeclaration(curr)
+        ) {
+          for (const param of curr.parameters) {
+            if (ts.isIdentifier(param.name) && param.name.text === name) {
+              return {
+                kind: 'parameter',
+                node: param,
+                name,
+                initializer: param.initializer,
+                scope: curr,
+              };
+            }
+            if (ts.isObjectBindingPattern(param.name)) {
+              for (const elem of param.name.elements) {
+                if (ts.isIdentifier(elem.name) && elem.name.text === name) {
+                  return {
+                    kind: 'destructured-parameter',
+                    node: elem,
+                    name,
+                    initializer: elem.initializer,
+                    scope: curr,
+                  };
+                }
+              }
+            }
+          }
         }
-        ts.forEachChild(n, walk);
+
+        if (ts.isBlock(curr) || ts.isSourceFile(curr)) {
+          for (const stmt of curr.statements) {
+            if (ts.isVariableStatement(stmt)) {
+              for (const decl of stmt.declarationList.declarations) {
+                if (ts.isIdentifier(decl.name) && decl.name.text === name) {
+                  return {
+                    kind: 'variable',
+                    node: decl,
+                    name,
+                    initializer: decl.initializer,
+                    scope: curr,
+                  };
+                }
+                if (ts.isObjectBindingPattern(decl.name)) {
+                  for (const elem of decl.name.elements) {
+                    if (ts.isIdentifier(elem.name) && elem.name.text === name) {
+                      return {
+                        kind: 'destructured-variable',
+                        node: elem,
+                        name,
+                        initializer: elem.initializer ?? decl.initializer,
+                        scope: curr,
+                      };
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        curr = curr.parent;
       }
-      walk(sf);
-      return decl;
+      return null;
     }
 
     function inspectExpression(
@@ -682,24 +749,67 @@ describe('Storefront copy integrity & manifest guard', () => {
         return { sanctioned: true, extractedStrings: strings };
       }
 
-      // 6. Dynamic identifiers: check declaration provenance (reject shadowed/local declarations carrying copy)
+      // 6. Dynamic identifiers: require proof of origin from manifest or approved domain bindings
       if (ts.isIdentifier(unwrapped)) {
         const name = unwrapped.text;
-        const localDecl = findLocalVariableDeclaration(name);
-        if (localDecl && localDecl.initializer) {
-          const initStrings = collectSubtreeStrings(localDecl.initializer);
+        const binding = resolveLexicalBinding(unwrapped);
+
+        if (binding?.initializer) {
+          if (isManifestReference(binding.initializer)) {
+            return { sanctioned: true, extractedStrings: [] };
+          }
+          const initStrings = collectSubtreeStrings(binding.initializer);
           if (initStrings.length > 0) {
             return { sanctioned: false, extractedStrings: initStrings };
           }
         }
 
-        if (
-          ['children', 'communityName', 'basketCount', 'sentence', 'title', 'subtitle'].includes(
-            name,
-          )
-        ) {
+        if (name === 'title' || name === 'subtitle') {
+          if (binding?.initializer && isManifestReference(binding.initializer)) {
+            return { sanctioned: true, extractedStrings: [] };
+          }
+          return { sanctioned: false, extractedStrings: [unwrapped.getText(sf)] };
+        }
+
+        if (name === 'sentence') {
+          if (
+            binding?.kind === 'parameter' &&
+            ts.isArrowFunction(binding.scope) &&
+            binding.scope.parent &&
+            ts.isCallExpression(binding.scope.parent) &&
+            ts.isPropertyAccessExpression(binding.scope.parent.expression) &&
+            binding.scope.parent.expression.name.text === 'map'
+          ) {
+            return { sanctioned: true, extractedStrings: [] };
+          }
+          return { sanctioned: false, extractedStrings: [unwrapped.getText(sf)] };
+        }
+
+        if (name === 'children') {
+          if (
+            (binding?.kind === 'parameter' || binding?.kind === 'destructured-parameter') &&
+            !binding?.initializer
+          ) {
+            return { sanctioned: true, extractedStrings: [] };
+          }
+          return { sanctioned: false, extractedStrings: [unwrapped.getText(sf)] };
+        }
+
+        if (name === 'basketCount') {
           return { sanctioned: true, extractedStrings: [] };
         }
+
+        if (name === 'communityName') {
+          if (binding?.initializer && ts.isCallExpression(binding.initializer)) {
+            const fn = binding.initializer.expression;
+            if (ts.isIdentifier(fn) && fn.text === 'communityNameForStore') {
+              return { sanctioned: true, extractedStrings: [] };
+            }
+          }
+          return { sanctioned: false, extractedStrings: [unwrapped.getText(sf)] };
+        }
+
+        return { sanctioned: false, extractedStrings: [unwrapped.getText(sf)] };
       }
 
       // 7. Dynamic formatting calls: inspect arguments for string literals (reject trust-by-name String('...'))
@@ -736,9 +846,12 @@ describe('Storefront copy integrity & manifest guard', () => {
         }
         if (ts.isIdentifier(curr)) {
           const rootName = curr.text;
-          const localDecl = findLocalVariableDeclaration(rootName);
-          if (localDecl && localDecl.initializer) {
-            const initStrings = collectSubtreeStrings(localDecl.initializer);
+          const binding = resolveLexicalBinding(curr);
+          if (binding?.initializer) {
+            if (isManifestReference(binding.initializer)) {
+              return { sanctioned: true, extractedStrings: [] };
+            }
+            const initStrings = collectSubtreeStrings(binding.initializer);
             if (initStrings.length > 0) {
               return { sanctioned: false, extractedStrings: initStrings };
             }
@@ -1085,5 +1198,33 @@ describe('Storefront copy integrity & manifest guard', () => {
     const literals3 = extractJsxLiterals(shopPath, probe3Source);
     const unauthorized3 = literals3.filter((lit) => !allowed.has(lit));
     expect(unauthorized3).toContain('Every order includes a complimentary gift.');
+  });
+
+  test('Oscar bypass probe rejection: parameter defaults bypass declaration provenance (Round 14)', () => {
+    // Oscar Round 14 probe (finding M9):
+    // A component parameter default `sentence = 'Every order includes a complimentary gift.'`
+    // rendered as `<p>{sentence}</p>` inside Card.
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const shopSource = fs.readFileSync(shopPath, 'utf-8');
+
+    const probeSource = shopSource
+      .replace(
+        'export default async function ShopPage',
+        `function Promotion({
+  sentence = 'Every order includes a complimentary gift.',
+}: {
+  sentence?: string;
+}) {
+  return <p>{sentence}</p>;
+}
+
+export default async function ShopPage`,
+      )
+      .replace('</Card>', '<Promotion /></Card>');
+
+    const literals = extractJsxLiterals(shopPath, probeSource);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+    expect(unauthorized).toContain('Every order includes a complimentary gift.');
   });
 });
