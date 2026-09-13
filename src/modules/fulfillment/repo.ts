@@ -260,3 +260,103 @@ export async function findDelivery(
 ): Promise<DeliveryRecordRow | null> {
   return executor(db).deliveryRecord.findUnique({ where: { orderId }, select: deliverySelect });
 }
+
+export async function markDelivered(
+  tx: Tx,
+  orderId: string,
+  payment: {
+    readonly paymentMethodUsed: DeliveryPaymentMethod;
+    readonly amountCollectedPaise: number;
+    readonly upiRef: string | null;
+  },
+  at: Date,
+): Promise<DeliveryRecordRow> {
+  return auditedExecutor(tx).deliveryRecord.update({
+    where: { orderId },
+    data: { status: 'DELIVERED', deliveredAt: at, ...payment },
+    select: deliverySelect,
+  });
+}
+
+export async function markFailed(
+  tx: Tx,
+  orderId: string,
+  failureReason: string,
+): Promise<DeliveryRecordRow> {
+  return auditedExecutor(tx).deliveryRecord.update({
+    where: { orderId },
+    data: { status: 'FAILED', failureReason },
+    select: deliverySelect,
+  });
+}
+
+export interface DeliveryQueueRow {
+  readonly orderId: string;
+  readonly orderNumber: string;
+  readonly storeId: string;
+  readonly status: OrderStatus;
+  readonly deliverySlotStart: Date;
+  readonly deliverySlotEnd: Date;
+  readonly contactNameSnapshot: string;
+  readonly contactPhoneSnapshot: string;
+  readonly deliveryAddressSnapshotJson: unknown;
+  readonly paymentMethod: 'COD' | 'UPI_ON_DELIVERY';
+  readonly amountDuePaise: number;
+  readonly delivery: DeliveryRecordRow;
+}
+
+/**
+ * The store's orders out on the road or back after a failed attempt, with
+ * their delivery record — queried through `DeliveryRecord`, this module's own
+ * table, which every dispatched order has. The amount due is the POS bill
+ * where there is one, else the estimate.
+ */
+export async function deliveryQueue(
+  db: DbExecutor,
+  principal: Principal,
+  storeId: string,
+): Promise<DeliveryQueueRow[]> {
+  const rows = await executor(db).deliveryRecord.findMany({
+    where: {
+      order: {
+        AND: [storeScopeFilter(principal), { storeId }],
+        status: { in: ['OUT_FOR_DELIVERY', 'DELIVERY_FAILED'] },
+      },
+    },
+    select: {
+      ...deliverySelect,
+      order: {
+        select: {
+          id: true,
+          orderNumber: true,
+          storeId: true,
+          status: true,
+          deliverySlotStart: true,
+          deliverySlotEnd: true,
+          contactNameSnapshot: true,
+          contactPhoneSnapshot: true,
+          deliveryAddressSnapshotJson: true,
+          paymentMethod: true,
+          estimatedTotalPaise: true,
+          posFinalTotalPaise: true,
+        },
+      },
+    },
+    orderBy: [{ order: { deliverySlotStart: 'asc' } }, { outAt: 'asc' }],
+    take: 200,
+  });
+  return rows.map(({ order, ...delivery }) => ({
+    orderId: order.id,
+    orderNumber: order.orderNumber,
+    storeId: order.storeId,
+    status: order.status,
+    deliverySlotStart: order.deliverySlotStart,
+    deliverySlotEnd: order.deliverySlotEnd,
+    contactNameSnapshot: order.contactNameSnapshot,
+    contactPhoneSnapshot: order.contactPhoneSnapshot,
+    deliveryAddressSnapshotJson: order.deliveryAddressSnapshotJson,
+    paymentMethod: order.paymentMethod,
+    amountDuePaise: order.posFinalTotalPaise ?? order.estimatedTotalPaise,
+    delivery,
+  }));
+}

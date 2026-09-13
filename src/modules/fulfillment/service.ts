@@ -46,8 +46,11 @@ import { getSettings } from '../stores/index';
 import { posBillingGatewayFor } from './pos/pos-billing-gateway';
 import {
   descriptor,
+  requireReason,
   restoreQuantity,
   validateLineOutcome,
+  validatePaymentCapture,
+  type DeliveredInput,
   type LinePickInput,
   type ModuleDescriptor,
 } from './domain/index';
@@ -60,6 +63,7 @@ export function moduleDescriptor(): ModuleDescriptor {
 
 export type {
   DeliveryPaymentMethod,
+  DeliveryQueueRow,
   DeliveryRecordRow,
   DeliveryStatus,
   PickingQueueRow,
@@ -475,4 +479,156 @@ export async function dispatchQueue(
     });
     return { ...row, dispatchBlockedBy: check.ok ? null : check.reason };
   });
+}
+
+// ---------------------------------------------------------------------------
+// D4 — delivery outcome
+// ---------------------------------------------------------------------------
+
+/** The delivery record must exist — dispatch opened it — or the data is inconsistent, not merely absent. */
+async function requireDelivery(tx: Tx, orderId: string): Promise<repo.DeliveryRecordRow> {
+  const record = await repo.findDelivery(tx, orderId);
+  if (record === null) {
+    throw new ConflictError('That order has no delivery record — it was not dispatched here', {
+      orderId,
+    });
+  }
+  return record;
+}
+
+/**
+ * `OUT_FOR_DELIVERY → DELIVERED`, with what was collected at the door. The
+ * amount due (the POS bill) is recorded beside the amount collected in the
+ * audit row, so a shortfall is visible without being a refusal.
+ */
+export async function recordDelivered(
+  actor: Principal,
+  orderId: string,
+  input: DeliveredInput,
+): Promise<TransitionOutcome> {
+  const payment = validatePaymentCapture(input);
+  const outcome = await withTransaction(async (tx) => {
+    const order = await lockForActor(tx, actor, orderId, ['OUT_FOR_DELIVERY']);
+    await requireDelivery(tx, orderId);
+    const moved = await transition(tx, orderId, 'DELIVERED', actor);
+    await repo.markDelivered(tx, orderId, payment, new Date());
+    await writeAuditLog(tx, {
+      principal: actor,
+      action: 'update',
+      entityType: 'Order',
+      entityId: orderId,
+      storeId: order.storeId,
+      before: { status: order.status },
+      after: { status: 'DELIVERED', ...payment, amountDuePaise: order.estimatedTotalPaise },
+    });
+    return moved;
+  });
+  announceTransition(outcome);
+  return outcome;
+}
+
+/** `OUT_FOR_DELIVERY → DELIVERY_FAILED`, with why. The order stays retryable. */
+export async function recordDeliveryFailed(
+  actor: Principal,
+  orderId: string,
+  input: { readonly failureReason: string },
+): Promise<TransitionOutcome> {
+  const reason = requireReason(input.failureReason, 'A failed delivery');
+  const outcome = await withTransaction(async (tx) => {
+    await lockForActor(tx, actor, orderId, ['OUT_FOR_DELIVERY']);
+    await requireDelivery(tx, orderId);
+    const moved = await transition(tx, orderId, 'DELIVERY_FAILED', actor, reason);
+    await repo.markFailed(tx, orderId, reason);
+    return moved;
+  });
+  announceTransition(outcome);
+  return outcome;
+}
+
+/** `DELIVERY_FAILED → OUT_FOR_DELIVERY`: the same record goes out again. */
+export async function retryDelivery(
+  actor: Principal,
+  orderId: string,
+  options: { readonly assigneeName?: string | null } = {},
+): Promise<TransitionOutcome> {
+  const assignee = (options.assigneeName ?? '').trim() || null;
+  const outcome = await withTransaction(async (tx) => {
+    await lockForActor(tx, actor, orderId, ['DELIVERY_FAILED']);
+    await requireDelivery(tx, orderId);
+    const moved = await transition(tx, orderId, 'OUT_FOR_DELIVERY', actor, assignee);
+    await repo.markOut(tx, orderId, assignee, new Date());
+    return moved;
+  });
+  announceTransition(outcome);
+  return outcome;
+}
+
+/**
+ * `DELIVERY_FAILED → CLOSED_UNDELIVERED`, terminally, with a reason.
+ *
+ * Stock is **not** restored here: the goods are physically back at the shop,
+ * but the state machine has no cancellation edge from a failed delivery and
+ * the plan scopes no stock movement to this step. Putting them back on the
+ * website shelf is a manual adjustment today — flagged as an open question.
+ */
+export async function closeUndelivered(
+  actor: Principal,
+  orderId: string,
+  reason: string,
+): Promise<TransitionOutcome> {
+  const why = requireReason(reason, 'Closing an undelivered order');
+  const outcome = await withTransaction(async (tx) => {
+    const order = await lockForActor(tx, actor, orderId, ['DELIVERY_FAILED']);
+    const moved = await transition(tx, orderId, 'CLOSED_UNDELIVERED', actor, why);
+    await writeAuditLog(tx, {
+      principal: actor,
+      action: 'update',
+      entityType: 'Order',
+      entityId: orderId,
+      storeId: order.storeId,
+      before: { status: order.status },
+      after: { status: 'CLOSED_UNDELIVERED', reason: why },
+    });
+    return moved;
+  });
+  announceTransition(outcome, why);
+  return outcome;
+}
+
+/**
+ * `DELIVERED → CLOSED` — a staff confirmation that nothing further is owed
+ * either way (the cash is in the till, no complaint came back).
+ *
+ * Deliberately manual rather than an automatic close after N days: nothing in
+ * this codebase runs on a schedule yet, and inventing a scheduler for one
+ * transition is a Phase 6 (ops hardening) decision. When one exists, it calls
+ * this function for delivered orders older than the window — the rule stays
+ * here, the timer stays there.
+ */
+export async function closeOrder(actor: Principal, orderId: string): Promise<TransitionOutcome> {
+  const outcome = await withTransaction(async (tx) => {
+    await lockForActor(tx, actor, orderId, ['DELIVERED']);
+    return transition(tx, orderId, 'CLOSED', actor);
+  });
+  announceTransition(outcome);
+  return outcome;
+}
+
+/** The delivery record for an order, if any — for the detail screen. */
+export async function deliveryDetails(
+  actor: Principal,
+  orderId: string,
+): Promise<repo.DeliveryRecordRow | null> {
+  const order = await staffOrder(actor, orderId);
+  if (order === null) return null;
+  return repo.findDelivery(getPrisma(), orderId);
+}
+
+/** The store's orders out for delivery or back after a failed attempt. */
+export async function deliveryQueue(
+  actor: Principal,
+  storeId: string,
+): Promise<repo.DeliveryQueueRow[]> {
+  assertAuthorized(actor, 'order:read', { type: 'Order', storeId });
+  return repo.deliveryQueue(getPrisma(), actor, storeId);
 }

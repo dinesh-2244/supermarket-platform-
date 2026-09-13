@@ -130,3 +130,64 @@ export function validateLineOutcome(qtyOrdered: number, input: LinePickInput): L
       };
   }
 }
+
+export interface DeliveredInput {
+  readonly paymentMethodUsed: 'CASH' | 'UPI';
+  readonly amountCollectedPaise: number;
+  readonly upiRef?: string | null;
+}
+
+export interface PaymentCapture {
+  readonly paymentMethodUsed: 'CASH' | 'UPI';
+  readonly amountCollectedPaise: number;
+  readonly upiRef: string | null;
+}
+
+const UPI_REF_MAX = 64;
+
+/**
+ * What a delivery's payment capture must look like: a whole, non-negative
+ * amount in paise; a UPI payment carries its reference, a cash one carries
+ * none. The amount is recorded as collected, not checked against the bill —
+ * a rider may legitimately collect less (a returned item at the door) and
+ * the audit row keeps the amount due beside it.
+ */
+export function validatePaymentCapture(input: DeliveredInput): PaymentCapture {
+  const amount = input.amountCollectedPaise;
+  if (!Number.isInteger(amount) || amount < 0) {
+    throw new ValidationError(
+      'The amount collected must be a whole number of paise, zero or more',
+      {
+        field: 'amountCollectedPaise',
+      },
+    );
+  }
+  const ref = (input.upiRef ?? '').trim();
+  if (input.paymentMethodUsed === 'UPI') {
+    if (ref.length === 0) {
+      throw new ValidationError('A UPI payment needs its UPI reference', { field: 'upiRef' });
+    }
+    if (ref.length > UPI_REF_MAX) {
+      throw new ValidationError('That UPI reference is too long', { field: 'upiRef' });
+    }
+    return { paymentMethodUsed: 'UPI', amountCollectedPaise: amount, upiRef: ref };
+  }
+  if (ref.length > 0) {
+    throw new ValidationError('A cash payment has no UPI reference', { field: 'upiRef' });
+  }
+  return { paymentMethodUsed: 'CASH', amountCollectedPaise: amount, upiRef: null };
+}
+
+const REASON_MAX = 500;
+
+/** A non-empty, bounded reason — for a failed attempt or an undelivered close. */
+export function requireReason(reason: string | null | undefined, what: string): string {
+  const trimmed = (reason ?? '').trim();
+  if (trimmed.length === 0) {
+    throw new ValidationError(`${what} needs a reason`, { field: 'reason' });
+  }
+  if (trimmed.length > REASON_MAX) {
+    throw new ValidationError('That reason is too long', { field: 'reason' });
+  }
+  return trimmed;
+}
