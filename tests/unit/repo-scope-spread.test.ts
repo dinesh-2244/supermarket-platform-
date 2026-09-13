@@ -121,6 +121,40 @@ export function misusesScopedWhere(source: string): number[] {
   return [...new Set(lines)].sort((a, b) => a - b);
 }
 
+/**
+ * For the two platform files the consumer scan skips — where `scopedWhere` is
+ * defined and re-exported — every mention of the name must be the definition
+ * itself (`export function scopedWhere`) or an unaliased export specifier
+ * (`export { scopedWhere }`). `export { scopedWhere as x }`, `export { x as
+ * scopedWhere }`, `export const x = scopedWhere`, a namespace member, a
+ * string key or a default export all hand the function out under another
+ * name, which no consumer-side rule can know about (OSCAR round 6).
+ */
+export function misexportsScopedWhere(source: string): number[] {
+  const file = ts.createSourceFile('platform.ts', source, ts.ScriptTarget.Latest, true);
+  const lines: number[] = [];
+  const report = (node: ts.Node): void => {
+    lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && node.text === 'scopedWhere') {
+      const parent = node.parent;
+      const definition = ts.isFunctionDeclaration(parent) && parent.name === node;
+      const plainExport =
+        ts.isExportSpecifier(parent) && parent.propertyName === undefined && parent.name === node;
+      if (!definition && !plainExport) report(node);
+    } else if (
+      (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) &&
+      node.text === 'scopedWhere'
+    ) {
+      report(node);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return [...new Set(lines)].sort((a, b) => a - b);
+}
+
 describe('repository store scoping', () => {
   const files = moduleFiles(MODULES_DIR).filter(
     (file) => file !== DEFINED_IN && file !== PLATFORM_INDEX,
@@ -266,6 +300,66 @@ describe('repository store scoping', () => {
     expect(misusesScopedWhere(`const q = { scopedWhere };`)).toEqual([1]);
     expect(misusesScopedWhere(`const q = { where: scopedWhere };`)).toEqual([1]);
     expect(misusesScopedWhere(repo(`    where: widen(scopedWhere),`))).toEqual([4]);
+  });
+
+  it('platform exports scopedWhere under its own name only — OSCAR round 6', () => {
+    // The two files the scan above skips are the definition and the
+    // re-export point. An aliased re-export there hands consumers the same
+    // function under a name no consumer-side rule can know about.
+    const violations: string[] = [];
+    for (const file of [DEFINED_IN, PLATFORM_INDEX]) {
+      for (const line of misexportsScopedWhere(readFileSync(file, 'utf8'))) {
+        violations.push(`${relative(process.cwd(), file)}:${line}`);
+      }
+    }
+    expect(violations).toEqual([]);
+
+    // OSCAR's two-file bypass, both halves. The consumer half is invisible to
+    // the consumer-side scan by design (no export-graph resolution); the
+    // platform half is what catches it.
+    const platformHalf = `export { scopedWhere as safeScope } from './authz/index';`;
+    expect(misexportsScopedWhere(platformHalf)).toEqual([1]);
+    const consumerHalf = repo(`    where: safeScope(principal, { storeId }).AND[1],`).replace(
+      'import { scopedWhere }',
+      'import { safeScope }',
+    );
+    expect(misusesScopedWhere(consumerHalf)).toEqual([]);
+
+    // The honest shapes: the definition, and the unaliased re-export.
+    expect(misexportsScopedWhere(`export function scopedWhere(p, extra) { return {}; }`)).toEqual(
+      [],
+    );
+    expect(
+      misexportsScopedWhere(`export { authorize, scopedWhere } from './authz/index';`),
+    ).toEqual([]);
+    expect(misexportsScopedWhere(`export * from './authz/index';`)).toEqual([]);
+
+    // Every other way of handing the function out under another name.
+    expect(
+      misexportsScopedWhere(
+        `import { scopedWhere } from './authz/index';\nexport { scopedWhere as safeScope };`,
+      ),
+    ).toEqual([1, 2]);
+    expect(misexportsScopedWhere(`export { other as scopedWhere } from './authz/index';`)).toEqual([
+      1,
+    ]);
+    expect(
+      misexportsScopedWhere(
+        `import { scopedWhere } from './authz/index';\nexport const safeScope = scopedWhere;`,
+      ),
+    ).toEqual([1, 2]);
+    expect(
+      misexportsScopedWhere(
+        `import * as authz from './authz/index';\nexport const safeScope = authz.scopedWhere;`,
+      ),
+    ).toEqual([2]);
+    expect(
+      misexportsScopedWhere(
+        `import * as authz from './authz/index';\nexport const safeScope = authz['scopedWhere'];`,
+      ),
+    ).toEqual([2]);
+    expect(misexportsScopedWhere(`export default scopedWhere;`)).toEqual([1]);
+    expect(misexportsScopedWhere(`export const scopedWhere = (p, extra) => ({});`)).toEqual([1]);
   });
 
   it('follows the import binding, whatever it is called locally — OSCAR round 5', () => {
