@@ -200,3 +200,63 @@ export async function findHandoff(
 ): Promise<PosBillingHandoffRow | null> {
   return executor(db).posBillingHandoff.findUnique({ where: { orderId }, select: handoffSelect });
 }
+
+// ---------------------------------------------------------------------------
+// Delivery record (D3 opens it on dispatch; D4 completes it)
+// ---------------------------------------------------------------------------
+
+export type DeliveryStatus = 'PENDING' | 'OUT' | 'DELIVERED' | 'FAILED';
+export type DeliveryPaymentMethod = 'CASH' | 'UPI';
+
+export interface DeliveryRecordRow {
+  readonly id: string;
+  readonly orderId: string;
+  readonly assigneeName: string | null;
+  readonly status: DeliveryStatus;
+  readonly outAt: Date | null;
+  readonly deliveredAt: Date | null;
+  readonly paymentMethodUsed: DeliveryPaymentMethod | null;
+  readonly amountCollectedPaise: number | null;
+  readonly upiRef: string | null;
+  readonly failureReason: string | null;
+}
+
+const deliverySelect = {
+  id: true,
+  orderId: true,
+  assigneeName: true,
+  status: true,
+  outAt: true,
+  deliveredAt: true,
+  paymentMethodUsed: true,
+  amountCollectedPaise: true,
+  upiRef: true,
+  failureReason: true,
+} as const;
+
+/**
+ * Mark the order out for delivery: one record per order (`orderId` is
+ * unique), created on the first dispatch and reused on a re-dispatch after a
+ * failed attempt — the previous failure reason is kept until the outcome
+ * overwrites it, so the trail of the last attempt is not lost mid-way.
+ */
+export async function markOut(
+  tx: Tx,
+  orderId: string,
+  assigneeName: string | null,
+  at: Date,
+): Promise<DeliveryRecordRow> {
+  return auditedExecutor(tx).deliveryRecord.upsert({
+    where: { orderId },
+    create: { orderId, assigneeName, status: 'OUT', outAt: at },
+    update: { ...(assigneeName === null ? {} : { assigneeName }), status: 'OUT', outAt: at },
+    select: deliverySelect,
+  });
+}
+
+export async function findDelivery(
+  db: DbExecutor,
+  orderId: string,
+): Promise<DeliveryRecordRow | null> {
+  return executor(db).deliveryRecord.findUnique({ where: { orderId }, select: deliverySelect });
+}
