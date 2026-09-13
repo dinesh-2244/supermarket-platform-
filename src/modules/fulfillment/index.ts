@@ -11,6 +11,8 @@
  *   - `order.picking`   { orderId } — `startPicking`
  *   - `order.picked`    { orderId } — `completePicking`
  *   - `order.billed`    { orderId, priceVarianceFlagged } — `recordFinalBill`
+ *   - `order.packed`    { orderId } — `markPacked`
+ *   - `order.dispatched` { orderId } — `dispatch`
  * Recording a line emits nothing; its trail is the `StockLedger` row (for a
  * restore) and the `AuditLog` row on the line.
  */
@@ -20,6 +22,9 @@ export {
   billingQueue,
   completePicking,
   confirmRevisedAmount,
+  dispatch,
+  dispatchQueue,
+  markPacked,
   moduleDescriptor,
   pickLines,
   pickingQueue,
@@ -27,6 +32,10 @@ export {
   recordLinePick,
   startPicking,
   type BilledOrder,
+  type DeliveryPaymentMethod,
+  type DeliveryRecordRow,
+  type DeliveryStatus,
+  type DispatchQueueRow,
   type FinalBillFormInput,
   type PickingQueueRow,
   type PickTaskRow,

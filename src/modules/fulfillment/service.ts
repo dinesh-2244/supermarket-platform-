@@ -22,6 +22,7 @@ import {
 import {
   addStockRestored,
   announceTransition,
+  checkTransition,
   computeVariance,
   confirmRevisedAmount as confirmRevisedAmountOnOrder,
   listPickLines,
@@ -57,7 +58,15 @@ export function moduleDescriptor(): ModuleDescriptor {
   return descriptor;
 }
 
-export type { PickingQueueRow, PickTaskRow, PickTaskStatus, PosBillingHandoffRow } from './repo';
+export type {
+  DeliveryPaymentMethod,
+  DeliveryRecordRow,
+  DeliveryStatus,
+  PickingQueueRow,
+  PickTaskRow,
+  PickTaskStatus,
+  PosBillingHandoffRow,
+} from './repo';
 
 /**
  * Lock the order and check the actor may drive it.
@@ -399,4 +408,71 @@ export async function billingDetails(
 /** The store's `PICKED` orders — waiting for their POS bill. */
 export async function billingQueue(actor: Principal, storeId: string): Promise<QueueRow[]> {
   return queueForStore(actor, storeId, { statuses: ['PICKED'] });
+}
+
+// ---------------------------------------------------------------------------
+// D3 — packing and dispatch
+// ---------------------------------------------------------------------------
+
+/** `BILLED_IN_POS → PACKED`. */
+export async function markPacked(actor: Principal, orderId: string): Promise<TransitionOutcome> {
+  const outcome = await withTransaction(async (tx) => {
+    await lockForActor(tx, actor, orderId, ['BILLED_IN_POS']);
+    return transition(tx, orderId, 'PACKED', actor);
+  });
+  announceTransition(outcome);
+  return outcome;
+}
+
+/**
+ * `PACKED → OUT_FOR_DELIVERY`, and the delivery record goes `OUT`.
+ *
+ * The variance guard is the state machine's, applied unchanged inside
+ * `transition`: an order whose POS bill came in over tolerance is refused here
+ * until a manager has confirmed the revised amount with the customer. This is
+ * the first place that guard is exercised by a real bill rather than a unit
+ * test. The record is opened in the same transaction, so a dispatched order
+ * always has one for the outcome to complete.
+ */
+export async function dispatch(
+  actor: Principal,
+  orderId: string,
+  options: { readonly assigneeName?: string | null } = {},
+): Promise<TransitionOutcome> {
+  const assignee = (options.assigneeName ?? '').trim() || null;
+  const outcome = await withTransaction(async (tx) => {
+    await lockForActor(tx, actor, orderId, ['PACKED']);
+    const moved = await transition(tx, orderId, 'OUT_FOR_DELIVERY', actor, assignee);
+    await repo.markOut(tx, orderId, assignee, new Date());
+    return moved;
+  });
+  announceTransition(outcome);
+  return outcome;
+}
+
+export interface DispatchQueueRow extends QueueRow {
+  /** The guard's reason a dispatch would be refused right now, or `null`. */
+  readonly dispatchBlockedBy: string | null;
+}
+
+/**
+ * The store's `BILLED_IN_POS` and `PACKED` orders, each saying whether the
+ * variance guard would block its dispatch — asked of the state machine, so the
+ * screen's "blocked" badge and the refusal it would get agree by construction.
+ */
+export async function dispatchQueue(
+  actor: Principal,
+  storeId: string,
+): Promise<DispatchQueueRow[]> {
+  const rows = await queueForStore(actor, storeId, { statuses: ['BILLED_IN_POS', 'PACKED'] });
+  const orders = await Promise.all(rows.map((row) => staffOrder(actor, row.id)));
+  return rows.map((row, i) => {
+    const order = orders[i];
+    if (order === null || order === undefined) return { ...row, dispatchBlockedBy: null };
+    const check = checkTransition('PACKED', 'OUT_FOR_DELIVERY', {
+      priceVarianceFlagged: order.priceVarianceFlagged,
+      customerConfirmedRevisedAmount: order.customerConfirmedRevisedAmount,
+    });
+    return { ...row, dispatchBlockedBy: check.ok ? null : check.reason };
+  });
 }
