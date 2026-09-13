@@ -766,6 +766,11 @@ model ProductRequest {
   note          String?
   customerName  String?
   customerPhone String?
+  /// `productName` folded for duplicate detection: lower-cased, whitespace collapsed.
+  productKey    String
+  /// Who sent it, for the intake caps: `customer:<id>`, `phone:<digits>` or
+  /// `client:<opaque key the storefront supplied>`. Never shown to staff as-is.
+  submitterKey  String
   status        ProductRequestStatus @default(NEW)
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
@@ -774,6 +779,8 @@ model ProductRequest {
   statusHistory ProductRequestStatusHistory[]
 
   @@index([storeId, status, createdAt])
+  @@index([storeId, createdAt])
+  @@index([storeId, submitterKey, createdAt])
 }
 
 /// Append-only: every status change, and the opening row, with who made it.

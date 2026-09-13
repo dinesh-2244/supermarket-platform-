@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { getPrisma, type Principal } from '@/modules/platform';
+import { getPrisma, RateLimitError, type Principal } from '@/modules/platform';
 import {
   getProductRequest,
+  INTAKE_LIMITS,
   listProductRequests,
   productRequestCounts,
   submitProductRequest,
@@ -66,6 +67,7 @@ afterAll(async () => {
 describe('submitting a request', () => {
   it('lands in the store the shopper is browsing, at NEW, with its opening history row', async () => {
     const created = await submitProductRequest(guestA, {
+      clientKey: 'guest-asha',
       productName: ' Ragi flour ',
       brand: '24 Mantra',
       packSize: '1 kg',
@@ -105,9 +107,9 @@ describe('submitting a request', () => {
 
   it('refuses a blank product name and writes nothing', async () => {
     const before = await prisma.productRequest.count({ where: { storeId: storeA } });
-    await expect(submitProductRequest(guestA, { productName: '  ' })).rejects.toThrow(
-      /product name/i,
-    );
+    await expect(
+      submitProductRequest(guestA, { clientKey: 'guest-blank', productName: '  ' }),
+    ).rejects.toThrow(/product name/i);
     expect(await prisma.productRequest.count({ where: { storeId: storeA } })).toBe(before);
   });
 
@@ -134,7 +136,8 @@ describe('the triage list', () => {
   let inB: string;
 
   beforeAll(async () => {
-    inB = (await submitProductRequest(guestB, { productName: 'Only in B' })).id;
+    inB = (await submitProductRequest(guestB, { clientKey: 'guest-b', productName: 'Only in B' }))
+      .id;
   });
 
   it('shows staff their own store’s requests, newest first, and not the other store’s', async () => {
@@ -185,8 +188,15 @@ describe('the triage list', () => {
 });
 
 describe('triage', () => {
+  let n = 0;
   async function fresh(): Promise<string> {
-    return (await submitProductRequest(guestA, { productName: `Triage ${Date.now()}` })).id;
+    n += 1;
+    return (
+      await submitProductRequest(guestA, {
+        clientKey: `triage-${n}`,
+        productName: `Triage ${n}`,
+      })
+    ).id;
   }
 
   it('moves the status and writes the history row and the audit row together', async () => {
@@ -254,6 +264,125 @@ describe('triage', () => {
   it('is not found for an id that does not exist', async () => {
     await expect(updateProductRequestStatus(superAdmin, 'no-such-id', 'REVIEWED')).rejects.toThrow(
       /not found/i,
+    );
+  });
+});
+
+describe('intake abuse control', () => {
+  // A store of its own, so the caps below are measured from zero.
+  let storeC: string;
+  let guestC: Principal;
+
+  beforeAll(async () => {
+    storeC = (await createStore(prisma)).id;
+    await createStoreSettings(prisma, storeC);
+    guestC = { kind: 'customer', customerId: null, storeId: storeC };
+  });
+
+  afterAll(async () => {
+    await prisma.productRequest.deleteMany({ where: { storeId: storeC } });
+    await prisma.storeSettings.deleteMany({ where: { storeId: storeC } });
+    await prisma.store.deleteMany({ where: { id: storeC } });
+  });
+
+  it('bounds one client hammering the form — OSCAR’s 121-in-1.7s probe', async () => {
+    // Same client, 121 rapid submissions of distinct product names.
+    const outcomes: string[] = [];
+    for (let i = 0; i < 121; i += 1) {
+      try {
+        await submitProductRequest(guestC, { clientKey: 'flood-one', productName: `Flood ${i}` });
+        outcomes.push('accepted');
+      } catch (error) {
+        outcomes.push(error instanceof Error ? error.constructor.name : 'unknown');
+      }
+    }
+    const accepted = outcomes.filter((o) => o === 'accepted').length;
+    expect(accepted).toBe(INTAKE_LIMITS.perSubmitter.max);
+    expect(new Set(outcomes.filter((o) => o !== 'accepted'))).toEqual(new Set(['RateLimitError']));
+    expect(await prisma.productRequest.count({ where: { storeId: storeC } })).toBe(accepted);
+  });
+
+  it('bounds a store even when every submission comes from a different client', async () => {
+    const before = await prisma.productRequest.count({ where: { storeId: storeC } });
+    let accepted = 0;
+    for (let i = 0; i < 121; i += 1) {
+      try {
+        await submitProductRequest(guestC, { clientKey: `many-${i}`, productName: `Many ${i}` });
+        accepted += 1;
+      } catch (error) {
+        expect(error).toBeInstanceOf(RateLimitError);
+      }
+    }
+    expect(before + accepted).toBe(INTAKE_LIMITS.perStore.max);
+    expect(await prisma.productRequest.count({ where: { storeId: storeC } })).toBe(
+      INTAKE_LIMITS.perStore.max,
+    );
+  });
+
+  it('holds the store cap under concurrent submissions, without any other kind of failure', async () => {
+    const storeD = (await createStore(prisma)).id;
+    await createStoreSettings(prisma, storeD);
+    const guestD: Principal = { kind: 'customer', customerId: null, storeId: storeD };
+    try {
+      const results = await Promise.allSettled(
+        Array.from({ length: 60 }, (_, i) =>
+          submitProductRequest(guestD, { clientKey: `conc-${i}`, productName: `Conc ${i}` }),
+        ),
+      );
+      for (const r of results) {
+        if (r.status === 'rejected') expect(r.reason).toBeInstanceOf(RateLimitError);
+      }
+      expect(await prisma.productRequest.count({ where: { storeId: storeD } })).toBeLessThanOrEqual(
+        INTAKE_LIMITS.perStore.max,
+      );
+    } finally {
+      await prisma.productRequest.deleteMany({ where: { storeId: storeD } });
+      await prisma.storeSettings.deleteMany({ where: { storeId: storeD } });
+      await prisma.store.deleteMany({ where: { id: storeD } });
+    }
+  });
+
+  it('treats the same ask from the same client as a double-submit, not a new row', async () => {
+    const storeE = (await createStore(prisma)).id;
+    await createStoreSettings(prisma, storeE);
+    const guestE: Principal = { kind: 'customer', customerId: null, storeId: storeE };
+    try {
+      await submitProductRequest(guestE, { clientKey: 'dup', productName: 'Ragi flour' });
+      await expect(
+        submitProductRequest(guestE, { clientKey: 'dup', productName: '  ragi  FLOUR ' }),
+      ).rejects.toThrow(/already/i);
+      // A different product from the same client, and the same product from a
+      // different client, are both new asks.
+      await submitProductRequest(guestE, { clientKey: 'dup', productName: 'Rice flour' });
+      await submitProductRequest(guestE, { clientKey: 'other', productName: 'Ragi flour' });
+      expect(await prisma.productRequest.count({ where: { storeId: storeE } })).toBe(3);
+    } finally {
+      await prisma.productRequest.deleteMany({ where: { storeId: storeE } });
+      await prisma.storeSettings.deleteMany({ where: { storeId: storeE } });
+      await prisma.store.deleteMany({ where: { id: storeE } });
+    }
+  });
+
+  it('identifies a signed-in shopper by account and a guest by phone before the client key', async () => {
+    const acc = await submitProductRequest(
+      { kind: 'customer', customerId: 'cust-key', storeId: storeA },
+      { productName: 'By account' },
+    );
+    const byPhone = await submitProductRequest(guestA, {
+      productName: 'By phone',
+      customerPhone: '9123456789',
+    });
+    const rows = await prisma.productRequest.findMany({
+      where: { id: { in: [acc.id, byPhone.id] } },
+      select: { id: true, submitterKey: true },
+    });
+    expect(rows.find((r) => r.id === acc.id)?.submitterKey).toBe('customer:cust-key');
+    expect(rows.find((r) => r.id === byPhone.id)?.submitterKey).toBe('phone:9123456789');
+  });
+
+  it('refuses a guest with neither phone nor client key — nothing to bound them by', async () => {
+    await expect(submitProductRequest(guestA, { productName: 'Anonymous' })).rejects.toThrow(
+      /client key/i,
     );
   });
 });

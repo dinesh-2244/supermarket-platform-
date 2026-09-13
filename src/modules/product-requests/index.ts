@@ -18,6 +18,7 @@ export {
 } from './service';
 
 export {
+  INTAKE_LIMITS,
   PRODUCT_REQUEST_STATUSES,
   REQUEST_TRANSITIONS,
   type ModuleDescriptor,

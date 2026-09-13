@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { moduleDescriptor } from '../index';
 import {
   assertRequestTransition,
+  INTAKE_LIMITS,
   PRODUCT_REQUEST_STATUSES,
+  productKeyOf,
   REQUEST_TRANSITIONS,
+  submitterKeyOf,
   validateSubmission,
 } from '../domain/index';
 
@@ -103,5 +106,40 @@ describe('a submission', () => {
     expect(() => validateSubmission({ productName: 'x', note: 'n'.repeat(501) })).toThrow(
       /too long/i,
     );
+  });
+});
+
+describe('intake abuse control — the pure parts', () => {
+  it('bounds a submitter and a store to a small number per window', () => {
+    expect(INTAKE_LIMITS.perSubmitter.max).toBeLessThanOrEqual(10);
+    expect(INTAKE_LIMITS.perStore.max).toBeLessThanOrEqual(60);
+    expect(INTAKE_LIMITS.perStore.windowMs).toBeLessThanOrEqual(60 * 60 * 1000);
+  });
+
+  it('keys a submitter by account, else phone, else the caller-supplied client key', () => {
+    expect(submitterKeyOf({ customerId: 'c1', customerPhone: '9876543210', clientKey: 'k' })).toBe(
+      'customer:c1',
+    );
+    expect(submitterKeyOf({ customerId: null, customerPhone: '9876543210', clientKey: 'k' })).toBe(
+      'phone:9876543210',
+    );
+    expect(submitterKeyOf({ customerId: null, customerPhone: null, clientKey: ' k1 ' })).toBe(
+      'client:k1',
+    );
+  });
+
+  it('refuses a fully anonymous submission — there is nothing to bound it by', () => {
+    expect(() =>
+      submitterKeyOf({ customerId: null, customerPhone: null, clientKey: null }),
+    ).toThrow(/client key/i);
+    expect(() => submitterKeyOf({ customerId: null, customerPhone: null, clientKey: '' })).toThrow(
+      /client key/i,
+    );
+  });
+
+  it('folds a product name to a key so "Ragi  Flour" and "ragi flour" are the same ask', () => {
+    expect(productKeyOf('  Ragi   FLOUR ')).toBe('ragi flour');
+    expect(productKeyOf('Ragi flour')).toBe(productKeyOf('ragi  flour'));
+    expect(productKeyOf('Ragi flour')).not.toBe(productKeyOf('Rice flour'));
   });
 });

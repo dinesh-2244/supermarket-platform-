@@ -10,8 +10,12 @@
 import {
   assertAuthorized,
   AuthzError,
+  ConflictError,
   getPrisma,
+  LOCK_NAMESPACE,
   NotFoundError,
+  RateLimitError,
+  tryAdvisoryXactLock,
   ValidationError,
   withTransaction,
   writeAuditLog,
@@ -21,7 +25,10 @@ import { getStore } from '../stores/index';
 import {
   assertRequestTransition,
   descriptor,
+  INTAKE_LIMITS,
   PRODUCT_REQUEST_STATUSES,
+  productKeyOf,
+  submitterKeyOf,
   validateSubmission,
   type ModuleDescriptor,
   type ProductRequestStatus,
@@ -54,8 +61,15 @@ export interface ProductRequestCounts {
  * No account needed — the same trust level as checkout's contact capture — but
  * it must be a *shopper*: the store comes off the principal, which is the store
  * their delivery area resolved to, so a form cannot address another shop, and
- * staff cannot file requests in a shopper's name. The request and its opening
- * history row land in one transaction.
+ * staff cannot file requests in a shopper's name.
+ *
+ * It is also a public write, so it is capped (`INTAKE_LIMITS`): a handful per
+ * submitter per day, a bounded number per store per window, and the same ask
+ * twice from the same person is a double-submit. The counts and the insert run
+ * under the store's intake lock so two submissions cannot both count N and
+ * both commit the N+1st; the lock is *tried*, not queued for, because a flood
+ * that is made to wait for a lock holds database connections while it waits —
+ * a submitter who finds the store busy is told to try again in a moment.
  */
 export async function submitProductRequest(
   principal: Principal,
@@ -68,6 +82,12 @@ export async function submitProductRequest(
     throw new ValidationError('Choose your delivery area first, so we know which store to ask', {});
   }
   const submission = validateSubmission(input);
+  const submitterKey = submitterKeyOf({
+    customerId: principal.customerId,
+    customerPhone: submission.customerPhone,
+    clientKey: input.clientKey,
+  });
+  const productKey = productKeyOf(submission.productName);
   const store = await getStore(principal, principal.storeId);
   if (!store.isActive) {
     throw new ValidationError('That store is not taking requests right now', {
@@ -75,12 +95,56 @@ export async function submitProductRequest(
     });
   }
 
-  return withTransaction((tx) =>
-    repo.insertRequest(tx, store.id, submission, {
-      actorType: 'CUSTOMER',
-      actorId: principal.customerId,
-    }),
-  );
+  return withTransaction(async (tx) => {
+    if (!(await tryAdvisoryXactLock(tx, LOCK_NAMESPACE.productRequestIntake, store.id))) {
+      throw new RateLimitError('The store is busy taking requests — please try again in a moment', {
+        storeId: store.id,
+      });
+    }
+    const now = Date.now();
+    if (
+      await repo.hasRecentDuplicate(
+        tx,
+        store.id,
+        submitterKey,
+        productKey,
+        new Date(now - INTAKE_LIMITS.duplicate.windowMs),
+      )
+    ) {
+      throw new ConflictError('You have already asked us for that — it is on the list', {
+        productName: submission.productName,
+      });
+    }
+    const mine = await repo.countRecentForSubmitter(
+      tx,
+      store.id,
+      submitterKey,
+      new Date(now - INTAKE_LIMITS.perSubmitter.windowMs),
+    );
+    if (mine >= INTAKE_LIMITS.perSubmitter.max) {
+      throw new RateLimitError('That is plenty of requests for today — thank you, we have them', {
+        limit: INTAKE_LIMITS.perSubmitter.max,
+      });
+    }
+    const stores = await repo.countRecentForStore(
+      tx,
+      store.id,
+      new Date(now - INTAKE_LIMITS.perStore.windowMs),
+    );
+    if (stores >= INTAKE_LIMITS.perStore.max) {
+      throw new RateLimitError('The store is busy taking requests — please try again later', {
+        limit: INTAKE_LIMITS.perStore.max,
+      });
+    }
+
+    return repo.insertRequest(
+      tx,
+      store.id,
+      submission,
+      { productKey, submitterKey },
+      { actorType: 'CUSTOMER', actorId: principal.customerId },
+    );
+  });
 }
 
 /**
