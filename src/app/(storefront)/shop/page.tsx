@@ -9,11 +9,11 @@ import { rupees, Card, Empty, PageHeading } from '../ui';
 import { CategoryTiles } from '../category-tiles';
 import { communityNameForStore } from '../communities';
 import { getCartQuantities } from '../cart-quantities';
+import { STOREFRONT_COPY_MANIFEST, formatShopSubtitle } from '../copy-manifest';
 
 export const metadata: Metadata = {
-  title: 'All Products | Munder Fresh Hyperlocal Grocery',
-  description:
-    'Shop fresh groceries, daily staples, fruits, vegetables, dairy, and household essentials.',
+  title: STOREFRONT_COPY_MANIFEST.shop.meta.title,
+  description: STOREFRONT_COPY_MANIFEST.shop.meta.description,
 };
 
 /**
@@ -47,15 +47,15 @@ export default async function ShopPage({
     <div className="space-y-6">
       <PageHeading
         title={`Shopping at ${communityName}`}
-        subtitle={`Scheduled slot delivery · Delivery ${rupees(settings.deliveryFeePaise)} · Min order ${rupees(
-          settings.minOrderPaise,
-        )}`}
+        subtitle={formatShopSubtitle(
+          rupees(settings.deliveryFeePaise),
+          rupees(settings.minOrderPaise),
+        )}
       />
 
       {settings.isAcceptingOrders ? null : (
         <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
-          This store has temporarily paused orders. You can still browse products and plan your
-          basket.
+          {STOREFRONT_COPY_MANIFEST.shop.pausedNotice}
         </p>
       )}
 

@@ -35,6 +35,7 @@ export interface ShopItem {
   readonly availability: AvailabilityRecord;
   readonly imageUrl?: string | null;
   readonly imageAlt?: string | null;
+  readonly categorySlug?: string | null;
 }
 
 export interface ShopPage {
@@ -118,12 +119,14 @@ export async function shopPage(
   });
 
   const pageIds = products.map((product) => product.id);
-  const [availability, priceOf, imagesList] = await Promise.all([
+  const [availability, priceOf, imagesList, categories] = await Promise.all([
     availabilityFor(principal, storeId, pageIds),
     pricesFor(principal, storeId, pageIds),
     Promise.all(pageIds.map((id) => listProductImages(principal, id))),
+    listCategories(principal),
   ]);
 
+  const categorySlugMap = new Map(categories.map((c) => [c.id, c.slug]));
   const imageMap = new Map(
     pageIds.map((id, index) => {
       const img = imagesList[index]?.[0];
@@ -132,7 +135,9 @@ export async function shopPage(
   );
 
   return {
-    items: products.flatMap((product) => toShopItem(product, priceOf, availability, imageMap)),
+    items: products.flatMap((product) =>
+      toShopItem(product, priceOf, availability, imageMap, categorySlugMap),
+    ),
     total,
     page: safePage,
     pageCount,
@@ -147,11 +152,13 @@ function toShopItem(
   priceOf: ReadonlyMap<string, ShopPrice>,
   availability: ReadonlyMap<string, AvailabilityRecord>,
   imageMap?: ReadonlyMap<string, { url: string; alt: string | null } | null>,
+  categorySlugMap?: ReadonlyMap<string, string>,
 ): ShopItem[] {
   const price = priceOf.get(product.id);
   const stock = availability.get(product.id);
   if (price === undefined || stock === undefined) return [];
   const img = imageMap?.get(product.id);
+  const categorySlug = categorySlugMap?.get(product.categoryId) ?? null;
   return [
     {
       product,
@@ -159,6 +166,7 @@ function toShopItem(
       availability: stock,
       imageUrl: img?.url ?? null,
       imageAlt: img?.alt ?? null,
+      categorySlug,
     },
   ];
 }
@@ -194,6 +202,8 @@ export async function productPage(
   const stock = availability.get(product.id);
   if (stock === undefined) return null;
 
+  const trail = categoryTrail(categories, product.categoryId);
+
   return {
     product,
     sellingPricePaise: listing.sellingPricePaise,
@@ -201,8 +211,9 @@ export async function productPage(
     availability: stock,
     imageUrl: images[0]?.url ?? null,
     imageAlt: images[0]?.alt ?? null,
+    categorySlug: trail[trail.length - 1]?.slug ?? trail[0]?.slug ?? null,
     images: images.map((image) => ({ id: image.id, url: image.url, alt: image.alt })),
-    trail: categoryTrail(categories, product.categoryId),
+    trail,
   };
 }
 
@@ -262,12 +273,14 @@ export async function searchShop(
   const window = hits.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const windowIds = window.map((hit) => hit.id);
-  const [availability, priceOf, imagesList] = await Promise.all([
+  const [availability, priceOf, imagesList, categories] = await Promise.all([
     availabilityFor(principal, storeId, windowIds),
     pricesFor(principal, storeId, windowIds),
     Promise.all(windowIds.map((id) => listProductImages(principal, id))),
+    listCategories(principal),
   ]);
 
+  const categorySlugMap = new Map(categories.map((c) => [c.id, c.slug]));
   const imageMap = new Map(
     windowIds.map((id, index) => {
       const img = imagesList[index]?.[0];
@@ -276,7 +289,9 @@ export async function searchShop(
   );
 
   return {
-    items: window.flatMap((hit) => toShopItem(hit, priceOf, availability, imageMap)),
+    items: window.flatMap((hit) =>
+      toShopItem(hit, priceOf, availability, imageMap, categorySlugMap),
+    ),
     total: hits.length,
     page: safePage,
     pageCount,
