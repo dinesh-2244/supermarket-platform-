@@ -15,4 +15,5 @@ export const EXPECTED_MIGRATIONS: readonly string[] = [
   '20260908190000_cart_pending_notice',
   '20260909131451_order_slot_index',
   '20260911171708_totp_last_counter',
+  '20260913060941_product_requests',
 ];

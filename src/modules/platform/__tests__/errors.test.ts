@@ -4,6 +4,7 @@ import {
   ConflictError,
   DomainError,
   NotFoundError,
+  RateLimitError,
   ValidationError,
   isAppError,
   toErrorResponse,
@@ -16,6 +17,7 @@ describe('platform/errors', () => {
     [new ConflictError('already exists'), 409, 'CONFLICT'],
     [new AuthzError('nope'), 403, 'FORBIDDEN'],
     [new DomainError('illegal transition'), 422, 'DOMAIN_RULE'],
+    [new RateLimitError('slow down'), 429, 'RATE_LIMITED'],
   ])('maps %s to its status and code', (error, status, code) => {
     const response = toErrorResponse(error);
 
