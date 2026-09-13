@@ -613,7 +613,7 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     await page.getByRole('button', { name: /shop store 1/i }).click();
     await expect(page).toHaveURL(/\/$|\/\?/);
 
-    // Add Sona Masoori Rice (clears ₹250 minimum order threshold with a single unit and has high stock across workers)
+    // Add Sona Masoori Rice (clears the ₹200 minimum order threshold with a single unit and has high stock across workers)
     await page.goto('/p/sona-masoori-rice-5kg');
     const addForm = page.locator('form').filter({ hasText: 'Add to basket' });
     await addForm.getByRole('button', { name: 'Add to basket' }).click();

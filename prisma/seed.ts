@@ -338,7 +338,8 @@ const STORES: readonly StoreSeed[] = [
       state: 'Karnataka',
       pincode: '560011',
     },
-    settings: { deliveryFeePaise: 3_000, minOrderPaise: 30_000, slotCapacity: 10 },
+    // Real business terms (2026-09-13): ₹200 minimum, free delivery — both stores.
+    settings: { deliveryFeePaise: 0, minOrderPaise: 20_000, slotCapacity: 10 },
     unlistedSkus: ['8901234500189', '8901234500202'],
     discountBp: 500,
     zones: [
@@ -370,7 +371,7 @@ const STORES: readonly StoreSeed[] = [
       state: 'Karnataka',
       pincode: '560038',
     },
-    settings: { deliveryFeePaise: 4_000, minOrderPaise: 25_000, slotCapacity: 14 },
+    settings: { deliveryFeePaise: 0, minOrderPaise: 20_000, slotCapacity: 14 },
     unlistedSkus: ['8901234500011', '8901234500134'],
     discountBp: 300,
     zones: [
