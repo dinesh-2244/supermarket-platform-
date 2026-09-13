@@ -252,15 +252,37 @@ export async function updateStoreAction(_state: ActionState, form: FormData): Pr
 export async function updateSettingsAction(_state: ActionState, form: FormData): Promise<string> {
   return run(async () => {
     const principal = await requirePrincipal();
+
+    // The form displays/inputs rupees with decimals (Delivery fee (₹), Minimum order (₹), Variance cap (₹)).
+    // If rupee inputs are present, strictly parse to integer paise before reading paise.
+    if (form.has('deliveryFee') && !form.has('deliveryFeePaise')) {
+      const paise = parseRupeesToPaise(text(form, 'deliveryFee'), 'deliveryFee', 'Delivery fee');
+      form.set('deliveryFeePaise', String(paise));
+    }
+
+    if (form.has('minOrder') && !form.has('minOrderPaise')) {
+      const paise = parseRupeesToPaise(text(form, 'minOrder'), 'minOrder', 'Minimum order');
+      form.set('minOrderPaise', String(paise));
+    }
+
+    if (form.has('priceVarianceAbsCap') && !form.has('priceVarianceAbsCapPaise')) {
+      const paise = parseRupeesToPaise(
+        text(form, 'priceVarianceAbsCap'),
+        'priceVarianceAbsCap',
+        'Variance cap',
+      );
+      form.set('priceVarianceAbsCapPaise', String(paise));
+    }
+
     const substitutionPolicy = text(form, 'substitutionPolicy');
     await updateSettings(principal, text(form, 'storeId'), {
-      deliveryFeePaise: int(form, 'deliveryFeePaise'),
-      minOrderPaise: int(form, 'minOrderPaise'),
-      slotLengthMinutes: int(form, 'slotLengthMinutes'),
-      slotCapacity: int(form, 'slotCapacity'),
-      priceVariancePercentBp: int(form, 'priceVariancePercentBp'),
-      priceVarianceAbsCapPaise: int(form, 'priceVarianceAbsCapPaise'),
-      lowStockThreshold: int(form, 'lowStockThreshold'),
+      deliveryFeePaise: int(form, 'deliveryFeePaise', 'Delivery fee'),
+      minOrderPaise: int(form, 'minOrderPaise', 'Minimum order'),
+      slotLengthMinutes: int(form, 'slotLengthMinutes', 'Slot length'),
+      slotCapacity: int(form, 'slotCapacity', 'Slot capacity'),
+      priceVariancePercentBp: int(form, 'priceVariancePercentBp', 'Price variance'),
+      priceVarianceAbsCapPaise: int(form, 'priceVarianceAbsCapPaise', 'Variance cap'),
+      lowStockThreshold: int(form, 'lowStockThreshold', 'Low-stock threshold'),
       isAcceptingOrders: checked(form, 'isAcceptingOrders'),
       ...(substitutionPolicy === 'NONE' ||
       substitutionPolicy === 'ASK_CUSTOMER' ||
