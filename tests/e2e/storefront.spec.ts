@@ -363,7 +363,7 @@ test.describe.serial('storefront', () => {
     await expect(page.getByRole('heading', { level: 1, name: /contact us/i })).toBeVisible();
     await expect(page.getByRole('heading', { name: /Store 1 Community/i })).toBeVisible();
     await expect(page.getByRole('heading', { name: /Store 2 Community/i })).toBeVisible();
-    await expect(page.getByText(/In-App Support for Active Orders/i)).toBeVisible();
+    await expect(page.getByText(/No Live Order Support Channel/i)).toBeVisible();
   });
 
   test('submitting a product request and clicking "Request Another Product" resets the form with empty fields', async ({

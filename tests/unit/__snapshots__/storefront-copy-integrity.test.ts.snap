@@ -78,19 +78,19 @@ exports[`Storefront copy integrity & manifest guard > STOREFRONT_COPY_MANIFEST m
   "contact": {
     "appNotice": {
       "aboutLinkText": "Learn more about our community hub delivery model on our About page",
-      "badge": "Resident Orders & Inquiries",
-      "description": "For current orders, order modifications, or immediate delivery updates, please reach out directly through your resident application or order receipt page.",
-      "title": "In-App Support for Active Orders",
+      "badge": "Order Support Status",
+      "description": "A dedicated live order-support channel is not currently active. For details on how our community hubs fulfill orders and schedule delivery slots, please visit our About page.",
+      "title": "No Live Order Support Channel",
     },
     "channels": {
       "addressLabel": "Hub Location",
       "addressPlaceholder": "On-premises community fulfillment facility",
       "emailLabel": "Email Support",
-      "emailPlaceholder": "Assigned per community hub in resident app",
+      "emailPlaceholder": "Assigned per community hub",
       "hoursLabel": "Operating Hours",
       "hoursPlaceholder": "Aligned with active delivery slot windows",
       "phoneLabel": "Phone Support",
-      "phonePlaceholder": "Assigned per community hub in resident app",
+      "phonePlaceholder": "Assigned per community hub",
     },
     "communityHubs": {
       "badge": "Community Store Hubs",

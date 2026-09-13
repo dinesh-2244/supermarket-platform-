@@ -152,10 +152,10 @@ export const STOREFRONT_COPY_MANIFEST = {
         'Have a question about your order, delivery schedule, or community service? We are here to help.',
     },
     appNotice: {
-      badge: 'Resident Orders & Inquiries',
-      title: 'In-App Support for Active Orders',
+      badge: 'Order Support Status',
+      title: 'No Live Order Support Channel',
       description:
-        'For current orders, order modifications, or immediate delivery updates, please reach out directly through your resident application or order receipt page.',
+        'A dedicated live order-support channel is not currently active. For details on how our community hubs fulfill orders and schedule delivery slots, please visit our About page.',
       aboutLinkText: 'Learn more about our community hub delivery model on our About page',
     },
     communityHubs: {
@@ -168,9 +168,9 @@ export const STOREFRONT_COPY_MANIFEST = {
     },
     channels: {
       phoneLabel: 'Phone Support',
-      phonePlaceholder: 'Assigned per community hub in resident app',
+      phonePlaceholder: 'Assigned per community hub',
       emailLabel: 'Email Support',
-      emailPlaceholder: 'Assigned per community hub in resident app',
+      emailPlaceholder: 'Assigned per community hub',
       hoursLabel: 'Operating Hours',
       hoursPlaceholder: 'Aligned with active delivery slot windows',
       addressLabel: 'Hub Location',
