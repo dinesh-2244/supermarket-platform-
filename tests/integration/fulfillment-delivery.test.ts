@@ -9,10 +9,14 @@ import {
 import {
   closeOrder,
   closeUndelivered,
+  completePicking,
   deliveryQueue,
   dispatch,
+  markPacked,
   recordDelivered,
   recordDeliveryFailed,
+  recordFinalBill,
+  recordLinePick,
   retryDelivery,
 } from '@/modules/fulfillment';
 import { createCustomer, createStoreWithProduct, createUser } from '../factories/index';
@@ -74,6 +78,10 @@ afterAll(async () => {
 
 const shopper: Principal = { kind: 'customer', customerId: null, storeId: null };
 
+async function stockOf(storeId: string, productId: string): Promise<number> {
+  const item = await prisma.inventoryItem.findFirstOrThrow({ where: { storeId, productId } });
+  return item.websiteStock;
+}
 async function order(id: string) {
   return prisma.order.findUniqueOrThrow({ where: { id } });
 }
@@ -234,15 +242,49 @@ describe('failed, retried, given up', () => {
     ]);
   });
 
-  it('closes a failed delivery as undelivered, with a reason, terminally', async () => {
-    const id = await outForDelivery();
+  it('closes a failed delivery as undelivered, with a reason, terminally — and puts the goods back', async () => {
+    const before = await stockOf(storeA, productA);
+    const id = await outForDelivery(); // 2 units left the shelf at placement
+    expect(await stockOf(storeA, productA)).toBe(before - 2);
     await recordDeliveryFailed(staffA, id, { failureReason: 'Nobody home' });
     await expect(closeUndelivered(staffA, id, '  ')).rejects.toThrow(/reason/i);
+    expect(await stockOf(storeA, productA)).toBe(before - 2);
+
     const outcome = await closeUndelivered(staffA, id, 'Three attempts, customer unreachable');
     expect(outcome).toMatchObject({ from: 'DELIVERY_FAILED', to: 'CLOSED_UNDELIVERED' });
     expect((await order(id)).closedAt).not.toBeNull();
+    // The goods are back at the shop: the picked units return to website
+    // stock with a ledger row, and the line's counter says so.
+    expect(await stockOf(storeA, productA)).toBe(before);
+    const ledger = await prisma.stockLedger.findFirst({
+      where: { storeId: storeA, productId: productA, reason: 'PICK_SHORT_RESTORE', refId: id },
+    });
+    expect(ledger).toMatchObject({ delta: 2, balanceAfter: before });
+    const line = await prisma.orderLine.findFirstOrThrow({ where: { orderId: id } });
+    expect(line.stockRestoredQty).toBe(2);
     await expect(retryDelivery(staffA, id)).rejects.toThrow(/CLOSED_UNDELIVERED/);
     await expect(closeUndelivered(staffA, id, 'again')).rejects.toThrow(/CLOSED_UNDELIVERED/);
+  });
+
+  it('closing undelivered restores only what picking had not already given back', async () => {
+    const before = await stockOf(storeA, productA);
+    const id = await placeOrder(storeA, productA, customerId, 3);
+    await walkTo(staffA, id, 'PICKING');
+    const line = await prisma.orderLine.findFirstOrThrow({ where: { orderId: id } });
+    // Short pick: 1 of 3 goes into the basket, 2 restored at once.
+    await recordLinePick(staffA, id, line.id, { outcome: 'SHORT', qtyPicked: 1 });
+    await completePicking(staffA, id);
+    const est = (await order(id)).estimatedTotalPaise;
+    await recordFinalBill(staffA, id, { billNumber: 'POS-U', finalTotalPaise: est });
+    await markPacked(staffA, id);
+    await dispatch(staffA, id);
+    expect(await stockOf(storeA, productA)).toBe(before - 1);
+    await recordDeliveryFailed(staffA, id, { failureReason: 'Refused' });
+    await closeUndelivered(staffA, id, 'Refused at the door');
+    expect(await stockOf(storeA, productA)).toBe(before);
+    expect(
+      (await prisma.orderLine.findFirstOrThrow({ where: { orderId: id } })).stockRestoredQty,
+    ).toBe(3);
   });
 
   it('refuses each outcome from the wrong state', async () => {

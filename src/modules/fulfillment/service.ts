@@ -564,12 +564,16 @@ export async function retryDelivery(
 }
 
 /**
- * `DELIVERY_FAILED → CLOSED_UNDELIVERED`, terminally, with a reason.
+ * `DELIVERY_FAILED → CLOSED_UNDELIVERED`, terminally, with a reason — and the
+ * goods go back on the shelf.
  *
- * Stock is **not** restored here: the goods are physically back at the shop,
- * but the state machine has no cancellation edge from a failed delivery and
- * the plan scopes no stock movement to this step. Putting them back on the
- * website shelf is a manual adjustment today — flagged as an open question.
+ * Everything the order still holds — `qtyOrdered − stockRestoredQty` per line,
+ * which is exactly what picking put in the basket, since short, unavailable
+ * and substituted lines have already restored their remainder — returns to
+ * `websiteStock` through `applyMovement` (`PICK_SHORT_RESTORE`, `refId` the
+ * order), and `stockRestoredQty` is bumped to match. The same counter and the
+ * same arithmetic as `cancelByStore`, so nothing is ever restored twice
+ * (decision 2026-09-13, Q2).
  */
 export async function closeUndelivered(
   actor: Principal,
@@ -580,6 +584,32 @@ export async function closeUndelivered(
   const outcome = await withTransaction(async (tx) => {
     const order = await lockForActor(tx, actor, orderId, ['DELIVERY_FAILED']);
     const moved = await transition(tx, orderId, 'CLOSED_UNDELIVERED', actor, why);
+
+    const restored: { productId: string; qty: number; balanceAfter: number }[] = [];
+    for (const line of await listPickLines(tx, orderId)) {
+      const outstanding = restoreQuantity({
+        qtyOrdered: line.qtyOrdered,
+        qtyPicked: 0,
+        stockRestoredQty: line.stockRestoredQty,
+      });
+      if (outstanding === 0) continue;
+      const movement = await applyMovement(tx, actor, {
+        storeId: order.storeId,
+        productId: line.productId,
+        delta: outstanding,
+        reason: 'PICK_SHORT_RESTORE',
+        refType: 'Order',
+        refId: orderId,
+        note: `Undelivered — ${why}`,
+      });
+      await addStockRestored(tx, line.id, outstanding);
+      restored.push({
+        productId: line.productId,
+        qty: outstanding,
+        balanceAfter: movement.balanceAfter,
+      });
+    }
+
     await writeAuditLog(tx, {
       principal: actor,
       action: 'update',
@@ -587,7 +617,7 @@ export async function closeUndelivered(
       entityId: orderId,
       storeId: order.storeId,
       before: { status: order.status },
-      after: { status: 'CLOSED_UNDELIVERED', reason: why },
+      after: { status: 'CLOSED_UNDELIVERED', reason: why, restored },
     });
     return moved;
   });
