@@ -5,6 +5,7 @@ import {
   type StorefrontArea,
   type StoreRecord,
 } from '@/modules/stores';
+import { formatCommunityDeliveryNote } from './copy-manifest';
 
 function formatRupees(paise: number): string {
   const sign = paise < 0 ? '-' : '';
@@ -109,9 +110,9 @@ export async function getCommunityCards(): Promise<readonly CommunityCardData[]>
       ? await resolveServiceability({ areaId: primaryArea.areaId })
       : null;
 
-    const deliveryNote = serviceability?.servable
-      ? `Scheduled Slots · Dedicated Hub · Min Order ${formatRupees(serviceability.minOrderPaise)}`
-      : 'Scheduled Slots · Dedicated Hub';
+    const deliveryNote = formatCommunityDeliveryNote(
+      serviceability?.servable ? formatRupees(serviceability.minOrderPaise) : undefined,
+    );
 
     cards.push({
       id: config.id,

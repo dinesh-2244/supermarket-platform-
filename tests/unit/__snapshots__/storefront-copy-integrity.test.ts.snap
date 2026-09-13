@@ -1,0 +1,95 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Storefront copy integrity & manifest guard > STOREFRONT_COPY_MANIFEST matches the approved customer-facing copy snapshot 1`] = `
+{
+  "about": {
+    "commitments": {
+      "badge": "Our Commitments",
+      "cards": {
+        "liveInventoryPricing": {
+          "description": "What you see in your community catalogue reflects your hub's own recorded availability and prices, not a shared or estimated figure. If prices change, you are notified upfront.",
+          "title": "Live Inventory & Price",
+        },
+        "oneHubOneCommunity": {
+          "description": "Each community is served by a dedicated store hub, so the catalogue reflects that hub's own store-recorded availability and pricing.",
+          "title": "One Hub, One Community",
+        },
+        "payAtDoorstep": {
+          "description": "Pay via Cash on Delivery or UPI once your order is handed over — no prepayment required.",
+          "title": "Pay at Doorstep",
+        },
+        "scheduledSlots": {
+          "description": "We deliver in scheduled one-hour time windows so you know when your order is expected to arrive.",
+          "title": "Scheduled Slots",
+        },
+      },
+      "title": "Real Operational Facts, No Fabrications",
+    },
+    "hero": {
+      "badge": "Our Hyperlocal Model",
+      "description": "Munder Fresh was built to serve residential communities with daily groceries delivered in scheduled time windows, with stock and pricing scoped directly to each community's dedicated store hub.",
+      "title": "Dedicated Grocery for Residential Communities",
+    },
+    "hubSystem": {
+      "badge": "How Munder Fresh Operates",
+      "description": "Munder Fresh pairs dedicated community store hubs directly with residential societies, organizing inventory and delivery scheduling around local service areas.",
+      "hubCardTemplate": "Dedicated local inventory managed by {hubName}. Items in the catalogue are drawn from this community hub's store records, updating with local stock levels.",
+      "title": "The Two-Community Hub System",
+    },
+    "meta": {
+      "description": "Learn about Munder Fresh: our dedicated two-community hyperlocal grocery model and scheduled slot delivery.",
+      "title": "About Us | Munder Fresh Hyperlocal Grocery",
+    },
+    "serviceBoundary": {
+      "description": "Because we operate dedicated store hubs paired with specific residential partners, we only accept orders from addresses within our serviceable zones.",
+      "title": "Living Outside Our Current Communities?",
+    },
+  },
+  "cart": {
+    "trustBadges": {
+      "doorstepPayment": "Pay with Cash or UPI on delivery",
+      "storeVerified": "Store-verified prices and availability",
+    },
+  },
+  "communities": {
+    "deliveryNoteBase": "Scheduled Slots · Dedicated Hub",
+    "deliveryNoteWithMinOrderPrefix": "Scheduled Slots · Dedicated Hub · Min Order ",
+  },
+  "footer": {
+    "commitmentsDescription": "Prices and availability are verified from your community's dedicated store. Free delivery options available on meeting order thresholds. Pay via Cash or UPI on delivery.",
+    "commitmentsTitle": "Store Commitments",
+  },
+  "home": {
+    "aboutPreview": {
+      "badge": "About Our Model",
+      "description": "We operate dedicated store hubs for partner residential societies. Learn how our two-community model delivers scheduled morning and evening slots.",
+      "title": "Hyperlocal Grocery Built for Residential Communities",
+    },
+    "communitySelector": {
+      "subtitle": "Choose your residential community to see accurate local stock, current store pricing, and booking slots.",
+      "title": "Select Your Community to Start Shopping",
+    },
+    "hero": {
+      "badge": "Hyperlocal Residential Delivery",
+      "subtitle": "Doorstep delivery of fruits & vegetables, dairy, pulses, staples, and daily home essentials — stocked and delivered by your dedicated community store hub.",
+      "titleHighlight": "Scheduled Slots",
+      "titlePrefix": "Fresh Groceries Delivered in ",
+    },
+    "highlights": {
+      "doorstepDescription": "Delivery straight to your flat or home",
+      "doorstepTitle": "Direct to Door",
+      "paymentDescription": "Cash or UPI accepted at doorstep",
+      "paymentTitle": "Pay on Delivery",
+      "produceDescription": "Vegetables & fruits, stocked at your local hub",
+      "produceTitle": "Fresh Produce",
+      "slotsDescription": "Pick your preferred delivery window",
+      "slotsTitle": "Scheduled Slots",
+    },
+    "promise": {
+      "badge": "The Munder Fresh Promise",
+      "description": "We partner directly with residential societies to fulfill orders from dedicated local hubs. Choose a scheduled delivery window that fits your day, with catalogue listings and prices scoped to your community's store-recorded availability.",
+      "title": "Why Hyperlocal Residential Delivery?",
+    },
+  },
+}
+`;

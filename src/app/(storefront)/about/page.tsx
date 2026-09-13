@@ -1,11 +1,11 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { STORE_COMMUNITIES } from '../communities';
+import { STOREFRONT_COPY_MANIFEST, formatHubCardDescription } from '../copy-manifest';
 
 export const metadata: Metadata = {
-  title: 'About Us | Munder Fresh Hyperlocal Grocery',
-  description:
-    'Learn about Munder Fresh: our dedicated two-community hyperlocal grocery model and scheduled slot delivery.',
+  title: STOREFRONT_COPY_MANIFEST.about.meta.title,
+  description: STOREFRONT_COPY_MANIFEST.about.meta.description,
 };
 
 /**
@@ -21,15 +21,13 @@ export default function AboutPage(): React.ReactElement {
       <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-800 via-emerald-700 to-teal-800 px-6 py-12 sm:px-12 sm:py-16 text-white shadow-md">
         <div className="relative z-10 max-w-2xl">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold backdrop-blur">
-            Our Hyperlocal Model
+            {STOREFRONT_COPY_MANIFEST.about.hero.badge}
           </span>
           <h1 className="mt-4 text-3xl sm:text-5xl font-black tracking-tight leading-tight">
-            Dedicated Grocery for Residential Communities
+            {STOREFRONT_COPY_MANIFEST.about.hero.title}
           </h1>
           <p className="mt-3 text-sm sm:text-base text-emerald-100 leading-relaxed">
-            Munder Fresh was built to serve residential communities with daily groceries delivered
-            in scheduled time windows, with stock and pricing scoped directly to each
-            community&apos;s dedicated store hub.
+            {STOREFRONT_COPY_MANIFEST.about.hero.description}
           </p>
         </div>
         <div className="absolute -right-8 -bottom-8 opacity-15 pointer-events-none text-9xl">
@@ -41,14 +39,13 @@ export default function AboutPage(): React.ReactElement {
       <section className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs">
         <div className="max-w-2xl">
           <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
-            How Munder Fresh Operates
+            {STOREFRONT_COPY_MANIFEST.about.hubSystem.badge}
           </span>
           <h2 className="mt-1 text-2xl sm:text-3xl font-black text-slate-900">
-            The Two-Community Hub System
+            {STOREFRONT_COPY_MANIFEST.about.hubSystem.title}
           </h2>
           <p className="mt-3 text-sm text-slate-600 leading-relaxed">
-            Munder Fresh pairs dedicated community store hubs directly with residential societies,
-            organizing inventory and delivery scheduling around local service areas.
+            {STOREFRONT_COPY_MANIFEST.about.hubSystem.description}
           </p>
         </div>
 
@@ -69,9 +66,7 @@ export default function AboutPage(): React.ReactElement {
                 </div>
                 <h3 className="mt-3 text-lg font-bold text-slate-900">{community.name}</h3>
                 <p className="mt-1 text-xs text-slate-600 leading-relaxed">
-                  Dedicated local inventory managed by {community.hubName}. Items in the catalogue
-                  are drawn from this community hub&apos;s store records, updating with local stock
-                  levels.
+                  {formatHubCardDescription(community.hubName)}
                 </p>
               </div>
               <div className="mt-5 pt-4 border-t border-emerald-200/60">
@@ -91,48 +86,51 @@ export default function AboutPage(): React.ReactElement {
       <section className="space-y-6">
         <div>
           <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
-            Our Commitments
+            {STOREFRONT_COPY_MANIFEST.about.commitments.badge}
           </span>
           <h2 className="mt-1 text-2xl font-black text-slate-900">
-            Real Operational Facts, No Fabrications
+            {STOREFRONT_COPY_MANIFEST.about.commitments.title}
           </h2>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col">
             <span className="text-2xl">⚡</span>
-            <h3 className="mt-3 text-sm font-bold text-slate-900">Scheduled Slots</h3>
+            <h3 className="mt-3 text-sm font-bold text-slate-900">
+              {STOREFRONT_COPY_MANIFEST.about.commitments.cards.scheduledSlots.title}
+            </h3>
             <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-              We deliver in scheduled one-hour time windows so you know when your order is expected
-              to arrive.
+              {STOREFRONT_COPY_MANIFEST.about.commitments.cards.scheduledSlots.description}
             </p>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col">
             <span className="text-2xl">🥦</span>
-            <h3 className="mt-3 text-sm font-bold text-slate-900">One Hub, One Community</h3>
+            <h3 className="mt-3 text-sm font-bold text-slate-900">
+              {STOREFRONT_COPY_MANIFEST.about.commitments.cards.oneHubOneCommunity.title}
+            </h3>
             <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-              Each community is served by a dedicated store hub, so the catalogue reflects that
-              hub&apos;s own store-recorded availability and pricing.
+              {STOREFRONT_COPY_MANIFEST.about.commitments.cards.oneHubOneCommunity.description}
             </p>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col">
             <span className="text-2xl">🏷️</span>
-            <h3 className="mt-3 text-sm font-bold text-slate-900">Live Inventory &amp; Price</h3>
+            <h3 className="mt-3 text-sm font-bold text-slate-900">
+              {STOREFRONT_COPY_MANIFEST.about.commitments.cards.liveInventoryPricing.title}
+            </h3>
             <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-              What you see in your community catalogue reflects your hub's own recorded availability
-              and prices, not a shared or estimated figure. If prices change, you are notified
-              upfront.
+              {STOREFRONT_COPY_MANIFEST.about.commitments.cards.liveInventoryPricing.description}
             </p>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col">
             <span className="text-2xl">🛡️</span>
-            <h3 className="mt-3 text-sm font-bold text-slate-900">Pay at Doorstep</h3>
+            <h3 className="mt-3 text-sm font-bold text-slate-900">
+              {STOREFRONT_COPY_MANIFEST.about.commitments.cards.payAtDoorstep.title}
+            </h3>
             <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-              Pay via Cash on Delivery or UPI once your order is handed over — no prepayment
-              required.
+              {STOREFRONT_COPY_MANIFEST.about.commitments.cards.payAtDoorstep.description}
             </p>
           </div>
         </div>
@@ -141,11 +139,10 @@ export default function AboutPage(): React.ReactElement {
       {/* Service Boundary & Unserviceable Notice */}
       <section className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs">
         <h2 className="text-xl font-bold text-slate-900">
-          Living Outside Our Current Communities?
+          {STOREFRONT_COPY_MANIFEST.about.serviceBoundary.title}
         </h2>
         <p className="mt-2 text-sm text-slate-600 leading-relaxed">
-          Because we operate dedicated store hubs paired with specific residential partners, we only
-          accept orders from addresses within our serviceable zones.
+          {STOREFRONT_COPY_MANIFEST.about.serviceBoundary.description}
         </p>
         <div className="mt-4 flex flex-wrap gap-4">
           <Link

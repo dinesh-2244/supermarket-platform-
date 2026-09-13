@@ -9,6 +9,7 @@ import {
 } from '@/storefront';
 import { clearAreaAction } from './actions';
 import { communityNameForStore, STORE_COMMUNITIES } from './communities';
+import { STOREFRONT_COPY_MANIFEST } from './copy-manifest';
 import { MobileCartBar } from './mobile-cart-bar';
 
 /**
@@ -299,12 +300,10 @@ export default async function StorefrontLayout({
 
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                Store Commitments
+                {STOREFRONT_COPY_MANIFEST.footer.commitmentsTitle}
               </h3>
               <p className="mt-3 text-xs text-slate-500 leading-relaxed">
-                Prices and availability are verified from your community&apos;s dedicated store.
-                Free delivery options available on meeting order thresholds. Pay via Cash or UPI on
-                delivery.
+                {STOREFRONT_COPY_MANIFEST.footer.commitmentsDescription}
               </p>
             </div>
           </div>

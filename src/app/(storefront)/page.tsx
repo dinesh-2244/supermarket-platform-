@@ -10,6 +10,7 @@ import { CommunitySelector } from './community-selector';
 import { CategoryTiles } from './category-tiles';
 import { communityNameForStore } from './communities';
 import { getCartQuantities } from './cart-quantities';
+import { STOREFRONT_COPY_MANIFEST } from './copy-manifest';
 
 export const metadata: Metadata = {
   title: 'Munder Fresh | Hyperlocal Grocery Platform',
@@ -46,17 +47,16 @@ export default async function StorefrontHome({
         <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-800 via-emerald-700 to-teal-800 px-6 py-12 sm:px-12 sm:py-16 text-white shadow-md">
           <div className="relative z-10 max-w-2xl">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold backdrop-blur">
-              Hyperlocal Residential Delivery
+              {STOREFRONT_COPY_MANIFEST.home.hero.badge}
             </span>
             <h1 className="mt-4 text-3xl sm:text-5xl font-black tracking-tight leading-tight">
-              Fresh Groceries Delivered in{' '}
+              {STOREFRONT_COPY_MANIFEST.home.hero.titlePrefix}
               <span className="text-emerald-200 underline decoration-amber-400">
-                Scheduled Slots
+                {STOREFRONT_COPY_MANIFEST.home.hero.titleHighlight}
               </span>
             </h1>
             <p className="mt-3 text-sm sm:text-base text-emerald-100 max-w-lg leading-relaxed">
-              Doorstep delivery of fruits &amp; vegetables, dairy, pulses, staples, and daily home
-              essentials — stocked and delivered by your dedicated community store hub.
+              {STOREFRONT_COPY_MANIFEST.home.hero.subtitle}
             </p>
           </div>
           <div className="absolute -right-12 -bottom-12 opacity-15 pointer-events-none text-9xl">
@@ -66,8 +66,8 @@ export default async function StorefrontHome({
 
         {/* Community Selector (D2) */}
         <CommunitySelector
-          title="Select Your Community to Start Shopping"
-          subtitle="Choose your residential community to see accurate local stock, current store pricing, and booking slots."
+          title={STOREFRONT_COPY_MANIFEST.home.communitySelector.title}
+          subtitle={STOREFRONT_COPY_MANIFEST.home.communitySelector.subtitle}
           showAreaSublist={false}
         />
 
@@ -75,26 +75,38 @@ export default async function StorefrontHome({
         <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
             <span className="text-2xl">⚡</span>
-            <h3 className="mt-2 text-xs sm:text-sm font-bold text-slate-900">Scheduled Slots</h3>
-            <p className="mt-0.5 text-[11px] text-slate-500">Pick your preferred delivery window</p>
+            <h3 className="mt-2 text-xs sm:text-sm font-bold text-slate-900">
+              {STOREFRONT_COPY_MANIFEST.home.highlights.slotsTitle}
+            </h3>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              {STOREFRONT_COPY_MANIFEST.home.highlights.slotsDescription}
+            </p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
             <span className="text-2xl">🥦</span>
-            <h3 className="mt-2 text-xs sm:text-sm font-bold text-slate-900">Fresh Produce</h3>
+            <h3 className="mt-2 text-xs sm:text-sm font-bold text-slate-900">
+              {STOREFRONT_COPY_MANIFEST.home.highlights.produceTitle}
+            </h3>
             <p className="mt-0.5 text-[11px] text-slate-500">
-              Vegetables & fruits, stocked at your local hub
+              {STOREFRONT_COPY_MANIFEST.home.highlights.produceDescription}
             </p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
             <span className="text-2xl">🛡️</span>
-            <h3 className="mt-2 text-xs sm:text-sm font-bold text-slate-900">Pay on Delivery</h3>
-            <p className="mt-0.5 text-[11px] text-slate-500">Cash or UPI accepted at doorstep</p>
+            <h3 className="mt-2 text-xs sm:text-sm font-bold text-slate-900">
+              {STOREFRONT_COPY_MANIFEST.home.highlights.paymentTitle}
+            </h3>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              {STOREFRONT_COPY_MANIFEST.home.highlights.paymentDescription}
+            </p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
             <span className="text-2xl">🏠</span>
-            <h3 className="mt-2 text-xs sm:text-sm font-bold text-slate-900">Direct to Door</h3>
+            <h3 className="mt-2 text-xs sm:text-sm font-bold text-slate-900">
+              {STOREFRONT_COPY_MANIFEST.home.highlights.doorstepTitle}
+            </h3>
             <p className="mt-0.5 text-[11px] text-slate-500">
-              Delivery straight to your flat or home
+              {STOREFRONT_COPY_MANIFEST.home.highlights.doorstepDescription}
             </p>
           </div>
         </section>
@@ -103,14 +115,13 @@ export default async function StorefrontHome({
         <section className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="max-w-xl">
             <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
-              About Our Model
+              {STOREFRONT_COPY_MANIFEST.home.aboutPreview.badge}
             </span>
             <h2 className="mt-1 text-xl sm:text-2xl font-black text-slate-900">
-              Hyperlocal Grocery Built for Residential Communities
+              {STOREFRONT_COPY_MANIFEST.home.aboutPreview.title}
             </h2>
             <p className="mt-2 text-xs sm:text-sm text-slate-600 leading-relaxed">
-              We operate dedicated store hubs for partner residential societies. Learn how our
-              two-community model delivers scheduled morning and evening slots.
+              {STOREFRONT_COPY_MANIFEST.home.aboutPreview.description}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
@@ -259,15 +270,13 @@ export default async function StorefrontHome({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="max-w-xl">
             <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
-              The Munder Fresh Promise
+              {STOREFRONT_COPY_MANIFEST.home.promise.badge}
             </span>
             <h2 className="mt-1 text-xl sm:text-2xl font-black text-slate-900">
-              Why Hyperlocal Residential Delivery?
+              {STOREFRONT_COPY_MANIFEST.home.promise.title}
             </h2>
             <p className="mt-2 text-xs sm:text-sm text-slate-600 leading-relaxed">
-              We partner directly with residential societies to fulfill orders from dedicated local
-              hubs. Choose a scheduled delivery window that fits your day, with catalogue listings
-              and prices scoped to your community's store-recorded availability.
+              {STOREFRONT_COPY_MANIFEST.home.promise.description}
             </p>
           </div>
           <Link

@@ -22,6 +22,7 @@ import { getCommunityConfigForStore } from '../communities';
 import { removeFromCartAction } from '../cart-actions';
 import { CartQuantityStepper } from './cart-quantity-stepper';
 import { noticeSentences } from '../cart-notices';
+import { STOREFRONT_COPY_MANIFEST } from '../copy-manifest';
 import { ActionForm } from '../form';
 import { rupees, Card, PageHeading } from '../ui';
 
@@ -245,7 +246,7 @@ export default async function CartPage(): Promise<React.ReactElement> {
                     d="M5 13l4 4L19 7"
                   />
                 </svg>
-                <span>Store-verified prices and availability</span>
+                <span>{STOREFRONT_COPY_MANIFEST.cart.trustBadges.storeVerified}</span>
               </div>
               <div className="flex items-center gap-2">
                 <svg
@@ -261,7 +262,7 @@ export default async function CartPage(): Promise<React.ReactElement> {
                     d="M5 13l4 4L19 7"
                   />
                 </svg>
-                <span>Pay with Cash or UPI on delivery</span>
+                <span>{STOREFRONT_COPY_MANIFEST.cart.trustBadges.doorstepPayment}</span>
               </div>
             </div>
           </Card>
