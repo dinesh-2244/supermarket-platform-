@@ -268,8 +268,8 @@ export default async function StorefrontHome({
             </h2>
             <p className="mt-2 text-xs sm:text-sm text-slate-600 leading-relaxed">
               We partner directly with residential societies to fulfill orders from dedicated local
-              hubs. Scheduled slots mean predictable arrivals, and live store inventory ensures zero
-              unannounced substitutions.
+              hubs. Scheduled slots mean predictable arrivals, and live store inventory means what
+              you see in the catalogue reflects what's actually on the shelf.
             </p>
           </div>
           <Link

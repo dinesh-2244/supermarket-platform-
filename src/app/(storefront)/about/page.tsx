@@ -5,14 +5,14 @@ import { STORE_COMMUNITIES } from '../communities';
 export const metadata: Metadata = {
   title: 'About Us | Munder Fresh Hyperlocal Grocery',
   description:
-    'Learn about Munder Fresh: our dedicated two-community hyperlocal grocery model, daily fresh sourcing, and scheduled slot delivery.',
+    'Learn about Munder Fresh: our dedicated two-community hyperlocal grocery model and scheduled slot delivery.',
 };
 
 /**
  * About Us editorial page (Requirement 3a).
  *
  * Details Munder Fresh's hyperlocal grocery model, the dedicated two-community operations,
- * scheduled slot deliveries, daily sourcing, and honest pricing with zero fabricated claims.
+ * scheduled slot deliveries, and honest pricing with zero fabricated claims.
  */
 export default function AboutPage(): React.ReactElement {
   return (
@@ -72,8 +72,7 @@ export default function AboutPage(): React.ReactElement {
                 <h3 className="mt-3 text-lg font-bold text-slate-900">{community.name}</h3>
                 <p className="mt-1 text-xs text-slate-600 leading-relaxed">
                   Dedicated local inventory managed by {community.hubName}. Items listed in the
-                  catalogue are stocked directly at this community hub, ensuring stock accuracy and
-                  timely fulfillment.
+                  catalogue are stocked directly at this community hub, not a distant warehouse.
                 </p>
               </div>
               <div className="mt-5 pt-4 border-t border-emerald-200/60">
@@ -105,8 +104,8 @@ export default function AboutPage(): React.ReactElement {
             <span className="text-2xl">⚡</span>
             <h3 className="mt-3 text-sm font-bold text-slate-900">Scheduled Slots</h3>
             <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-              We deliver in predictable, scheduled time windows so you know when your order arrives.
-              No lingering waits.
+              We deliver in predictable, scheduled one-hour time windows so you know when your order
+              is expected to arrive.
             </p>
           </div>
 
@@ -146,8 +145,7 @@ export default function AboutPage(): React.ReactElement {
         </h2>
         <p className="mt-2 text-sm text-slate-600 leading-relaxed">
           Because we operate physical mini-hubs specifically dedicated to our residential partners,
-          we only accept orders from addresses within our serviceable zones. We never take orders we
-          cannot fulfill reliably.
+          we only accept orders from addresses within our serviceable zones.
         </p>
         <div className="mt-4 flex flex-wrap gap-4">
           <Link
