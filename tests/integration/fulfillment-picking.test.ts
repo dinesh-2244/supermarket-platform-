@@ -47,6 +47,10 @@ let managerA: Principal;
 let managerB: Principal;
 let staffA: Principal;
 let staffUserId: string;
+let otherStaffA: string;
+let inactiveStaffA: string;
+let staffB: string;
+let superAdminId: string;
 const userIds: string[] = [];
 const categoryIds: string[] = [];
 const extraProducts: string[] = [];
@@ -72,11 +76,19 @@ beforeAll(async () => {
   const mA = await createUser(prisma, { role: 'STORE_MANAGER', storeId: storeA });
   const mB = await createUser(prisma, { role: 'STORE_MANAGER', storeId: storeB });
   const sA = await createUser(prisma, { role: 'STORE_STAFF', storeId: storeA });
+  const sA2 = await createUser(prisma, { role: 'STORE_STAFF', storeId: storeA });
+  const sAOff = await createUser(prisma, { role: 'STORE_STAFF', storeId: storeA, isActive: false });
+  const sB = await createUser(prisma, { role: 'STORE_STAFF', storeId: storeB });
+  const sup = await createUser(prisma, { role: 'SUPER_ADMIN', storeId: null });
   managerA = { kind: 'user', userId: mA.id, role: 'STORE_MANAGER', storeId: storeA };
   managerB = { kind: 'user', userId: mB.id, role: 'STORE_MANAGER', storeId: storeB };
   staffA = { kind: 'user', userId: sA.id, role: 'STORE_STAFF', storeId: storeA };
   staffUserId = sA.id;
-  userIds.push(mA.id, mB.id, sA.id);
+  otherStaffA = sA2.id;
+  inactiveStaffA = sAOff.id;
+  staffB = sB.id;
+  superAdminId = sup.id;
+  userIds.push(mA.id, mB.id, sA.id, sA2.id, sAOff.id, sB.id, sup.id);
 });
 
 afterAll(async () => {
@@ -294,10 +306,15 @@ describe('recording a line', () => {
     expect(await stockOf(storeA, productA)).toBe(before);
   });
 
-  it('a substitution records the substitute and moves no stock in this phase', async () => {
+  it('a substitution restores the ordered product and takes the substitute off the shelf, in one transaction', async () => {
+    // None of the ordered product left the shelf — the substitute went in its
+    // place — so its reservation goes back; and the substitute is now committed
+    // to this order, so its `websiteStock` drops by what went in, with its own
+    // ledger row. Both movements and the line outcome commit together.
     const beforeA = await stockOf(storeA, productA);
     const beforeA2 = await stockOf(storeA, productA2);
-    const { id, lineIds } = await inPicking([{ productId: productA, qty: 2 }]);
+    const { id, lineIds } = await inPicking([{ productId: productA, qty: 3 }]);
+    expect(await stockOf(storeA, productA)).toBe(beforeA - 3);
     const line = await recordLinePick(staffA, id, lineIds[productA]!, {
       outcome: 'SUBSTITUTED',
       qtyPicked: 2,
@@ -307,10 +324,100 @@ describe('recording a line', () => {
       lineStatus: 'SUBSTITUTED',
       qtyPicked: 2,
       substituteProductId: productA2,
-      stockRestoredQty: 0,
+      stockRestoredQty: 3,
     });
+    expect(await stockOf(storeA, productA)).toBe(beforeA);
+    expect(await stockOf(storeA, productA2)).toBe(beforeA2 - 2);
+    const restore = await prisma.stockLedger.findFirst({
+      where: { storeId: storeA, productId: productA, reason: 'PICK_SHORT_RESTORE', refId: id },
+    });
+    expect(restore).toMatchObject({ delta: 3, balanceAfter: beforeA });
+    const taken = await prisma.stockLedger.findFirst({
+      where: { storeId: storeA, productId: productA2, refType: 'Order', refId: id },
+    });
+    expect(taken).toMatchObject({ delta: -2, balanceAfter: beforeA2 - 2, reason: 'ORDER_PLACED' });
+    // And a later correction has nothing left to restore for this line.
+    const result = await correctOrder(managerA, id, 'Customer changed their mind');
+    expect(result.restored).toEqual([]);
+    expect(await stockOf(storeA, productA)).toBe(beforeA);
+  });
+
+  it('refuses a substitute with too little website stock, and leaves nothing behind', async () => {
+    const scarce = await createProduct(prisma, { categoryId: categoryIds[0]! });
+    extraProducts.push(scarce.id);
+    await createStoreProduct(prisma, storeA, scarce.id, { sellingPricePaise: 5_000 });
+    await createInventoryItem(prisma, storeA, scarce.id, { websiteStock: 1 });
+    const beforeA = await stockOf(storeA, productA);
+    const { id, lineIds } = await inPicking([{ productId: productA, qty: 2 }]);
+    await expect(
+      recordLinePick(staffA, id, lineIds[productA]!, {
+        outcome: 'SUBSTITUTED',
+        qtyPicked: 2,
+        substituteProductId: scarce.id,
+      }),
+    ).rejects.toThrow(/substitute.*stock|stock.*substitute/i);
+    // Rolled back as a whole: no restore of A, no ledger for the substitute,
+    // the line is still to pick.
     expect(await stockOf(storeA, productA)).toBe(beforeA - 2);
-    expect(await stockOf(storeA, productA2)).toBe(beforeA2);
+    expect(await stockOf(storeA, scarce.id)).toBe(1);
+    expect(await prisma.stockLedger.count({ where: { refId: id } })).toBe(0);
+    const line = await prisma.orderLine.findUniqueOrThrow({ where: { id: lineIds[productA]! } });
+    expect(line).toMatchObject({ lineStatus: 'PENDING', stockRestoredQty: 0 });
+
+    // Zero stock is the same refusal.
+    await prisma.inventoryItem.updateMany({
+      where: { storeId: storeA, productId: scarce.id },
+      data: { websiteStock: 0 },
+    });
+    await expect(
+      recordLinePick(staffA, id, lineIds[productA]!, {
+        outcome: 'SUBSTITUTED',
+        qtyPicked: 1,
+        substituteProductId: scarce.id,
+      }),
+    ).rejects.toThrow(/substitute.*stock|stock.*substitute/i);
+  });
+
+  it('refuses the ordered product as its own substitute', async () => {
+    const { id, lineIds } = await inPicking([{ productId: productA, qty: 2 }]);
+    await expect(
+      recordLinePick(staffA, id, lineIds[productA]!, {
+        outcome: 'SUBSTITUTED',
+        qtyPicked: 2,
+        substituteProductId: productA,
+      }),
+    ).rejects.toThrow(/itself/i);
+    const line = await prisma.orderLine.findUniqueOrThrow({ where: { id: lineIds[productA]! } });
+    expect(line.lineStatus).toBe('PENDING');
+  });
+
+  it('two pickers substituting the last unit at once: exactly one gets it', async () => {
+    const last = await createProduct(prisma, { categoryId: categoryIds[0]! });
+    extraProducts.push(last.id);
+    await createStoreProduct(prisma, storeA, last.id, { sellingPricePaise: 5_000 });
+    await createInventoryItem(prisma, storeA, last.id, { websiteStock: 1 });
+    const one = await inPicking([{ productId: productA, qty: 1 }]);
+    const two = await inPicking([{ productId: productA, qty: 1 }]);
+    const results = await Promise.allSettled([
+      recordLinePick(staffA, one.id, one.lineIds[productA]!, {
+        outcome: 'SUBSTITUTED',
+        qtyPicked: 1,
+        substituteProductId: last.id,
+      }),
+      recordLinePick(staffA, two.id, two.lineIds[productA]!, {
+        outcome: 'SUBSTITUTED',
+        qtyPicked: 1,
+        substituteProductId: last.id,
+      }),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((r) => r.status === 'rejected');
+    expect(rejected?.status === 'rejected' && String(rejected.reason)).toMatch(/stock/i);
+    expect(await stockOf(storeA, last.id)).toBe(0);
+    const lines = await prisma.orderLine.findMany({
+      where: { id: { in: [one.lineIds[productA]!, two.lineIds[productA]!] } },
+    });
+    expect(lines.map((l) => l.lineStatus).sort()).toEqual(['PENDING', 'SUBSTITUTED']);
   });
 
   it('refuses a substitute the store does not list', async () => {
@@ -356,6 +463,44 @@ describe('recording a line', () => {
 });
 
 describe('who may pick', () => {
+  async function accepted(): Promise<string> {
+    const { id } = await placeOrder(storeA, [{ productId: productA, qty: 1 }]);
+    await acceptOrder(staffA, id);
+    return id;
+  }
+
+  async function assignee(id: string): Promise<string | null> {
+    return (await prisma.pickTask.findUniqueOrThrow({ where: { orderId: id } })).assignedUserId;
+  }
+
+  it('staff can only take a task themselves — handing it to anyone else needs a manager', async () => {
+    const id = await accepted();
+    await expect(startPicking(staffA, id, otherStaffA)).rejects.toThrow(/permission/i);
+    expect(await orderStatus(id)).toBe('ACCEPTED');
+    expect(await assignee(id)).toBeNull();
+    await startPicking(staffA, id, staffUserId);
+    expect(await assignee(id)).toBe(staffUserId);
+  });
+
+  it('a manager assigns an active picker of the order’s store', async () => {
+    const id = await accepted();
+    await startPicking(managerA, id, otherStaffA);
+    expect(await orderStatus(id)).toBe('PICKING');
+    expect(await assignee(id)).toBe(otherStaffA);
+  });
+
+  it('a manager cannot assign the other store’s staff, a disabled account, or an unknown user', async () => {
+    const id = await accepted();
+    await expect(startPicking(managerA, id, staffB)).rejects.toThrow(/that store/i);
+    await expect(startPicking(managerA, id, inactiveStaffA)).rejects.toThrow(/active/i);
+    await expect(startPicking(managerA, id, superAdminId)).rejects.toThrow(/that store/i);
+    await expect(
+      startPicking(managerA, id, '00000000-0000-4000-8000-000000000000'),
+    ).rejects.toThrow(/active/i);
+    expect(await orderStatus(id)).toBe('ACCEPTED');
+    expect(await assignee(id)).toBeNull();
+  });
+
   it('refuses a shopper, and the other store’s staff — as not found', async () => {
     const { id, lineIds } = await placeOrder(storeA, [{ productId: productA, qty: 1 }]);
     await expect(acceptOrder(shopper, id)).rejects.toThrow(/permission/i);

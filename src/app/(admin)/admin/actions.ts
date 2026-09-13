@@ -38,6 +38,7 @@ import {
 import { setListed, setPrice } from '@/modules/pricing';
 import { adjustStock, reconcileStock, runStockImport } from '@/modules/inventory';
 import { confirmRevisedAmount, correctOrder } from '@/modules/orders';
+import { updateProductRequestStatus, type ProductRequestStatus } from '@/modules/product-requests';
 
 /**
  * Server actions for the back office.
@@ -643,5 +644,28 @@ export async function confirmRevisedAmountAction(
     revalidatePath('/admin/orders');
     revalidatePath(`/admin/orders/${orderId}`);
     return 'Recorded — the order can now leave PACKED.';
+  });
+}
+
+/**
+ * Update the triage status of a product request (Phase 5.5).
+ */
+export async function updateProductRequestStatusAction(
+  _state: ActionState,
+  form: FormData,
+): Promise<string> {
+  return run(async () => {
+    const principal = await requirePrincipal();
+    const requestId = text(form, 'requestId');
+    const toStatus = text(form, 'toStatus') as ProductRequestStatus;
+    const note = optionalText(form, 'note');
+
+    if (toStatus === 'DECLINED' && (!note || note.trim().length === 0)) {
+      throw new ValidationError('Declining a request needs a reason');
+    }
+
+    await updateProductRequestStatus(principal, requestId, toStatus, note);
+    revalidatePath('/admin/product-requests');
+    return `Request status updated to ${toStatus}.`;
   });
 }

@@ -1,14 +1,16 @@
 'use server';
 
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { rebuildForStore } from '@/modules/cart';
 import { isAppError } from '@/modules/platform';
+import { submitProductRequest } from '@/modules/product-requests';
 import { captureServiceabilityRequest, getStore, resolveServiceability } from '@/modules/stores';
 import {
   clearCartMoveNotice,
   clearStoreContext,
   currentCartToken,
+  currentStorefrontPrincipal,
   setCartMoveNotice,
   STORE_CONTEXT_COOKIE,
   STORE_CONTEXT_MAX_AGE_SECONDS,
@@ -148,5 +150,63 @@ export async function captureInterestAction(
       ...(pincode === '' ? {} : { pincode }),
     });
     return 'Thank you — we have noted it. We will get to your area as soon as we can.';
+  });
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
+ * Resolves an opaque, stable client id for rate-limiting anonymous intake.
+ *
+ * Hash of the basket cookie if present, else fallback to request IP.
+ * Never exposes or stores the raw cookie or IP.
+ */
+async function resolveClientKey(): Promise<string> {
+  const cartToken = await currentCartToken();
+  if (cartToken !== null && cartToken.trim().length > 0) {
+    return sha256Hex(`cart:${cartToken.trim()}`);
+  }
+
+  const headerStore = await headers();
+  const forwarded = headerStore.get('x-forwarded-for');
+  const realIp = headerStore.get('x-real-ip');
+  const ip = forwarded ? forwarded.split(',')[0]?.trim() : (realIp?.trim() ?? '127.0.0.1');
+  return sha256Hex(`ip:${ip}`);
+}
+
+/**
+ * Submit a customer product request (Phase 5.5).
+ */
+export async function requestProductAction(
+  _state: string | undefined,
+  form: FormData,
+): Promise<string> {
+  return run(async () => {
+    const { principal } = await currentStorefrontPrincipal();
+    const productName = text(form, 'productName');
+    const brand = text(form, 'brand');
+    const packSize = text(form, 'packSize');
+    const note = text(form, 'note');
+    const customerName = text(form, 'customerName');
+    const customerPhone = text(form, 'customerPhone');
+    const clientKey = await resolveClientKey();
+
+    await submitProductRequest(principal, {
+      clientKey,
+      productName,
+      brand: brand === '' ? null : brand,
+      packSize: packSize === '' ? null : packSize,
+      note: note === '' ? null : note,
+      customerName: customerName === '' ? null : customerName,
+      customerPhone: customerPhone === '' ? null : customerPhone,
+    });
+
+    return 'ok';
   });
 }
