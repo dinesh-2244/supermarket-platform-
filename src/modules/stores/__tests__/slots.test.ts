@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertOpeningHours,
   assertSlotLength,
   isBookableSlot,
   localDayStart,
@@ -55,6 +56,8 @@ describe('zoneOffsetMs — sub-second inputs', () => {
         slotLengthMinutes: 60,
         timeZone: IST,
         horizonDays: 1,
+        openMinuteOfDay: 600,
+        closeMinuteOfDay: 1200,
       });
       for (const slot of slots.slice(0, 5)) expect(slot.getMilliseconds()).toBe(0);
     }
@@ -69,12 +72,16 @@ describe('zoneOffsetMs — sub-second inputs', () => {
       slotLengthMinutes: 60,
       timeZone: IST,
       horizonDays: 1,
+      openMinuteOfDay: 600,
+      closeMinuteOfDay: 1200,
     });
     const b = slotGrid({
       from: new Date('2026-03-01T06:00:00.900Z'),
       slotLengthMinutes: 60,
       timeZone: IST,
       horizonDays: 1,
+      openMinuteOfDay: 600,
+      closeMinuteOfDay: 1200,
     });
 
     expect(b.map((d) => d.toISOString())).toEqual(a.map((d) => d.toISOString()));
@@ -120,6 +127,8 @@ describe('slotGrid', () => {
     timeZone: IST,
     horizonDays: 1,
     leadMinutes: 120,
+    openMinuteOfDay: 600,
+    closeMinuteOfDay: 1200,
   };
 
   it('puts hourly windows on the hour in the store’s own timezone', () => {
@@ -146,7 +155,9 @@ describe('slotGrid', () => {
     const slots = slotGrid({ ...base, from, horizonDays: 2 });
 
     expect(slots.at(-1)!.getTime()).toBeLessThanOrEqual(from.getTime() + 2 * 86_400_000);
-    expect(slots.length).toBeGreaterThan(24);
+    // 14:00–19:00 today (6), 10:00–19:00 tomorrow (10), 10:00 and 11:00 on the
+    // day the horizon (11:30 IST) cuts off (2).
+    expect(slots).toHaveLength(18);
   });
 
   it('is stable — asking twice a minute apart offers the same windows', () => {
@@ -168,7 +179,9 @@ describe('slotGrid', () => {
     });
     const gaps = slots.slice(1).map((slot, index) => slot.getTime() - slots[index]!.getTime());
 
-    expect(new Set(gaps)).toEqual(new Set([30 * 60_000]));
+    // Half an hour between windows, and the overnight gap from the last
+    // window at 19:30 to the next day's 10:00.
+    expect(new Set(gaps)).toEqual(new Set([30 * 60_000, 14.5 * 3600_000]));
   });
 
   it('refuses a nonsense slot length or instant', () => {
@@ -188,8 +201,11 @@ describe('slotGrid', () => {
       from: new Date('2026-03-01T06:00:00Z'),
       slotLengthMinutes: 60,
       timeZone: IST,
+      openMinuteOfDay: 600,
+      closeMinuteOfDay: 1200,
     });
-    expect(slots.length).toBeGreaterThan(60);
+    // 6 today, 10, 10, then 10:00 and 11:00 on the fourth day.
+    expect(slots).toHaveLength(28);
   });
 });
 
@@ -198,7 +214,16 @@ describe('a window keeps its identity across midnight (R3)', () => {
   // which does not divide 1,440. Two things are asserted here: that length is
   // now refused outright, and a *supported* non-hourly length crosses midnight
   // without losing a window.
-  const fortyFive = { slotLengthMinutes: 45, timeZone: IST, horizonDays: 3, leadMinutes: 120 };
+  // A full-day window: the identity property is about the grid, and the
+  // opening hours are a filter over it (see the next describe).
+  const fortyFive = {
+    slotLengthMinutes: 45,
+    timeZone: IST,
+    horizonDays: 3,
+    leadMinutes: 120,
+    openMinuteOfDay: 0,
+    closeMinuteOfDay: 1440,
+  };
 
   it('refuses a length that does not divide the day', () => {
     for (const bad of [50, 7, 13, 100, 1_441]) {
@@ -290,6 +315,116 @@ describe('a window keeps its identity across midnight (R3)', () => {
   });
 });
 
+describe('opening hours — only windows inside them are offered', () => {
+  const hours = {
+    slotLengthMinutes: 60,
+    timeZone: IST,
+    horizonDays: 1,
+    leadMinutes: 0,
+    openMinuteOfDay: 600,
+    closeMinuteOfDay: 1200,
+  };
+  const istWallClock = (slot: Date): string =>
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: IST,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(slot);
+
+  it('offers 10:00 through 19:00 and nothing outside, on the store’s wall clock', () => {
+    // Midnight IST, one day: exactly the ten hourly windows 10:00–19:00.
+    const slots = slotGrid({ ...hours, from: new Date('2026-02-28T18:30:00Z') });
+    expect(slots.map(istWallClock)).toEqual([
+      '10:00',
+      '11:00',
+      '12:00',
+      '13:00',
+      '14:00',
+      '15:00',
+      '16:00',
+      '17:00',
+      '18:00',
+      '19:00',
+    ]);
+  });
+
+  it('keeps a window only if it ends by closing time', () => {
+    // 90-minute windows are anchored to midnight (00:00, 01:30, … 09:00,
+    // 10:30, …), so inside 10:00–20:00 the first is 10:30, not 10:00, and the
+    // last is 18:00 (ends 19:30): 19:30 would end at 21:00, past the door.
+    const slots = slotGrid({
+      ...hours,
+      slotLengthMinutes: 90,
+      from: new Date('2026-02-28T18:30:00Z'),
+    });
+    expect(slots.map(istWallClock)).toEqual(['10:30', '12:00', '13:30', '15:00', '16:30', '18:00']);
+  });
+
+  it('is a filter over the anchored grid, not a new anchor', () => {
+    // Every window inside the hours is exactly one the full-day grid offers.
+    const from = new Date('2026-03-01T06:00:00Z');
+    const all = new Set(
+      slotGrid({ ...hours, from, openMinuteOfDay: 0, closeMinuteOfDay: 1440 }).map((s) =>
+        s.toISOString(),
+      ),
+    );
+    const inside = slotGrid({ ...hours, from });
+    expect(inside.length).toBeGreaterThan(0);
+    for (const slot of inside) expect(all.has(slot.toISOString())).toBe(true);
+  });
+
+  it('composes with DST: the hours stay on the wall clock across a spring-forward', () => {
+    // London, 29 March 2026: 01:00 → 02:00. The local day is 23 hours long,
+    // the grid is still anchored to that day's midnight, and 10:00–20:00 must
+    // still mean 10:00–20:00 on the wall — not 09:00–19:00 or 11:00–21:00.
+    const londonWallClock = (slot: Date): string =>
+      new Intl.DateTimeFormat('en-GB', {
+        timeZone: LONDON,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(slot);
+    const slots = slotGrid({
+      ...hours,
+      timeZone: LONDON,
+      from: new Date('2026-03-29T00:00:00Z'), // local midnight of the shift day
+    });
+    expect(slots.map(londonWallClock)).toEqual([
+      '10:00',
+      '11:00',
+      '12:00',
+      '13:00',
+      '14:00',
+      '15:00',
+      '16:00',
+      '17:00',
+      '18:00',
+      '19:00',
+    ]);
+    // …and the first is the real instant 10:00 BST = 09:00 UTC.
+    expect(slots[0]).toEqual(new Date('2026-03-29T09:00:00Z'));
+  });
+
+  it('refuses hours that are not a whole-minute window inside one day', () => {
+    const from = new Date('2026-03-01T06:00:00Z');
+    for (const [open, close] of [
+      [600, 600],
+      [1200, 600],
+      [-1, 1200],
+      [600, 1441],
+      [600.5, 1200],
+      [600, 630],
+    ] as const) {
+      expect(() =>
+        slotGrid({ ...hours, from, openMinuteOfDay: open, closeMinuteOfDay: close }),
+      ).toThrow(/opening hours/i);
+    }
+    expect(assertOpeningHours(600, 660, 60)).toBeUndefined();
+    expect(assertOpeningHours(0, 1440, 60)).toBeUndefined();
+  });
+});
+
 describe('isBookableSlot', () => {
   const grid = {
     from: new Date('2026-03-01T06:00:00Z'),
@@ -297,6 +432,8 @@ describe('isBookableSlot', () => {
     timeZone: IST,
     horizonDays: 1,
     leadMinutes: 120,
+    openMinuteOfDay: 600,
+    closeMinuteOfDay: 1200,
   };
 
   it('accepts a slot the grid offers', () => {

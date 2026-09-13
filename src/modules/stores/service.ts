@@ -26,7 +26,7 @@ import {
   type ServiceabilityInput,
   type ServiceabilityResult,
 } from './domain/index';
-import { slotGrid } from './domain/slots';
+import { assertOpeningHours, slotGrid } from './domain/slots';
 import * as repo from './repo';
 
 /** What this module owns and is allowed to depend on (§4). */
@@ -172,6 +172,9 @@ export interface StorefrontSettings {
   readonly isAcceptingOrders: boolean;
   readonly slotLengthMinutes: number;
   readonly slotCapacity: number;
+  /** Opening hours, minutes after local midnight — what the slot grid honours. */
+  readonly openMinuteOfDay: number;
+  readonly closeMinuteOfDay: number;
 }
 
 /**
@@ -197,6 +200,8 @@ export async function getStorefrontSettings(
     isAcceptingOrders: settings.isAcceptingOrders,
     slotLengthMinutes: settings.slotLengthMinutes,
     slotCapacity: settings.slotCapacity,
+    openMinuteOfDay: settings.openMinuteOfDay,
+    closeMinuteOfDay: settings.closeMinuteOfDay,
   };
 }
 
@@ -205,6 +210,8 @@ export interface SlotGrid {
   readonly timeZone: string;
   readonly slotLengthMinutes: number;
   readonly slotCapacity: number;
+  readonly openMinuteOfDay: number;
+  readonly closeMinuteOfDay: number;
   /** Every window a shopper may choose, in order. Empty when the shop is shut. */
   readonly starts: readonly Date[];
 }
@@ -238,6 +245,8 @@ export async function slotGridFor(
     timeZone: store.timezone,
     slotLengthMinutes: settings.slotLengthMinutes,
     slotCapacity: settings.slotCapacity,
+    openMinuteOfDay: settings.openMinuteOfDay,
+    closeMinuteOfDay: settings.closeMinuteOfDay,
   };
 
   // A shop that has paused orders offers no windows at all, rather than windows
@@ -250,6 +259,8 @@ export async function slotGridFor(
       from,
       slotLengthMinutes: settings.slotLengthMinutes,
       timeZone: store.timezone,
+      openMinuteOfDay: settings.openMinuteOfDay,
+      closeMinuteOfDay: settings.closeMinuteOfDay,
       ...(options.horizonDays === undefined ? {} : { horizonDays: options.horizonDays }),
       ...(options.leadMinutes === undefined ? {} : { leadMinutes: options.leadMinutes }),
     }),
@@ -298,6 +309,15 @@ export async function updateSettings(
   if (before === null) throw new NotFoundError('Store settings not found', { storeId });
 
   if (Object.keys(data).length === 0) return before;
+
+  // The hours and the slot length are one rule (`assertOpeningHours`, shared
+  // with the grid): judged on what the row will *be*, since an update may
+  // carry any one of the three and leave the others as they are.
+  assertOpeningHours(
+    data.openMinuteOfDay ?? before.openMinuteOfDay,
+    data.closeMinuteOfDay ?? before.closeMinuteOfDay,
+    data.slotLengthMinutes ?? before.slotLengthMinutes,
+  );
 
   return withTransaction(async (tx) => {
     const after = await repo.updateSettingsRow(tx, storeId, { ...data });

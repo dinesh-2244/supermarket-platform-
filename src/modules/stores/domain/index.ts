@@ -187,6 +187,8 @@ export interface EditableSettings {
   readonly minOrderPaise?: number;
   readonly slotLengthMinutes?: number;
   readonly slotCapacity?: number;
+  readonly openMinuteOfDay?: number;
+  readonly closeMinuteOfDay?: number;
   readonly priceVariancePercentBp?: number;
   readonly priceVarianceAbsCapPaise?: number;
   readonly isAcceptingOrders?: boolean;
@@ -209,6 +211,8 @@ export const EDITABLE_SETTINGS_FIELDS = [
   'minOrderPaise',
   'slotLengthMinutes',
   'slotCapacity',
+  'openMinuteOfDay',
+  'closeMinuteOfDay',
   'priceVariancePercentBp',
   'priceVarianceAbsCapPaise',
   'isAcceptingOrders',
@@ -294,6 +298,13 @@ export function assertEditableSettings(input: EditableSettings): void {
     assertSlotLength(input.slotLengthMinutes);
   }
   if (input.slotCapacity !== undefined) assertPositiveInt(input.slotCapacity, 'slotCapacity');
+  // Each bound alone: a whole minute inside the day. The pair — opening before
+  // closing, wide enough for a window — is checked against the *resulting*
+  // settings in the service, since an update may carry only one of them.
+  if (input.openMinuteOfDay !== undefined)
+    assertNonNegativeInt(input.openMinuteOfDay, 'openMinuteOfDay');
+  if (input.closeMinuteOfDay !== undefined)
+    assertNonNegativeInt(input.closeMinuteOfDay, 'closeMinuteOfDay');
 
   if (input.priceVariancePercentBp !== undefined) {
     assertNonNegativeInt(input.priceVariancePercentBp, 'priceVariancePercentBp');

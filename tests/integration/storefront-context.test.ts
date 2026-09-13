@@ -147,9 +147,11 @@ describe('P3-1 — what a storefront principal may read', () => {
 
     const settings = await getStorefrontSettings(principal, storeA);
     expect(Object.keys(settings).sort()).toEqual([
+      'closeMinuteOfDay',
       'deliveryFeePaise',
       'isAcceptingOrders',
       'minOrderPaise',
+      'openMinuteOfDay',
       'slotCapacity',
       'slotLengthMinutes',
       'storeId',

@@ -129,12 +129,57 @@ export function assertSlotLength(slotLengthMinutes: number): void {
   }
 }
 
+/**
+ * Opening hours as minutes after local midnight: `open ≤ start` and
+ * `start + slotLength ≤ close` for every window offered. Whole minutes, inside
+ * one day, and wide enough to hold at least one window — a store whose hours
+ * fit no slot would offer nothing every day and never say why.
+ */
+export function assertOpeningHours(
+  openMinuteOfDay: number,
+  closeMinuteOfDay: number,
+  slotLengthMinutes: number,
+): void {
+  const whole = Number.isInteger(openMinuteOfDay) && Number.isInteger(closeMinuteOfDay);
+  if (
+    !whole ||
+    openMinuteOfDay < 0 ||
+    closeMinuteOfDay > MINUTES_PER_DAY ||
+    openMinuteOfDay >= closeMinuteOfDay
+  ) {
+    throw new ValidationError(
+      'Opening hours must be whole minutes after midnight, opening before closing, within one day',
+      { openMinuteOfDay, closeMinuteOfDay },
+    );
+  }
+  if (closeMinuteOfDay - openMinuteOfDay < slotLengthMinutes) {
+    throw new ValidationError(
+      'Opening hours must be long enough for at least one delivery window',
+      {
+        openMinuteOfDay,
+        closeMinuteOfDay,
+        slotLengthMinutes,
+      },
+    );
+  }
+}
+
 export interface SlotGridInput {
   readonly from: Date;
   readonly slotLengthMinutes: number;
   readonly timeZone: string;
+  /** Opening hours, minutes after local midnight (10:00 = 600). */
+  readonly openMinuteOfDay: number;
+  /** Closing time, minutes after local midnight (20:00 = 1200). */
+  readonly closeMinuteOfDay: number;
   readonly horizonDays?: number;
   readonly leadMinutes?: number;
+}
+
+/** Minutes past midnight on the store's wall clock at `instant`. */
+function wallClockMinute(instant: number, timeZone: string): number {
+  const local = instant + zoneOffsetMs(new Date(instant), timeZone);
+  return (((local % DAY_MS) + DAY_MS) % DAY_MS) / MINUTE_MS;
 }
 
 /**
@@ -145,8 +190,9 @@ export interface SlotGridInput {
  * slot that can be offered is exactly a slot that can be booked.
  */
 export function slotGrid(input: SlotGridInput): Date[] {
-  const { from, slotLengthMinutes, timeZone } = input;
+  const { from, slotLengthMinutes, timeZone, openMinuteOfDay, closeMinuteOfDay } = input;
   assertSlotLength(slotLengthMinutes);
+  assertOpeningHours(openMinuteOfDay, closeMinuteOfDay, slotLengthMinutes);
   if (Number.isNaN(from.getTime())) {
     throw new ValidationError('Slots need a valid instant to start from', {});
   }
@@ -179,8 +225,18 @@ export function slotGrid(input: SlotGridInput): Date[] {
   for (let day = firstDay; day <= latest;) {
     const nextDay = localDayStart(new Date(day + DAY_MS + 2 * 60 * MINUTE_MS), timeZone).getTime();
 
+    // The opening hours are a **filter over that anchored grid**, not a second
+    // anchor: a window is offered when it is one the full day would offer *and*
+    // it sits inside the hours on the store's wall clock. Judged on the wall
+    // clock (`zoneOffsetMs` at the window itself) rather than as minutes since
+    // the day's midnight, so that on a DST-shift day "10:00" is still 10:00 on
+    // the wall — the day is an hour shorter or longer, the door opens when the
+    // clock on it says so.
     for (let cursor = day; cursor < nextDay && cursor <= latest; cursor += step) {
-      if (cursor >= earliest) slots.push(new Date(cursor));
+      if (cursor < earliest) continue;
+      const opensAt = wallClockMinute(cursor, timeZone);
+      if (opensAt < openMinuteOfDay || opensAt + slotLengthMinutes > closeMinuteOfDay) continue;
+      slots.push(new Date(cursor));
     }
 
     // A DST-shortened day could otherwise fail to advance.

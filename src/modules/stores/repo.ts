@@ -48,6 +48,8 @@ export interface SettingsRecord {
   readonly minOrderPaise: number;
   readonly slotLengthMinutes: number;
   readonly slotCapacity: number;
+  readonly openMinuteOfDay: number;
+  readonly closeMinuteOfDay: number;
   readonly substitutionPolicy: 'NONE' | 'ASK_CUSTOMER' | 'STAFF_DISCRETION';
   readonly posMode: 'MANUAL' | 'ADAPTER';
   readonly priceVariancePercentBp: number;

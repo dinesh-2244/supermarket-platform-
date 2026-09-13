@@ -16,4 +16,5 @@ export const EXPECTED_MIGRATIONS: readonly string[] = [
   '20260909131451_order_slot_index',
   '20260911171708_totp_last_counter',
   '20260913060941_product_requests',
+  '20260914020000_store_opening_hours',
 ];

@@ -258,6 +258,8 @@ export async function updateSettingsAction(_state: ActionState, form: FormData):
       minOrderPaise: int(form, 'minOrderPaise'),
       slotLengthMinutes: int(form, 'slotLengthMinutes'),
       slotCapacity: int(form, 'slotCapacity'),
+      openMinuteOfDay: int(form, 'openMinuteOfDay'),
+      closeMinuteOfDay: int(form, 'closeMinuteOfDay'),
       priceVariancePercentBp: int(form, 'priceVariancePercentBp'),
       priceVarianceAbsCapPaise: int(form, 'priceVarianceAbsCapPaise'),
       lowStockThreshold: int(form, 'lowStockThreshold'),

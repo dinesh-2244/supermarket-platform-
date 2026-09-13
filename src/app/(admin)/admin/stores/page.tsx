@@ -5,6 +5,13 @@ import { createStoreAction, updateSettingsAction, updateStoreAction } from '../a
 import { ActionForm, Check, Field, Hidden, Select } from '../form';
 import { Card, Empty, PageHeading, StoreSwitcher, Table } from '../ui';
 
+/** 600 → "10:00", for the label beside a minutes-after-midnight field. */
+function clock(minuteOfDay: number): string {
+  const h = Math.floor(minuteOfDay / 60);
+  const m = minuteOfDay % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
 export const dynamic = 'force-dynamic';
 
 /**
@@ -148,6 +155,20 @@ export default async function StoresPage({
               name="slotCapacity"
               type="number"
               defaultValue={settings.slotCapacity}
+              width="w-full"
+            />
+            <Field
+              label={`Opens (minutes after midnight) — ${clock(settings.openMinuteOfDay)}`}
+              name="openMinuteOfDay"
+              type="number"
+              defaultValue={settings.openMinuteOfDay}
+              width="w-full"
+            />
+            <Field
+              label={`Closes (minutes after midnight) — ${clock(settings.closeMinuteOfDay)}`}
+              name="closeMinuteOfDay"
+              type="number"
+              defaultValue={settings.closeMinuteOfDay}
               width="w-full"
             />
             <Field
