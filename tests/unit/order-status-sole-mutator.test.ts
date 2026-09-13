@@ -56,6 +56,10 @@ function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) return sourceFiles(full);
+    // `module-boundaries.test.ts` writes and removes `__boundary_fixture__`
+    // files while it runs; in a parallel worker they can appear in this
+    // listing and be gone by the time they are read. They are not source.
+    if (entry.includes('__boundary_fixture__')) return [];
     return /\.tsx?$/.test(entry) ? [full] : [];
   });
 }

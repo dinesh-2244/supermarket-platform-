@@ -9,6 +9,7 @@
  */
 import {
   assertAuthorized,
+  AuthzError,
   ConflictError,
   getPrisma,
   NotFoundError,
@@ -21,19 +22,27 @@ import {
 import {
   addStockRestored,
   announceTransition,
+  computeVariance,
+  confirmRevisedAmount as confirmRevisedAmountOnOrder,
   listPickLines,
   lockOrder,
   lockPickLine,
+  queueForStore,
   setLineOutcome,
+  setPosBill,
   staffOrder,
   transition,
   type LockedOrderRow,
   type OrderStatus,
   type PickLineRow,
+  type QueueRow,
   type TransitionOutcome,
+  type VarianceResult,
 } from '../orders/index';
 import { applyMovement } from '../inventory/index';
 import { getListing } from '../pricing/index';
+import { getSettings } from '../stores/index';
+import { posBillingGatewayFor } from './pos/pos-billing-gateway';
 import {
   descriptor,
   restoreQuantity,
@@ -48,7 +57,7 @@ export function moduleDescriptor(): ModuleDescriptor {
   return descriptor;
 }
 
-export type { PickingQueueRow, PickTaskRow, PickTaskStatus } from './repo';
+export type { PickingQueueRow, PickTaskRow, PickTaskStatus, PosBillingHandoffRow } from './repo';
 
 /**
  * Lock the order and check the actor may drive it.
@@ -279,4 +288,115 @@ export async function pickingQueue(
 ): Promise<repo.PickingQueueRow[]> {
   assertAuthorized(actor, 'order:read', { type: 'Order', storeId });
   return repo.pickingQueue(getPrisma(), actor, storeId);
+}
+
+// ---------------------------------------------------------------------------
+// D2 — POS billing handoff (manual mode only)
+// ---------------------------------------------------------------------------
+
+export interface FinalBillFormInput {
+  readonly billNumber: string;
+  readonly finalTotalPaise: number;
+  readonly discrepancyNote?: string | null;
+}
+
+export interface BilledOrder {
+  readonly outcome: TransitionOutcome;
+  readonly handoff: repo.PosBillingHandoffRow;
+  /** What the store's threshold made of the bill — shown right after submit. */
+  readonly variance: VarianceResult;
+}
+
+/**
+ * Record the final POS bill for a `PICKED` order.
+ *
+ * The bill comes through the store's `PosBillingGateway` (ADR-0007) — in this
+ * phase always the manual one, a staff member typing in what the POS printed.
+ * Then, in one transaction: the `PosBillingHandoff` row, the order's POS
+ * fields, `priceVarianceFlagged` from `computeVariance` against the store's own
+ * thresholds, and the `BILLED_IN_POS` transition. This is the first time
+ * `posFinalTotalPaise` is ever set on a real order, which is what makes the
+ * `PACKED → OUT_FOR_DELIVERY` guard mean something.
+ */
+export async function recordFinalBill(
+  actor: Principal,
+  orderId: string,
+  input: FinalBillFormInput,
+): Promise<BilledOrder> {
+  if (actor.kind !== 'user') {
+    throw new AuthzError('You do not have permission to perform this action', {});
+  }
+  const billed = await withTransaction(async (tx) => {
+    const order = await lockForActor(tx, actor, orderId, ['PICKED']);
+    const settings = await getSettings(actor, order.storeId);
+    const gateway = posBillingGatewayFor(settings.posMode);
+    const bill = await gateway.recordFinalBill(orderId, {
+      billNumber: input.billNumber,
+      finalTotalPaise: input.finalTotalPaise,
+      billedByUserId: actor.userId,
+      discrepancyNote: input.discrepancyNote ?? null,
+    });
+    const variance = computeVariance({
+      estimatedTotalPaise: order.estimatedTotalPaise,
+      posFinalTotalPaise: bill.finalTotalPaise,
+      percentBp: settings.priceVariancePercentBp,
+      absCapPaise: settings.priceVarianceAbsCapPaise,
+    });
+
+    const handoff = await repo.insertHandoff(tx, {
+      orderId,
+      posBillNumber: bill.billNumber,
+      posFinalTotalPaise: bill.finalTotalPaise,
+      billedByUserId: bill.billedByUserId,
+      discrepancyNote: bill.discrepancyNote,
+    });
+    await setPosBill(tx, orderId, {
+      posBillNumber: bill.billNumber,
+      posFinalTotalPaise: bill.finalTotalPaise,
+      priceVarianceFlagged: variance.flagged,
+    });
+    const outcome = await transition(tx, orderId, 'BILLED_IN_POS', actor, bill.discrepancyNote);
+    await writeAuditLog(tx, {
+      principal: actor,
+      action: 'update',
+      entityType: 'Order',
+      entityId: orderId,
+      storeId: order.storeId,
+      before: { status: order.status, estimatedTotalPaise: order.estimatedTotalPaise },
+      after: {
+        status: 'BILLED_IN_POS',
+        posBillNumber: bill.billNumber,
+        posFinalTotalPaise: bill.finalTotalPaise,
+        variance,
+        posMode: gateway.mode,
+      },
+    });
+    return { outcome, handoff, variance };
+  });
+  announceTransition(billed.outcome, undefined, { priceVarianceFlagged: billed.variance.flagged });
+  return billed;
+}
+
+/**
+ * Confirm a revised amount with the customer — Phase 4's action, reachable
+ * from here so the billing screen has one surface. Manager-or-above; the
+ * rule lives in `orders`.
+ */
+export async function confirmRevisedAmount(actor: Principal, orderId: string): Promise<void> {
+  return confirmRevisedAmountOnOrder(actor, orderId);
+}
+
+/** The handoff recorded for an order, if any — for the detail screen. */
+export async function billingDetails(
+  actor: Principal,
+  orderId: string,
+): Promise<repo.PosBillingHandoffRow | null> {
+  const order = await staffOrder(actor, orderId);
+  if (order === null) return null;
+  return repo.findHandoff(getPrisma(), orderId);
+}
+
+/** The store's `PICKED` orders — waiting for their POS bill. */
+export async function billingQueue(actor: Principal, storeId: string): Promise<QueueRow[]> {
+  return queueForStore(actor, storeId, { statuses: ['PICKED'] });
 }
