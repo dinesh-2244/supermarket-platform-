@@ -282,8 +282,8 @@ export default async function ProductRequestsAdminPage({
       <Card
         title={
           filterStatus
-            ? `${String(requests.length)} request(s) (${filterStatus})`
-            : `${String(requests.length)} total request(s)`
+            ? `${String(counts.byStatus[filterStatus])} request(s) (${filterStatus})`
+            : `${String(counts.total)} total request(s)`
         }
         subtitle="Shopper requests organized by submission date."
       >

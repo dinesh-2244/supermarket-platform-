@@ -90,4 +90,16 @@ describe('Product Requests UI: Admin Status Styles and Transitions', () => {
     expect(pageSource).toContain('listProductRequests');
     expect(pageSource).toContain('getProductRequest');
   });
+
+  test('admin table title displays exact counts from productRequestCounts, not capped requests.length (AD9 invariant)', () => {
+    const adminDir = path.resolve(__dirname, '../../src/app/(admin)/admin/product-requests');
+    const pageSource = fs.readFileSync(path.join(adminDir, 'page.tsx'), 'utf-8');
+
+    // Title must use counts.byStatus or counts.total, never requests.length
+    expect(pageSource).toContain('counts.byStatus[filterStatus]');
+    expect(pageSource).toContain('counts.total');
+    expect(pageSource).not.toMatch(
+      /title\s*=\s*\{\s*filterStatus\s*\?\s*`\$\{String\(requests\.length\)\}/,
+    );
+  });
 });
