@@ -508,6 +508,107 @@ describe('Storefront copy integrity & manifest guard', () => {
    *   STOREFRONT_COPY_MANIFEST is either in STOREFRONT_COPY_MANIFEST or on an explicit,
    *   reviewed allowlist of functional/structural UI labels.
    */
+  const STOREFRONT_ALLOWED_LITERALS: Record<string, Set<string>> = {
+    'about/page.tsx': new Set([
+      '🌱',
+      'Dedicated Store Hub',
+      'Shop',
+      'Store →',
+      '⚡',
+      '🥦',
+      '🏷️',
+      '🛡️',
+      'Request Delivery to Your Society →',
+      'Browse Product Catalogue →',
+    ]),
+    'cart/page.tsx': new Set([
+      ', and is now priced there.',
+      '.',
+      'Add',
+      'Came with you:',
+      'Delivery',
+      'Estimated total',
+      'Explore fresh fruits, vegetables, dairy & daily staples from your community store.',
+      'Items in Basket',
+      'Minimum order',
+      'Not sold or not in stock there, so removed:',
+      'Only',
+      'Out of stock at your shop right now.',
+      'Price changed from',
+      'Proceed to checkout',
+      'Start shopping',
+      'Subtotal (',
+      'We had to take',
+      'Your basket is empty.',
+      'Your basket moved to',
+      'an item',
+      'available — reduce the quantity to continue.',
+      'each',
+      'item',
+      'item(s))',
+      'items',
+      'more to reach the minimum order for your area.',
+      'out:',
+      'some items',
+      'title="Change delivery area"',
+      'title="Total"',
+      'title="Your basket"',
+      'to',
+      '·',
+      '— your basket uses the new price.',
+    ]),
+    'community-selector.tsx': new Set([
+      'Local Store Hub',
+      'Open',
+      'Paused',
+      'Primary Hub:',
+      'View all',
+      'serviceable sectors / blocks',
+      '⚡',
+      '🏪',
+      '📍',
+    ]),
+    'layout.tsx': new Set([
+      'About',
+      'About Munder Fresh',
+      'Account',
+      'Account & Past Orders',
+      'Basket',
+      'Browse All Products',
+      'Choose ▼',
+      'Delivering to:',
+      'Fresh',
+      'M',
+      'Munder',
+      'Munder Fresh Supermarket Platform. All rights reserved.',
+      'Search',
+      'Select Community',
+      'Shop',
+      'Shopping & Orders',
+      'Sign in',
+      'Your Basket',
+      'title="Click to switch community or store"',
+      '©',
+      '▼',
+      '📍',
+    ]),
+    'mobile-cart-bar.tsx': new Set(['View Basket', 'added', 'item', 'items', '→']),
+    'page.tsx': new Set([
+      'Browse all',
+      'Explore the Full Catalogue',
+      'Learn More About Us →',
+      'Open Full Shop Catalogue →',
+      'Select Community →',
+      'This shop has nothing listed yet.',
+      'products across categories with search, filters, and complete listings in our Shop.',
+      '⚡',
+      '🏠',
+      '🛡️',
+      '🥦',
+    ]),
+    'shop/page.tsx': new Set(['This store has no items listed currently.']),
+  };
+
   function extractJsxLiterals(filePath: string, sourceOverride?: string): string[] {
     const content = sourceOverride ?? fs.readFileSync(filePath, 'utf-8');
     const sf = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
@@ -551,6 +652,17 @@ describe('Storefront copy integrity & manifest guard', () => {
       return null;
     }
 
+    const APPROVED_FORMATTERS = new Set([
+      'formatActiveWelcomeTitle',
+      'formatActiveWelcomeTerms',
+      'formatShopSubtitle',
+      'formatHubCardDescription',
+      'formatCommunityDeliveryNote',
+      'formatCommunitySubtitle',
+      'formatContactHubDescription',
+      'formatDeliveryFee',
+    ]);
+
     function isManifestReference(expr: ts.Expression): boolean {
       const unwrapped = unwrapStaticExpression(expr);
       if (ts.isPropertyAccessExpression(unwrapped)) {
@@ -564,21 +676,47 @@ describe('Storefront copy integrity & manifest guard', () => {
       }
       if (ts.isCallExpression(unwrapped)) {
         const fn = unwrapped.expression;
-        if (ts.isIdentifier(fn)) {
+        if (ts.isIdentifier(fn) && APPROVED_FORMATTERS.has(fn.text)) {
           const name = fn.text;
-          if (
-            [
-              'formatActiveWelcomeTitle',
-              'formatActiveWelcomeTerms',
-              'formatShopSubtitle',
-              'formatHubCardDescription',
-              'formatCommunityDeliveryNote',
-              'formatCommunitySubtitle',
-              'formatContactHubDescription',
-            ].includes(name)
-          ) {
-            return true;
+          if (name !== 'formatCommunityDeliveryNote' && unwrapped.arguments.length === 0) {
+            return false;
           }
+          const relPath = (
+            path.isAbsolute(filePath) ? path.relative(storefrontDir, filePath) : filePath
+          ).replace(/\\/g, '/');
+          const allowed = STOREFRONT_ALLOWED_LITERALS[relPath] ?? new Set<string>();
+
+          for (const arg of unwrapped.arguments) {
+            if (!arg) return false;
+            const unwrappedArg = unwrapStaticExpression(arg);
+
+            // 1. Recursive manifest reference or approved formatter call
+            if (isManifestReference(unwrappedArg)) {
+              continue;
+            }
+
+            // 2. Static literal: must be on the file allowlist
+            const staticStr = resolveStaticString(unwrappedArg);
+            if (staticStr !== null) {
+              if (allowed.has(staticStr)) {
+                continue;
+              }
+              return false;
+            }
+
+            // 3. Dynamic expression: recursively validate via inspectExpression
+            const res = inspectExpression(unwrappedArg, false);
+            if (!res.sanctioned) {
+              return false;
+            }
+            if (res.extractedStrings.length > 0) {
+              const allAllowed = res.extractedStrings.every((s) => allowed.has(s));
+              if (!allAllowed) {
+                return false;
+              }
+            }
+          }
+          return true;
         }
       }
       return false;
@@ -1022,114 +1160,6 @@ describe('Storefront copy integrity & manifest guard', () => {
     return literals;
   }
 
-  /**
-   * Strict per-file allowlist for functional, structural, and navigation UI literals
-   * in storefront components that consume STOREFRONT_COPY_MANIFEST.
-   *
-   * Any marketing claim, delivery promise, or business guarantee MUST be declared
-   * in STOREFRONT_COPY_MANIFEST rather than inlined.
-   */
-  const STOREFRONT_ALLOWED_LITERALS: Record<string, Set<string>> = {
-    'about/page.tsx': new Set([
-      '🌱',
-      'Dedicated Store Hub',
-      'Shop',
-      'Store →',
-      '⚡',
-      '🥦',
-      '🏷️',
-      '🛡️',
-      'Request Delivery to Your Society →',
-      'Browse Product Catalogue →',
-    ]),
-    'cart/page.tsx': new Set([
-      ', and is now priced there.',
-      '.',
-      'Add',
-      'Came with you:',
-      'Delivery',
-      'Estimated total',
-      'Explore fresh fruits, vegetables, dairy & daily staples from your community store.',
-      'Items in Basket',
-      'Minimum order',
-      'Not sold or not in stock there, so removed:',
-      'Only',
-      'Out of stock at your shop right now.',
-      'Price changed from',
-      'Proceed to checkout',
-      'Start shopping',
-      'Subtotal (',
-      'We had to take',
-      'Your basket is empty.',
-      'Your basket moved to',
-      'an item',
-      'available — reduce the quantity to continue.',
-      'each',
-      'item',
-      'item(s))',
-      'items',
-      'more to reach the minimum order for your area.',
-      'out:',
-      'some items',
-      'title="Change delivery area"',
-      'title="Total"',
-      'title="Your basket"',
-      'to',
-      '·',
-      '— your basket uses the new price.',
-    ]),
-    'community-selector.tsx': new Set([
-      'Local Store Hub',
-      'Open',
-      'Paused',
-      'Primary Hub:',
-      'View all',
-      'serviceable sectors / blocks',
-      '⚡',
-      '🏪',
-      '📍',
-    ]),
-    'layout.tsx': new Set([
-      'About',
-      'About Munder Fresh',
-      'Account',
-      'Account & Past Orders',
-      'Basket',
-      'Browse All Products',
-      'Choose ▼',
-      'Delivering to:',
-      'Fresh',
-      'M',
-      'Munder',
-      'Munder Fresh Supermarket Platform. All rights reserved.',
-      'Search',
-      'Select Community',
-      'Shop',
-      'Shopping & Orders',
-      'Sign in',
-      'Your Basket',
-      'title="Click to switch community or store"',
-      '©',
-      '▼',
-      '📍',
-    ]),
-    'mobile-cart-bar.tsx': new Set(['View Basket', 'added', 'item', 'items', '→']),
-    'page.tsx': new Set([
-      'Browse all',
-      'Explore the Full Catalogue',
-      'Learn More About Us →',
-      'Open Full Shop Catalogue →',
-      'Select Community →',
-      'This shop has nothing listed yet.',
-      'products across categories with search, filters, and complete listings in our Shop.',
-      '⚡',
-      '🏠',
-      '🛡️',
-      '🥦',
-    ]),
-    'shop/page.tsx': new Set(['This store has no items listed currently.']),
-  };
-
   test('all storefront components importing STOREFRONT_COPY_MANIFEST strictly forbid unauthorized inline literals via dynamic AST scan', () => {
     // Dynamically discover every .tsx file under src/app/(storefront) that imports STOREFRONT_COPY_MANIFEST
     const manifestConsumerFiles = storefrontFiles.filter((filePath) => {
@@ -1359,5 +1389,77 @@ export default async function ShopPage`,
     const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
     const unauthorized = literals.filter((lit) => !allowed.has(lit));
     expect(unauthorized).toContain('Every order includes a complimentary gift.');
+  });
+
+  test('Oscar bypass probe rejection: isManifestReference trusts formatter callee name without argument inspection (.join delimiter) (Round 17)', () => {
+    // Oscar Round 17 probe:
+    // Approved formatter formatShopSubtitle('Every order includes a complimentary gift.', '')
+    // passed as .join() delimiter to sanctioned manifest references.
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const shopSource = fs.readFileSync(shopPath, 'utf-8');
+
+    const probeSource = shopSource.replace(
+      '</Card>',
+      `<p>
+        {[STOREFRONT_COPY_MANIFEST.shop.pausedNotice, STOREFRONT_COPY_MANIFEST.shop.pausedNotice].join(
+          formatShopSubtitle('Every order includes a complimentary gift.', ''),
+        )}
+      </p></Card>`,
+    );
+
+    const literals = extractJsxLiterals(shopPath, probeSource);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+    expect(unauthorized).toContain('Every order includes a complimentary gift.');
+  });
+
+  test('Oscar bypass probe rejection: isManifestReference rejects uninspected formatter arguments in direct JSX rendering (Round 17)', () => {
+    // Direct JSX child rendering of approved formatter with unauthorized copy argument.
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const shopSource = fs.readFileSync(shopPath, 'utf-8');
+
+    const probeSource = shopSource.replace(
+      '</Card>',
+      `<p>{formatShopSubtitle('Every order includes a complimentary gift.', '')}</p></Card>`,
+    );
+
+    const literals = extractJsxLiterals(shopPath, probeSource);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+    expect(unauthorized).toContain('Every order includes a complimentary gift.');
+  });
+
+  test('Oscar bypass probe rejection: isManifestReference rejects uninspected formatter arguments in .join() receiver elements (Round 17)', () => {
+    // Approved formatter with unauthorized copy argument inside .join() receiver array.
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const shopSource = fs.readFileSync(shopPath, 'utf-8');
+
+    const probeSource = shopSource.replace(
+      '</Card>',
+      `<p>{[formatShopSubtitle('Every order includes a complimentary gift.', '')].join('')}</p></Card>`,
+    );
+
+    const literals = extractJsxLiterals(shopPath, probeSource);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+    expect(unauthorized).toContain('Every order includes a complimentary gift.');
+  });
+
+  test('Oscar bypass probe rejection: isManifestReference rejects uninspected formatter arguments in claim attributes (Round 17)', () => {
+    // Approved formatter with unauthorized copy argument passed to claim-bearing JSX attribute.
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const shopSource = fs.readFileSync(shopPath, 'utf-8');
+
+    const probeSource = shopSource.replace(
+      'title={`All Products (${String(shop.total)} available)`}',
+      `title="All Products" subtitle={formatShopSubtitle('Every order includes a complimentary gift.', '')}`,
+    );
+
+    const literals = extractJsxLiterals(shopPath, probeSource);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+    expect(unauthorized.some((u) => u.includes('Every order includes a complimentary gift.'))).toBe(
+      true,
+    );
   });
 });
