@@ -119,6 +119,34 @@ describe('M1: Strict money parsing for pricing actions', () => {
         }),
       );
     });
+
+    it('rejects ambiguous submission when BOTH mrp and mrpPaise are provided', async () => {
+      const form = new FormData();
+      form.set('storeId', 'store-1');
+      form.set('productId', 'prod-1');
+      form.set('mrp', '150.50');
+      form.set('mrpPaise', '15050');
+      form.set('sellingPrice', '140.25');
+
+      const result = await setPriceAction(undefined, form);
+      expect(result.startsWith('!')).toBe(true);
+      expect(result).toMatch(/Cannot specify both mrp .* and mrpPaise/i);
+      expect(pricing.setPrice).not.toHaveBeenCalled();
+    });
+
+    it('rejects ambiguous submission when BOTH sellingPrice and sellingPricePaise are provided', async () => {
+      const form = new FormData();
+      form.set('storeId', 'store-1');
+      form.set('productId', 'prod-1');
+      form.set('mrp', '150.50');
+      form.set('sellingPrice', '140.25');
+      form.set('sellingPricePaise', '14025');
+
+      const result = await setPriceAction(undefined, form);
+      expect(result.startsWith('!')).toBe(true);
+      expect(result).toMatch(/Cannot specify both sellingPrice .* and sellingPricePaise/i);
+      expect(pricing.setPrice).not.toHaveBeenCalled();
+    });
   });
 });
 
