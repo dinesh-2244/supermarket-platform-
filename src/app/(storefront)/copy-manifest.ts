@@ -76,7 +76,7 @@ export const STOREFRONT_COPY_MANIFEST = {
       badge: 'The Munder Fresh Promise',
       title: 'Dependable Hyperlocal Service for Quarters Families',
       description:
-        'We partner directly with your residential quarters to fulfill orders from dedicated local hubs. Enjoy free doorstep delivery on orders meeting the minimum order, fulfilled daily from 10:00 AM to 8:00 PM as early as operationally possible.',
+        'We serve your residential quarters directly from dedicated local hubs. Enjoy free doorstep delivery on orders meeting the minimum order, fulfilled daily from 10:00 AM to 8:00 PM as early as operationally possible.',
     },
   },
   shop: {
@@ -140,7 +140,7 @@ export const STOREFRONT_COPY_MANIFEST = {
     serviceBoundary: {
       title: 'Living Outside Our Current Quarters Communities?',
       description:
-        'Because we operate dedicated store hubs paired specifically with partner residential communities, we only accept orders from addresses within our serviceable zones.',
+        'Because we operate dedicated store hubs serving specific residential communities, we only accept orders from addresses within our serviceable zones.',
     },
   },
   contact: {
@@ -165,8 +165,7 @@ export const STOREFRONT_COPY_MANIFEST = {
     communityHubs: {
       badge: 'Community Store Hubs',
       title: 'Our Dedicated Quarters Hubs',
-      description:
-        'Munder Fresh operates dedicated store hubs paired directly with our partner Navy Quarters communities.',
+      description: 'Munder Fresh operates dedicated store hubs serving Navy Quarters communities.',
       hubCardTemplate:
         'Dedicated store hub serving {hubName}. Contact channels and operating hours will be listed here once assigned.',
     },
