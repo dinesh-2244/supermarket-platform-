@@ -67,7 +67,7 @@ export default async function StorefrontHome({
         {/* Community Selector (D2) */}
         <CommunitySelector
           title="Select Your Community to Start Shopping"
-          subtitle="Choose your residential community to see accurate local stock, today's fresh pricing, and booking slots."
+          subtitle="Choose your residential community to see accurate local stock, current store pricing, and booking slots."
           showAreaSublist={false}
         />
 
@@ -109,7 +109,7 @@ export default async function StorefrontHome({
               Hyperlocal Grocery Built for Residential Communities
             </h2>
             <p className="mt-2 text-xs sm:text-sm text-slate-600 leading-relaxed">
-              We operate dedicated mini-hubs for partner residential societies. Learn how our
+              We operate dedicated store hubs for partner residential societies. Learn how our
               two-community model delivers scheduled morning and evening slots.
             </p>
           </div>
@@ -266,8 +266,8 @@ export default async function StorefrontHome({
             </h2>
             <p className="mt-2 text-xs sm:text-sm text-slate-600 leading-relaxed">
               We partner directly with residential societies to fulfill orders from dedicated local
-              hubs. Scheduled slots mean predictable arrivals, and live store inventory means what
-              you see in the catalogue reflects what's actually on the shelf.
+              hubs. Choose a scheduled delivery window that fits your day, with catalogue listings
+              and prices scoped to your community's store-recorded availability.
             </p>
           </div>
           <Link

@@ -299,7 +299,7 @@ export default async function StorefrontLayout({
 
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                Quality Guarantee
+                Store Commitments
               </h3>
               <p className="mt-3 text-xs text-slate-500 leading-relaxed">
                 Prices and availability are verified from your community&apos;s dedicated store.

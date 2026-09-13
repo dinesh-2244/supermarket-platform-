@@ -110,8 +110,8 @@ export async function getCommunityCards(): Promise<readonly CommunityCardData[]>
       : null;
 
     const deliveryNote = serviceability?.servable
-      ? `Scheduled Slots · Fresh Daily · Min Order ${formatRupees(serviceability.minOrderPaise)}`
-      : 'Scheduled Slots · Fresh Daily';
+      ? `Scheduled Slots · Dedicated Hub · Min Order ${formatRupees(serviceability.minOrderPaise)}`
+      : 'Scheduled Slots · Dedicated Hub';
 
     cards.push({
       id: config.id,

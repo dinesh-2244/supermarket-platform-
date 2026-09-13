@@ -27,9 +27,9 @@ export default function AboutPage(): React.ReactElement {
             Dedicated Grocery for Residential Communities
           </h1>
           <p className="mt-3 text-sm sm:text-base text-emerald-100 leading-relaxed">
-            Munder Fresh was built to solve a simple problem: residential communities need fresh,
-            reliable daily groceries delivered in predictable time windows, with stock and pricing
-            shown straight from their community's dedicated store — not a distant dark store.
+            Munder Fresh was built to serve residential communities with daily groceries delivered
+            in scheduled time windows, with stock and pricing scoped directly to each
+            community&apos;s dedicated store hub.
           </p>
         </div>
         <div className="absolute -right-8 -bottom-8 opacity-15 pointer-events-none text-9xl">
@@ -47,9 +47,8 @@ export default function AboutPage(): React.ReactElement {
             The Two-Community Hub System
           </h2>
           <p className="mt-3 text-sm text-slate-600 leading-relaxed">
-            Unlike city-wide grocery apps that try to service hundreds of square kilometers from
-            sprawling regional warehouses, Munder Fresh pairs dedicated community store hubs
-            directly with gated residential societies.
+            Munder Fresh pairs dedicated community store hubs directly with residential societies,
+            organizing inventory and delivery scheduling around local service areas.
           </p>
         </div>
 
@@ -71,8 +70,8 @@ export default function AboutPage(): React.ReactElement {
                 <h3 className="mt-3 text-lg font-bold text-slate-900">{community.name}</h3>
                 <p className="mt-1 text-xs text-slate-600 leading-relaxed">
                   Dedicated local inventory managed by {community.hubName}. Items in the catalogue
-                  are drawn from this community hub's own inventory, not a distant warehouse —
-                  availability updates as stock does.
+                  are drawn from this community hub&apos;s store records, updating with local stock
+                  levels.
                 </p>
               </div>
               <div className="mt-5 pt-4 border-t border-emerald-200/60">
@@ -104,8 +103,8 @@ export default function AboutPage(): React.ReactElement {
             <span className="text-2xl">⚡</span>
             <h3 className="mt-3 text-sm font-bold text-slate-900">Scheduled Slots</h3>
             <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-              We deliver in predictable, scheduled one-hour time windows so you know when your order
-              is expected to arrive.
+              We deliver in scheduled one-hour time windows so you know when your order is expected
+              to arrive.
             </p>
           </div>
 
@@ -113,8 +112,8 @@ export default function AboutPage(): React.ReactElement {
             <span className="text-2xl">🥦</span>
             <h3 className="mt-3 text-sm font-bold text-slate-900">One Hub, One Community</h3>
             <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-              Each community is served by a single dedicated store hub, not a shared regional
-              warehouse, so the catalogue reflects that hub's own stock, not a pooled estimate.
+              Each community is served by a dedicated store hub, so the catalogue reflects that
+              hub&apos;s own store-recorded availability and pricing.
             </p>
           </div>
 
@@ -145,8 +144,8 @@ export default function AboutPage(): React.ReactElement {
           Living Outside Our Current Communities?
         </h2>
         <p className="mt-2 text-sm text-slate-600 leading-relaxed">
-          Because we operate physical mini-hubs specifically dedicated to our residential partners,
-          we only accept orders from addresses within our serviceable zones.
+          Because we operate dedicated store hubs paired with specific residential partners, we only
+          accept orders from addresses within our serviceable zones.
         </p>
         <div className="mt-4 flex flex-wrap gap-4">
           <Link

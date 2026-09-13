@@ -245,7 +245,7 @@ export default async function CartPage(): Promise<React.ReactElement> {
                     d="M5 13l4 4L19 7"
                   />
                 </svg>
-                <span>Fresh daily quality guaranteed</span>
+                <span>Store-verified prices and availability</span>
               </div>
               <div className="flex items-center gap-2">
                 <svg

@@ -100,67 +100,236 @@ describe('Storefront copy integrity (M1 regression guard)', () => {
   });
 
   /**
-   * PR #46 (About/Home) went through three review rounds because each fix only
-   * addressed the exact phrase reported, not the underlying pattern — an
-   * absolute guarantee, or an operational claim (sourcing, stock presence, no
-   * markups, no cancellations) with nothing in the codebase backing it. These
-   * patterns lock in every phrase found across all three rounds so the same
-   * class of claim can't silently reappear on a future storefront page.
+   * PR #46 (About/Home) went through four review rounds because early fixes only
+   * addressed specific reported phrases rather than their underlying semantic families:
+   * 1. Predictable delivery outcomes & timing guarantees
+   * 2. Physical shelf / on-shelf stock & absolute fulfillment guarantees
+   * 3. Sourcing, provenance, & daily freshness / quality guarantees
+   * 4. Dark-store & regional warehouse topology claims
+   * 5. Unbacked pricing & cancellation policies
+   *
+   * These patterns lock in every semantic family so variations, singular/plural forms,
+   * or wording changes cannot bypass the regression suite.
    */
-  test('no storefront file contains unbacked sourcing/provenance claims', () => {
-    const patterns = [
-      /vetted local produc/i,
-      /daily fresh sourcing/i,
-      /sourced every morning/i,
-      /morning fresh sourcing/i,
-      /\bfarm[- ]fresh\b/i,
-      /\bpicked fresh\b/i,
-      /\blocal farm\b/i,
-      /\bmorning fresh harvest\b/i,
+  const SPEED_AND_PREDICTABLE_DELIVERY_PATTERNS = [
+    /\b\d+\s*-(?:hour|hr|minute|min)\s+(?:delivery|slot\s+delivery\s+guarantee)/i,
+    /\b1-hr\s+delivery\b/i,
+    /\b1-hour\s+delivery\b/i,
+    /\bpredictable(?:\s+\w+)?\s*(?:arrival|delivery|time|window|schedule|outcome)s?\b/i,
+    /\bpredictable\s+arrivals?\b/i,
+    /\bpredictable\s+time\s+windows?\b/i,
+    /\bno\s+lingering\s+waits\b/i,
+  ];
+
+  const PHYSICAL_ON_SHELF_STOCK_PATTERNS = [
+    /\b(?:actually\s+|currently\s+)?on\s+the\s+shelf\b/i,
+    /\bactual\s+physical\s+stock\b/i,
+    /\bphysical\s+(?:stock|shelf|shelves)\b/i,
+    /\bshelf\s+stock\b/i,
+    /\bstocked\s+directly\b/i,
+    /\bno\s+missing\s+items\b/i,
+    /\bnever\s+take\s+orders\s+we\s+cannot\s+fulfill\b/i,
+    /\bzero\s+unannounced\s+substitutions?\b/i,
+    /\bensur\w*\s+(?:stock\s+accuracy|timely\s+fulfillment)\b/i,
+  ];
+
+  const SOURCING_AND_DAILY_QUALITY_PATTERNS = [
+    /\bfresh\s+daily\b/i,
+    /\bdaily\s+fresh\b/i,
+    /\bquality\s+guarantee(?:d)?\b/i,
+    /\bguarantee(?:d)?\s+fresh\b/i,
+    /\bvetted\s+local\s+produc/i,
+    /\bdaily\s+fresh\s+sourcing/i,
+    /\bsourced\s+every\s+morning\b/i,
+    /\bmorning\s+fresh(?:\s+sourcing|\s+harvest)?\b/i,
+    /\bfarm[- ]fresh\b/i,
+    /\bpicked\s+fresh\b/i,
+    /\blocal\s+farm\b/i,
+  ];
+
+  const DARK_STORE_AND_WAREHOUSE_TOPOLOGY_PATTERNS = [
+    /\bdark\s*stores?\b/i,
+    /\b(?:sprawling\s+|shared\s+|distant\s+|regional\s+)?warehouses?\b/i,
+    /\bmini[- ]hubs?\b/i,
+  ];
+
+  const PRICING_AND_CANCELLATION_POLICY_PATTERNS = [
+    /\bsurprise\s+markups?\b/i,
+    /\bzero\s+markups?\b/i,
+    /\bcancellation\s+penalt(?:y|ies)\b/i,
+    /\bwholesale\s+prices?\b/i,
+  ];
+
+  const ALL_SEMANTIC_PATTERNS = [
+    ...SPEED_AND_PREDICTABLE_DELIVERY_PATTERNS,
+    ...PHYSICAL_ON_SHELF_STOCK_PATTERNS,
+    ...SOURCING_AND_DAILY_QUALITY_PATTERNS,
+    ...DARK_STORE_AND_WAREHOUSE_TOPOLOGY_PATTERNS,
+    ...PRICING_AND_CANCELLATION_POLICY_PATTERNS,
+  ];
+
+  test('semantic family patterns catch Oscar probe strings from pr46-c2-copy-guard-probe.log', () => {
+    const probeStrings = [
+      {
+        text: 'Scheduled slots mean predictable arrivals',
+        pattern: /\bpredictable\s+arrivals?\b/i,
+      },
+      {
+        text: "the catalogue reflects what's actually on the shelf",
+        pattern: /\b(?:actually\s+|currently\s+)?on\s+the\s+shelf\b/i,
+      },
+      { text: 'not a distant dark store', pattern: /\bdark\s*stores?\b/i },
+      { text: 'Fresh daily quality guaranteed', pattern: /\bfresh\s+daily\b/i },
+      { text: 'Scheduled Slots · Fresh Daily', pattern: /\bfresh\s+daily\b/i },
     ];
+
+    for (const { text, pattern } of probeStrings) {
+      expect(
+        pattern.test(text),
+        `Expected specific pattern (${pattern.source}) to match Oscar probe: "${text}"`,
+      ).toBe(true);
+
+      expect(
+        ALL_SEMANTIC_PATTERNS.some((p) => p.test(text)),
+        `Expected semantic family patterns to catch Oscar probe: "${text}"`,
+      ).toBe(true);
+    }
+  });
+
+  test('semantic family patterns catch representative variants across singular/plural and wording changes', () => {
+    const variants = [
+      // Predictable delivery
+      'predictable arrival',
+      'predictable arrivals',
+      'predictable time window',
+      'predictable time windows',
+      'predictable delivery slot',
+      'no lingering waits',
+      // Physical on-shelf stock
+      'on the shelf',
+      'actually on the shelf',
+      "what's actually on the shelf",
+      'items on the shelf',
+      'actual physical stock',
+      'physical shelf',
+      'physical shelves',
+      'physical stock',
+      'shelf stock',
+      'stocked directly',
+      'no missing items',
+      'never take orders we cannot fulfill',
+      'zero unannounced substitutions',
+      'zero unannounced substitution',
+      'ensures stock accuracy',
+      'ensuring timely fulfillment',
+      // Sourcing and daily quality
+      'Fresh daily',
+      'fresh daily',
+      'Fresh Daily',
+      'Daily fresh',
+      'daily fresh',
+      'Fresh daily quality guaranteed',
+      'quality guaranteed',
+      'quality guarantee',
+      'guaranteed fresh',
+      'farm-fresh',
+      'farm fresh',
+      'picked fresh',
+      'local farm',
+      'vetted local produce',
+      'sourced every morning',
+      'morning fresh harvest',
+      // Dark store / warehouse topology
+      'dark store',
+      'dark stores',
+      'not a distant dark store',
+      'no dark stores',
+      'regional warehouse',
+      'regional warehouses',
+      'sprawling regional warehouses',
+      'distant warehouse',
+      'shared regional warehouse',
+      'warehouse',
+      'warehouses',
+      'physical mini-hubs',
+      'mini-hub',
+      'mini-hubs',
+      // Pricing / cancellation
+      'surprise markup',
+      'surprise markups',
+      'zero markup',
+      'zero markups',
+      'cancellation penalty',
+      'cancellation penalties',
+      'wholesale price',
+      'wholesale prices',
+    ];
+
+    for (const variant of variants) {
+      expect(
+        ALL_SEMANTIC_PATTERNS.some((p) => p.test(variant)),
+        `Expected semantic patterns to catch variant: "${variant}"`,
+      ).toBe(true);
+    }
+  });
+
+  test('no storefront file contains speed or predictable delivery outcome promises', () => {
     for (const file of storefrontFiles) {
       const content = fs.readFileSync(file, 'utf-8');
       const relative = path.relative(process.cwd(), file);
-      for (const pattern of patterns) {
+      for (const pattern of SPEED_AND_PREDICTABLE_DELIVERY_PATTERNS) {
         expect(
           pattern.test(content),
-          `Found unbacked sourcing/provenance claim (${pattern.source}) in ${relative}`,
+          `Found predictable delivery / speed promise (${pattern.source}) in ${relative}`,
         ).toBe(false);
       }
     }
   });
 
-  test('no storefront file claims an absolute stock/fulfillment guarantee', () => {
-    const patterns = [
-      /\bno missing items\b/i,
-      /\bactual physical stock\b/i,
-      /\bno lingering waits\b/i,
-      /never take orders we cannot fulfill/i,
-      /\bzero\s+unannounced substitutions\b/i,
-      /ensur\w*\s+(?:stock accuracy|timely fulfillment)/i,
-    ];
+  test('no storefront file claims physical on-shelf stock or absolute fulfillment guarantees', () => {
     for (const file of storefrontFiles) {
       const content = fs.readFileSync(file, 'utf-8');
       const relative = path.relative(process.cwd(), file);
-      for (const pattern of patterns) {
+      for (const pattern of PHYSICAL_ON_SHELF_STOCK_PATTERNS) {
         expect(
           pattern.test(content),
-          `Found unbacked stock/fulfillment guarantee (${pattern.source}) in ${relative}`,
+          `Found physical stock / fulfillment guarantee (${pattern.source}) in ${relative}`,
         ).toBe(false);
       }
     }
   });
 
-  test('no storefront file claims a pricing/cancellation policy that does not exist', () => {
-    const patterns = [
-      /\bsurprise markups?\b/i,
-      /\bcancellation penalt(?:y|ies)\b/i,
-      /\bwholesale prices?\b/i,
-    ];
+  test('no storefront file contains unbacked sourcing, provenance, or daily quality guarantees', () => {
     for (const file of storefrontFiles) {
       const content = fs.readFileSync(file, 'utf-8');
       const relative = path.relative(process.cwd(), file);
-      for (const pattern of patterns) {
+      for (const pattern of SOURCING_AND_DAILY_QUALITY_PATTERNS) {
+        expect(
+          pattern.test(content),
+          `Found unbacked sourcing/quality claim (${pattern.source}) in ${relative}`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  test('no storefront file claims dark-store, regional warehouse, or mini-hub topology', () => {
+    for (const file of storefrontFiles) {
+      const content = fs.readFileSync(file, 'utf-8');
+      const relative = path.relative(process.cwd(), file);
+      for (const pattern of DARK_STORE_AND_WAREHOUSE_TOPOLOGY_PATTERNS) {
+        expect(
+          pattern.test(content),
+          `Found dark-store / warehouse topology claim (${pattern.source}) in ${relative}`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  test('no storefront file claims a pricing or cancellation policy that does not exist', () => {
+    for (const file of storefrontFiles) {
+      const content = fs.readFileSync(file, 'utf-8');
+      const relative = path.relative(process.cwd(), file);
+      for (const pattern of PRICING_AND_CANCELLATION_POLICY_PATTERNS) {
         expect(
           pattern.test(content),
           `Found unbacked pricing/cancellation-policy claim (${pattern.source}) in ${relative}`,
