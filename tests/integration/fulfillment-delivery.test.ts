@@ -3,6 +3,7 @@ import {
   clearEventHandlersForTests,
   getPrisma,
   on,
+  withTransaction,
   type DomainEventName,
   type Principal,
 } from '@/modules/platform';
@@ -20,7 +21,15 @@ import {
   recordLinePick,
   retryDelivery,
 } from '@/modules/fulfillment';
-import { createCustomer, createStoreWithProduct, createUser } from '../factories/index';
+import { applyMovement } from '@/modules/inventory';
+import {
+  createCustomer,
+  createInventoryItem,
+  createProduct,
+  createStoreProduct,
+  createStoreWithProduct,
+  createUser,
+} from '../factories/index';
 import { placeOrder, walkTo } from './helpers/fulfillment-walk';
 
 /**
@@ -36,6 +45,7 @@ const prisma = getPrisma();
 let storeA: string;
 let storeB: string;
 let productA: string;
+let productA2: string;
 let productB: string;
 let customerId: string;
 let managerA: Principal;
@@ -49,6 +59,9 @@ beforeAll(async () => {
   storeA = a.store.id;
   productA = a.product.id;
   categoryIds.push(a.product.categoryId);
+  productA2 = (await createProduct(prisma, { categoryId: a.product.categoryId })).id;
+  await createStoreProduct(prisma, storeA, productA2, { sellingPricePaise: 5_000 });
+  await createInventoryItem(prisma, storeA, productA2, { websiteStock: 50 });
   const b = await createStoreWithProduct(prisma, { websiteStock: 100 });
   storeB = b.store.id;
   productB = b.product.id;
@@ -70,7 +83,7 @@ afterAll(async () => {
   await prisma.stockLedger.deleteMany({ where: { storeId: { in: stores } } });
   await prisma.inventoryItem.deleteMany({ where: { storeId: { in: stores } } });
   await prisma.storeProduct.deleteMany({ where: { storeId: { in: stores } } });
-  await prisma.product.deleteMany({ where: { id: { in: [productA, productB] } } });
+  await prisma.product.deleteMany({ where: { id: { in: [productA, productA2, productB] } } });
   await prisma.category.deleteMany({ where: { id: { in: categoryIds } } });
   await prisma.storeSettings.deleteMany({ where: { storeId: { in: stores } } });
   await prisma.store.deleteMany({ where: { id: { in: stores } } });
@@ -366,6 +379,67 @@ describe('failed, retried, given up', () => {
     expect(
       (await prisma.orderLine.findFirstOrThrow({ where: { orderId: id } })).stockRestoredQty,
     ).toBe(3);
+  });
+
+  it('closing undelivered puts the substitute back too — what the ledger says is still out', async () => {
+    // Order 3 of A; the picker substitutes 2 of A2. Picking restored all 3 of
+    // A (none left the shelf) and took 2 of A2. The undelivered close must
+    // give those 2 back — derived from the ledger, not from qtyPicked, so a
+    // unit that already came back (a manual return against the same line)
+    // is not credited twice.
+    const beforeA = await stockOf(storeA, productA);
+    const beforeA2 = await stockOf(storeA, productA2);
+    const id = await placeOrder(storeA, productA, customerId, 3);
+    await walkTo(staffA, id, 'PICKING');
+    const line = await prisma.orderLine.findFirstOrThrow({ where: { orderId: id } });
+    await recordLinePick(staffA, id, line.id, {
+      outcome: 'SUBSTITUTED',
+      qtyPicked: 2,
+      substituteProductId: productA2,
+    });
+    await completePicking(staffA, id);
+    const est = (await order(id)).estimatedTotalPaise;
+    await recordFinalBill(staffA, id, { billNumber: 'POS-S', finalTotalPaise: est });
+    await markPacked(staffA, id);
+    await dispatch(staffA, id);
+    expect(await stockOf(storeA, productA)).toBe(beforeA);
+    expect(await stockOf(storeA, productA2)).toBe(beforeA2 - 2);
+
+    // One unit already found its way back against this line (say, a manual
+    // return keyed the same way). Only the other one is still out.
+    await withTransaction((tx) =>
+      applyMovement(tx, managerA, {
+        storeId: storeA,
+        productId: productA2,
+        delta: 1,
+        reason: 'MANUAL_ADJUST',
+        refType: 'Order',
+        refId: id,
+        note: `substitute on line ${line.id}`,
+      }),
+    );
+    expect(await stockOf(storeA, productA2)).toBe(beforeA2 - 1);
+
+    await recordDeliveryFailed(staffA, id, { failureReason: 'Refused' });
+    await closeUndelivered(staffA, id, 'Refused at the door');
+    expect(await stockOf(storeA, productA)).toBe(beforeA);
+    expect(await stockOf(storeA, productA2)).toBe(beforeA2);
+    const back = await prisma.stockLedger.findFirst({
+      where: {
+        storeId: storeA,
+        productId: productA2,
+        refId: id,
+        reason: 'PICK_SHORT_RESTORE',
+      },
+    });
+    expect(back).toMatchObject({ delta: 1, balanceAfter: beforeA2 });
+    const audit = await prisma.auditLog.findFirstOrThrow({
+      where: { entityType: 'Order', entityId: id, action: 'update' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect((audit.afterJson as { restored: unknown[] }).restored).toEqual([
+      { productId: productA2, qty: 1, balanceAfter: beforeA2, substituteForLineId: line.id },
+    ]);
   });
 
   it('refuses each outcome from the wrong state', async () => {

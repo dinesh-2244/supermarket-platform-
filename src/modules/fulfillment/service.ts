@@ -40,7 +40,7 @@ import {
   type TransitionOutcome,
   type VarianceResult,
 } from '../orders/index';
-import { applyMovement } from '../inventory/index';
+import { applyMovement, outstandingFor } from '../inventory/index';
 import { principalForUserId } from '../identity/index';
 import { getListing } from '../pricing/index';
 import { getSettings } from '../stores/index';
@@ -296,6 +296,26 @@ export async function recordLinePick(
 }
 
 /**
+ * The ledger key under which a line's substitute units are taken and given
+ * back: every row for (store, substitute, this order, this line) carries it,
+ * so the sum of their deltas is what is still out.
+ */
+function substituteLedgerRef(
+  storeId: string,
+  productId: string,
+  orderId: string,
+  lineId: string,
+): { storeId: string; productId: string; refType: 'Order'; refId: string; note: string } {
+  return {
+    storeId,
+    productId,
+    refType: 'Order',
+    refId: orderId,
+    note: `substitute on line ${lineId}`,
+  };
+}
+
+/**
  * Commit `qty` of the substitute to the order: its `websiteStock` drops under
  * the inventory row lock, with a ledger row against the order. There is no
  * dedicated ledger reason for a substitution and Phase 5 adds no schema, so it
@@ -313,13 +333,9 @@ async function takeSubstitute(
 ): Promise<number> {
   try {
     const taken = await applyMovement(tx, actor, {
-      storeId,
-      productId,
+      ...substituteLedgerRef(storeId, productId, ref.orderId, ref.lineId),
       delta: -qty,
       reason: 'ORDER_PLACED',
-      refType: 'Order',
-      refId: ref.orderId,
-      note: `substitute on line ${ref.lineId}`,
     });
     return taken.balanceAfter;
   } catch (error) {
@@ -687,8 +703,14 @@ export async function closeUndelivered(
     const order = await lockForActor(tx, actor, orderId, ['DELIVERY_FAILED']);
     const moved = await transition(tx, orderId, 'CLOSED_UNDELIVERED', actor, why);
 
-    const restored: { productId: string; qty: number; balanceAfter: number }[] = [];
-    for (const line of await listPickLines(tx, orderId)) {
+    const restored: {
+      productId: string;
+      qty: number;
+      balanceAfter: number;
+      substituteForLineId?: string;
+    }[] = [];
+    const lines = await listPickLines(tx, orderId);
+    for (const line of lines) {
       const outstanding = restoreQuantity({
         qtyOrdered: line.qtyOrdered,
         qtyPicked: 0,
@@ -709,6 +731,30 @@ export async function closeUndelivered(
         productId: line.productId,
         qty: outstanding,
         balanceAfter: movement.balanceAfter,
+      });
+    }
+    // A substituted line committed units of *another* product to this order
+    // (`recordLinePick` took them under the key below). `stockRestoredQty`
+    // counts the ordered product only and Phase 5 adds no column, so what is
+    // still out is read from the ledger itself — the rows under that key —
+    // which is also what makes this safe against a unit that already came
+    // back. (Decision 2026-09-14: the cancel path in `orders` does not do
+    // this yet; Phase 6 backlog.)
+    for (const line of lines) {
+      if (line.substituteProductId === null) continue;
+      const ref = substituteLedgerRef(order.storeId, line.substituteProductId, orderId, line.id);
+      const stillOut = await outstandingFor(tx, ref);
+      if (stillOut === 0) continue;
+      const movement = await applyMovement(tx, actor, {
+        ...ref,
+        delta: stillOut,
+        reason: 'PICK_SHORT_RESTORE',
+      });
+      restored.push({
+        productId: line.substituteProductId,
+        qty: stillOut,
+        balanceAfter: movement.balanceAfter,
+        substituteForLineId: line.id,
       });
     }
 

@@ -677,6 +677,12 @@ export async function cancelByStore(
   // that governs the rest of the lifecycle.
   await transition(tx, orderId, 'CANCELLED_BY_STORE', actor, note);
 
+  // KNOWN GAP (Phase 6 backlog, decision 2026-09-14): this restores the
+  // *ordered* product only. A line recorded as SUBSTITUTED during picking
+  // committed units of `substituteProductId` to the order as well, and a
+  // cancellation after that point does not give them back. The undelivered
+  // close in `fulfillment` does (from the ledger); this Phase 4 path is
+  // frozen and will be aligned when Phase 6 reopens it.
   const lines = await repo.listLines(tx, orderId);
   const restored: { productId: string; qty: number; balanceAfter: number }[] = [];
   for (const line of lines) {
