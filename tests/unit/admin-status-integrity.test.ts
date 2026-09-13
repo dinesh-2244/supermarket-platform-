@@ -131,7 +131,7 @@ describe('navigationFor role access and information architecture (R2 / M4 regres
     ]);
   });
 
-  it('returns exactly 13 navigation items for STORE_MANAGER', () => {
+  it('returns exactly 14 navigation items for STORE_MANAGER', () => {
     const items = navigationFor('STORE_MANAGER');
     expect(items).toEqual([
       { href: '/admin', label: 'Overview' },
@@ -147,10 +147,11 @@ describe('navigationFor role access and information architecture (R2 / M4 regres
       { href: '/admin/users', label: 'Users' },
       { href: '/admin/audit', label: 'Audit log' },
       { href: '/admin/reports', label: 'Reports & KPIs' },
+      { href: '/admin/product-requests', label: 'Product requests' },
     ]);
   });
 
-  it('returns exactly 14 navigation items for SUPER_ADMIN', () => {
+  it('returns exactly 15 navigation items for SUPER_ADMIN', () => {
     const items = navigationFor('SUPER_ADMIN');
     expect(items).toEqual([
       { href: '/admin', label: 'Overview' },
@@ -166,6 +167,7 @@ describe('navigationFor role access and information architecture (R2 / M4 regres
       { href: '/admin/users', label: 'Users' },
       { href: '/admin/audit', label: 'Audit log' },
       { href: '/admin/reports', label: 'Reports & KPIs' },
+      { href: '/admin/product-requests', label: 'Product requests' },
       { href: '/admin/categories', label: 'Categories' },
     ]);
   });
