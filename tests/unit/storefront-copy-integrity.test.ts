@@ -817,7 +817,41 @@ describe('Storefront copy integrity & manifest guard', () => {
         const fn = unwrapped.expression;
         const argStrings: string[] = [];
         if (ts.isPropertyAccessExpression(fn) && fn.name.text === 'join') {
-          // .join delimiter is sanctioned formatting
+          // .join delimiter is sanctioned formatting, but inspect the receiver
+          const receiver = unwrapStaticExpression(fn.expression);
+          if (ts.isArrayLiteralExpression(receiver)) {
+            const elemStrings: string[] = [];
+            let allSanctioned = true;
+            for (const elem of receiver.elements) {
+              if (ts.isSpreadElement(elem)) {
+                allSanctioned = false;
+                elemStrings.push(...collectSubtreeStrings(elem));
+                continue;
+              }
+              const unwrappedElem = unwrapStaticExpression(elem);
+              if (isManifestReference(unwrappedElem)) {
+                continue;
+              }
+              const staticStr = resolveStaticString(unwrappedElem);
+              if (staticStr !== null) {
+                elemStrings.push(staticStr);
+                continue;
+              }
+              const res = inspectExpression(unwrappedElem, false);
+              if (!res.sanctioned) {
+                allSanctioned = false;
+              }
+              elemStrings.push(...res.extractedStrings);
+            }
+            if (!allSanctioned || elemStrings.length > 0) {
+              return { sanctioned: allSanctioned, extractedStrings: elemStrings };
+            }
+          } else {
+            const receiverRes = inspectExpression(receiver, false);
+            if (!receiverRes.sanctioned || receiverRes.extractedStrings.length > 0) {
+              return receiverRes;
+            }
+          }
         } else {
           for (const arg of unwrapped.arguments) {
             argStrings.push(...collectSubtreeStrings(arg));
@@ -1221,6 +1255,24 @@ describe('Storefront copy integrity & manifest guard', () => {
 export default async function ShopPage`,
       )
       .replace('</Card>', '<Promotion /></Card>');
+
+    const literals = extractJsxLiterals(shopPath, probeSource);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+    expect(unauthorized).toContain('Every order includes a complimentary gift.');
+  });
+
+  test('Oscar bypass probe rejection: .join() trusts receiver array by method name alone (Round 15)', () => {
+    // Oscar Round 15 probe:
+    // Receiver array `['Every order includes a complimentary gift.'].join('')`
+    // rendered directly in JSX.
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const shopSource = fs.readFileSync(shopPath, 'utf-8');
+
+    const probeSource = shopSource.replace(
+      '</Card>',
+      `<p>{['Every order includes a complimentary gift.'].join('')}</p></Card>`,
+    );
 
     const literals = extractJsxLiterals(shopPath, probeSource);
     const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
