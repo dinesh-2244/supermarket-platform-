@@ -333,6 +333,30 @@ export function storeScopeFilter(
   return ids === null ? {} : { [field]: { in: ids } };
 }
 
+/**
+ * A complete Prisma `where` for a store-bound read: the principal's scope
+ * **and** the caller's conditions, as two members of one `AND`.
+ *
+ * This is the only way a repository applies the scope. Spreading the filter
+ * beside a `storeId` condition — `{ ...storeScopeFilter(p), storeId }` —
+ * produced two `storeId` keys and kept the second, so the scope was silently
+ * gone; and any text guard against that shape can be aliased around. Putting
+ * both in an `AND` makes the overwrite impossible to write, whatever the
+ * caller's conditions are called, and a unit test refuses any other use of
+ * `storeScopeFilter` outside this file.
+ *
+ * Use it as the whole `where`, never spread: `{ ...scopedWhere(p, x), AND }`
+ * would overwrite the `AND` the scope lives in. Nested `AND`/`OR` inside
+ * `extra` are fine — they sit inside the outer `AND` untouched.
+ */
+export function scopedWhere<T extends Record<string, unknown>>(
+  principal: Principal,
+  extra: T,
+  field = 'storeId',
+): { AND: [ReturnType<typeof storeScopeFilter>, T] } {
+  return { AND: [storeScopeFilter(principal, field), extra] };
+}
+
 /** True when this principal may act on data belonging to `storeId`. */
 export function canAccessStore(principal: Principal, storeId: string): boolean {
   const ids = allowedStoreIds(principal);

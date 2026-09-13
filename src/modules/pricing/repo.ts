@@ -9,7 +9,7 @@
  */
 import {
   getPrisma,
-  storeScopeFilter,
+  scopedWhere,
   type DbExecutor,
   type Principal,
   type Tx,
@@ -101,16 +101,11 @@ export async function listListings(
   db?: DbExecutor,
 ): Promise<readonly StoreProductRecord[]> {
   return executor(db).storeProduct.findMany({
-    where: {
-      // `AND`, never a spread beside `storeId`: both are `storeId` conditions,
-      // and a spread keeps only the second — which silently turns the scope off.
-      AND: [
-        storeScopeFilter(principal),
-        options.storeId !== undefined ? { storeId: options.storeId } : {},
-      ],
+    where: scopedWhere(principal, {
+      ...(options.storeId !== undefined ? { storeId: options.storeId } : {}),
       ...(options.listedOnly === true ? { isListed: true } : {}),
       ...(options.productIds !== undefined ? { productId: { in: [...options.productIds] } } : {}),
-    },
+    }),
     select: listingSelect,
     orderBy: [{ storeId: 'asc' }, { productId: 'asc' }],
     take: options.limit ?? 500,
@@ -132,7 +127,7 @@ export async function listListedProductIds(
   db?: DbExecutor,
 ): Promise<readonly string[]> {
   const rows = await executor(db).storeProduct.findMany({
-    where: { AND: [storeScopeFilter(principal), { storeId }], isListed: true },
+    where: scopedWhere(principal, { storeId, isListed: true }),
     select: { productId: true },
     orderBy: { productId: 'asc' },
   });

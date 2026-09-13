@@ -10,7 +10,7 @@
 import {
   getPrisma,
   type Prisma,
-  storeScopeFilter,
+  scopedWhere,
   type DbExecutor,
   type Principal,
   type Tx,
@@ -256,17 +256,12 @@ export async function listForPrincipal(
   filter: { storeId?: string; statuses?: readonly OrderStatus[]; limit?: number },
 ): Promise<QueueRow[]> {
   return executor(db).order.findMany({
-    where: {
-      // `AND`, never a spread beside `storeId`: both are `storeId` conditions,
-      // and a spread keeps only the second — which silently turns the scope off.
-      AND: [
-        storeScopeFilter(principal),
-        filter.storeId === undefined ? {} : { storeId: filter.storeId },
-      ],
+    where: scopedWhere(principal, {
+      ...(filter.storeId === undefined ? {} : { storeId: filter.storeId }),
       ...(filter.statuses === undefined || filter.statuses.length === 0
         ? {}
         : { status: { in: [...filter.statuses] } }),
-    },
+    }),
     select: queueSelect,
     orderBy: [{ deliverySlotStart: 'asc' }, { placedAt: 'asc' }],
     take: filter.limit ?? 200,
@@ -342,7 +337,7 @@ export async function countByStatusAndVariance(
 ): Promise<OrderCountCell[]> {
   const rows = await executor(db).order.groupBy({
     by: ['status', 'priceVarianceFlagged'],
-    where: { AND: [storeScopeFilter(principal), { storeId }] },
+    where: scopedWhere(principal, { storeId }),
     _count: { _all: true },
   });
   return rows.map((row) => ({
@@ -392,7 +387,7 @@ export async function findForPrincipal(
   orderId: string,
 ): Promise<StaffOrderRow | null> {
   const rows = await executor(db).order.findMany({
-    where: { id: orderId, ...storeScopeFilter(principal) },
+    where: scopedWhere(principal, { id: orderId }),
     select: {
       ...queueSelect,
       paymentMethod: true,
@@ -597,11 +592,4 @@ export async function setCorrectionReason(tx: Tx, orderId: string, reason: strin
     where: { id: orderId },
     data: { correctionReason: reason },
   });
-}
-
-/** Orders the principal may see — the scope filter lives here, not in callers. */
-export function scopeFor(
-  principal: Principal,
-): Record<string, { in: readonly string[] }> | Record<string, never> {
-  return storeScopeFilter(principal);
 }
