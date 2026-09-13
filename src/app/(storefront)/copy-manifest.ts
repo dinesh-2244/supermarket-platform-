@@ -168,9 +168,9 @@ export const STOREFRONT_COPY_MANIFEST = {
     },
     channels: {
       phoneLabel: 'Phone Support',
-      phonePlaceholder: 'Assigned per community hub',
+      phonePlaceholder: 'Not yet published',
       emailLabel: 'Email Support',
-      emailPlaceholder: 'Assigned per community hub',
+      emailPlaceholder: 'Not yet published',
       hoursLabel: 'Operating Hours',
       hoursPlaceholder: 'Aligned with active delivery slot windows',
       addressLabel: 'Hub Location',
