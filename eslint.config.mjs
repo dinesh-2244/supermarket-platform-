@@ -22,6 +22,7 @@ const MODULES = [
   'checkout',
   'orders',
   'fulfillment',
+  'product-requests',
   'notifications',
   'admin',
 ];

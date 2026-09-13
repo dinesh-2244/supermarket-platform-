@@ -411,10 +411,13 @@ describe('order actions (Phase 4) — additive, and no existing grant moved', ()
       'audit-log:read',
     ];
 
-    expect(ALL_ACTIONS.filter((action) => !action.startsWith('order:')).sort()).toEqual(
-      [...before].sort(),
-    );
+    // Later phases add their own prefixes (Phase 4 `order:`, Phase 5.5
+    // `product-request:`); the pre-Phase-4 set itself must not change.
+    const added = (action: string): boolean =>
+      action.startsWith('order:') || action.startsWith('product-request:');
+    expect(ALL_ACTIONS.filter((action) => !added(action)).sort()).toEqual([...before].sort());
     expect(ALL_ACTIONS.filter((action) => action.startsWith('order:'))).toHaveLength(4);
+    expect(ALL_ACTIONS.filter((action) => action.startsWith('product-request:'))).toHaveLength(2);
 
     // A staff member still cannot write inventory; a shopper still cannot write
     // anything at all. Spot-checks of the decisions most likely to be loosened
@@ -423,5 +426,32 @@ describe('order actions (Phase 4) — additive, and no existing grant moved', ()
     expect(allows(shopperA, 'inventory:adjust')).toBe(false);
     expect(allows(managerA, 'product:write')).toBe(false);
     expect(allows(managerA, 'store-settings:update-pos-mode')).toBe(false);
+  });
+});
+
+describe('product-request actions (Phase 5.5) — additive, and no existing grant moved', () => {
+  const requestInA: Resource = { type: 'ProductRequest', storeId: STORE_A };
+  const requestInB: Resource = { type: 'ProductRequest', storeId: STORE_B };
+
+  it("lets every member of staff read their store's requests, super-admin any", () => {
+    expect(allows(staffA, 'product-request:read', requestInA)).toBe(true);
+    expect(allows(staffA, 'product-request:read', requestInB)).toBe(false);
+    expect(allows(managerA, 'product-request:read', requestInA)).toBe(true);
+    expect(allows(managerA, 'product-request:read', requestInB)).toBe(false);
+    expect(allows(superAdmin, 'product-request:read', requestInB)).toBe(true);
+  });
+
+  it('reserves triage for managers and above, store-scoped', () => {
+    expect(allows(staffA, 'product-request:manage', requestInA)).toBe(false);
+    expect(allows(managerA, 'product-request:manage', requestInA)).toBe(true);
+    expect(allows(managerA, 'product-request:manage', requestInB)).toBe(false);
+    expect(allows(superAdmin, 'product-request:manage', requestInB)).toBe(true);
+  });
+
+  it('gives shoppers and the system no read or triage', () => {
+    for (const principal of [visitor, shopperA, accountA, system]) {
+      expect(allows(principal, 'product-request:read', requestInA)).toBe(false);
+      expect(allows(principal, 'product-request:manage', requestInA)).toBe(false);
+    }
   });
 });

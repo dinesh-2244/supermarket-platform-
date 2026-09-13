@@ -63,6 +63,16 @@ enum PaymentMethod {
   UPI_ON_DELIVERY
 }
 
+/// Triage states for a shopper's "request a product" (Phase 5.5). `NEW` is
+/// the initial state; `FULFILLED` is terminal; `DECLINED` can be reopened.
+enum ProductRequestStatus {
+  NEW
+  REVIEWED
+  PLANNED
+  DECLINED
+  FULFILLED
+}
+
 /// Order lifecycle (§11). There is deliberately **no customer-cancel value** (R4):
 /// only an audited store/admin correction can end an order early, via
 /// CANCELLED_BY_STORE.
@@ -138,6 +148,7 @@ model Store {
   users            User[]
   carts            Cart[]
   orders           Order[]
+  productRequests  ProductRequest[]
 
   @@index([isActive])
 }
@@ -736,6 +747,49 @@ model OrderStatusHistory {
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Product requests (Phase 5.5) — owned by `product-requests`
+// ---------------------------------------------------------------------------
+
+/// A shopper asking for something the catalogue does not carry. Pre-purchase
+/// and possibly anonymous, so the contact details are plain snapshots rather
+/// than a link to `Customer`: nothing here is an account, and nothing in it
+/// touches stock, orders or the POS.
+model ProductRequest {
+  id            String               @id @default(uuid())
+  storeId       String
+  productName   String
+  brand         String?
+  packSize      String?
+  note          String?
+  customerName  String?
+  customerPhone String?
+  status        ProductRequestStatus @default(NEW)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  store         Store                         @relation(fields: [storeId], references: [id])
+  statusHistory ProductRequestStatusHistory[]
+
+  @@index([storeId, status, createdAt])
+}
+
+/// Append-only: every status change, and the opening row, with who made it.
+model ProductRequestStatusHistory {
+  id         String                @id @default(uuid())
+  requestId  String
+  fromStatus ProductRequestStatus?
+  toStatus   ProductRequestStatus
+  actorType  ActorType
+  actorId    String?
+  note       String?
+  createdAt  DateTime              @default(now())
+
+  request ProductRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, createdAt])
 }
 
 // ---------------------------------------------------------------------------
