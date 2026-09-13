@@ -596,6 +596,21 @@ describe('Storefront copy integrity & manifest guard', () => {
       return found;
     }
 
+    // Find local VariableDeclaration by identifier name in the SourceFile
+    function findLocalVariableDeclaration(name: string): ts.VariableDeclaration | null {
+      let decl: ts.VariableDeclaration | null = null;
+      function walk(n: ts.Node) {
+        if (decl) return;
+        if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === name) {
+          decl = n;
+          return;
+        }
+        ts.forEachChild(n, walk);
+      }
+      walk(sf);
+      return decl;
+    }
+
     function inspectExpression(
       expr: ts.Expression,
       isClaimAttribute: boolean,
@@ -667,9 +682,17 @@ describe('Storefront copy integrity & manifest guard', () => {
         return { sanctioned: true, extractedStrings: strings };
       }
 
-      // 6. Safe dynamic identifiers
+      // 6. Dynamic identifiers: check declaration provenance (reject shadowed/local declarations carrying copy)
       if (ts.isIdentifier(unwrapped)) {
         const name = unwrapped.text;
+        const localDecl = findLocalVariableDeclaration(name);
+        if (localDecl && localDecl.initializer) {
+          const initStrings = collectSubtreeStrings(localDecl.initializer);
+          if (initStrings.length > 0) {
+            return { sanctioned: false, extractedStrings: initStrings };
+          }
+        }
+
         if (
           ['children', 'communityName', 'basketCount', 'sentence', 'title', 'subtitle'].includes(
             name,
@@ -679,9 +702,21 @@ describe('Storefront copy integrity & manifest guard', () => {
         }
       }
 
-      // 7. Safe dynamic formatting calls: rupees, String, getFullYear, join
+      // 7. Dynamic formatting calls: inspect arguments for string literals (reject trust-by-name String('...'))
       if (ts.isCallExpression(unwrapped)) {
         const fn = unwrapped.expression;
+        const argStrings: string[] = [];
+        if (ts.isPropertyAccessExpression(fn) && fn.name.text === 'join') {
+          // .join delimiter is sanctioned formatting
+        } else {
+          for (const arg of unwrapped.arguments) {
+            argStrings.push(...collectSubtreeStrings(arg));
+          }
+        }
+        if (argStrings.length > 0) {
+          return { sanctioned: false, extractedStrings: argStrings };
+        }
+
         if (ts.isIdentifier(fn) && ['rupees', 'String'].includes(fn.text)) {
           return { sanctioned: true, extractedStrings: [] };
         }
@@ -693,16 +728,25 @@ describe('Storefront copy integrity & manifest guard', () => {
         }
       }
 
-      // 8. Safe model property access
+      // 8. Model property access: check root identifier declaration provenance (reject shadowed model roots)
       if (ts.isPropertyAccessExpression(unwrapped)) {
         let curr: ts.Expression = unwrapped;
         while (ts.isPropertyAccessExpression(curr)) {
           curr = curr.expression;
         }
         if (ts.isIdentifier(curr)) {
+          const rootName = curr.text;
+          const localDecl = findLocalVariableDeclaration(rootName);
+          if (localDecl && localDecl.initializer) {
+            const initStrings = collectSubtreeStrings(localDecl.initializer);
+            if (initStrings.length > 0) {
+              return { sanctioned: false, extractedStrings: initStrings };
+            }
+          }
+
           if (
             ['community', 'line', 'area', 'notice', 'totals', 'issue', 'shop', 'settings'].includes(
-              curr.text,
+              rootName,
             )
           ) {
             return { sanctioned: true, extractedStrings: [] };
@@ -1000,5 +1044,46 @@ describe('Storefront copy integrity & manifest guard', () => {
     expect(unauthorized).toContain('Every order includes a complimentary gift.');
     expect(unauthorized).toContain('getPromotionalGuarantee()');
     expect(unauthorized).toContain('promotions.orderGuarantee');
+  });
+
+  test('Oscar bypass probe rejection: trust-by-name smuggling via String(...), local arbitrary variables, and shadowed model roots are rejected (Round 13)', () => {
+    // Oscar Round 13 probes:
+    // 1. Wrapping unauthorized copy in String(...)
+    // 2. Assigning unauthorized copy to an identifier sharing a safe name (const sentence = '...')
+    // 3. Shadowing a safe model root with arbitrary copy (const community = { name: '...' })
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const shopSource = fs.readFileSync(shopPath, 'utf-8');
+
+    // Probe 1: String('...')
+    const probe1Source = shopSource.replace(
+      '</Card>',
+      `<p>{String('Every order includes a complimentary gift.')}</p></Card>`,
+    );
+    const literals1 = extractJsxLiterals(shopPath, probe1Source);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized1 = literals1.filter((lit) => !allowed.has(lit));
+    expect(unauthorized1).toContain('Every order includes a complimentary gift.');
+
+    // Probe 2: local arbitrary variable named 'sentence'
+    const probe2Source = shopSource
+      .replace(
+        'export default async function ShopPage',
+        "const sentence = 'Every order includes a complimentary gift.';\nexport default async function ShopPage",
+      )
+      .replace('</Card>', '<p>{sentence}</p></Card>');
+    const literals2 = extractJsxLiterals(shopPath, probe2Source);
+    const unauthorized2 = literals2.filter((lit) => !allowed.has(lit));
+    expect(unauthorized2).toContain('Every order includes a complimentary gift.');
+
+    // Probe 3: shadowed safe model root (community.name)
+    const probe3Source = shopSource
+      .replace(
+        'export default async function ShopPage',
+        "const community = { name: 'Every order includes a complimentary gift.' };\nexport default async function ShopPage",
+      )
+      .replace('</Card>', '<p>{community.name}</p></Card>');
+    const literals3 = extractJsxLiterals(shopPath, probe3Source);
+    const unauthorized3 = literals3.filter((lit) => !allowed.has(lit));
+    expect(unauthorized3).toContain('Every order includes a complimentary gift.');
   });
 });
