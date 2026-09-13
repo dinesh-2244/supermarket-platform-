@@ -513,19 +513,80 @@ describe('Storefront copy integrity & manifest guard', () => {
     const sf = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
     const literals: string[] = [];
 
+    function unwrapStaticExpression(expr: ts.Expression): ts.Expression {
+      let curr = expr;
+      while (true) {
+        if (ts.isParenthesizedExpression(curr)) {
+          curr = curr.expression;
+        } else if (ts.isAsExpression(curr)) {
+          curr = curr.expression;
+        } else if (ts.isTypeAssertionExpression(curr)) {
+          curr = curr.expression;
+        } else if (ts.isSatisfiesExpression(curr)) {
+          curr = curr.expression;
+        } else if (ts.isNonNullExpression(curr)) {
+          curr = curr.expression;
+        } else {
+          break;
+        }
+      }
+      return curr;
+    }
+
+    function resolveStaticString(expr: ts.Expression): string | null {
+      const unwrapped = unwrapStaticExpression(expr);
+      if (ts.isStringLiteral(unwrapped) || ts.isNoSubstitutionTemplateLiteral(unwrapped)) {
+        return unwrapped.text;
+      }
+      if (
+        ts.isBinaryExpression(unwrapped) &&
+        unwrapped.operatorToken.kind === ts.SyntaxKind.PlusToken
+      ) {
+        const left = resolveStaticString(unwrapped.left);
+        const right = resolveStaticString(unwrapped.right);
+        if (left !== null && right !== null) {
+          return left + right;
+        }
+      }
+      return null;
+    }
+
+    function collectStaticStrings(expr: ts.Expression): string[] {
+      const unwrapped = unwrapStaticExpression(expr);
+      if (ts.isStringLiteral(unwrapped) || ts.isNoSubstitutionTemplateLiteral(unwrapped)) {
+        return [unwrapped.text];
+      }
+      if (
+        ts.isBinaryExpression(unwrapped) &&
+        unwrapped.operatorToken.kind === ts.SyntaxKind.PlusToken
+      ) {
+        const combined = resolveStaticString(unwrapped);
+        if (combined !== null) {
+          return [combined];
+        }
+        return [...collectStaticStrings(unwrapped.left), ...collectStaticStrings(unwrapped.right)];
+      }
+      if (ts.isConditionalExpression(unwrapped)) {
+        return [
+          ...collectStaticStrings(unwrapped.whenTrue),
+          ...collectStaticStrings(unwrapped.whenFalse),
+        ];
+      }
+      return [];
+    }
+
     function visit(node: ts.Node) {
       if (ts.isJsxText(node)) {
         const text = node.text.trim().replace(/\s+/g, ' ');
         if (text) literals.push(text);
       } else if (ts.isJsxExpression(node)) {
-        if (
-          node.expression &&
-          (ts.isStringLiteral(node.expression) ||
-            ts.isNoSubstitutionTemplateLiteral(node.expression))
-        ) {
-          if (!node.parent || !ts.isJsxAttribute(node.parent)) {
-            const text = node.expression.text.trim().replace(/\s+/g, ' ');
-            if (text) literals.push(text);
+        if (!node.parent || !ts.isJsxAttribute(node.parent)) {
+          if (node.expression) {
+            const strings = collectStaticStrings(node.expression);
+            for (const str of strings) {
+              const text = str.trim().replace(/\s+/g, ' ');
+              if (text) literals.push(text);
+            }
           }
         }
       } else if (ts.isJsxAttribute(node)) {
@@ -538,13 +599,11 @@ describe('Storefront copy integrity & manifest guard', () => {
           if (node.initializer) {
             if (ts.isStringLiteral(node.initializer)) {
               literals.push(`${propName}="${node.initializer.text}"`);
-            } else if (
-              ts.isJsxExpression(node.initializer) &&
-              node.initializer.expression &&
-              (ts.isStringLiteral(node.initializer.expression) ||
-                ts.isNoSubstitutionTemplateLiteral(node.initializer.expression))
-            ) {
-              literals.push(`${propName}="${node.initializer.expression.text}"`);
+            } else if (ts.isJsxExpression(node.initializer) && node.initializer.expression) {
+              const strings = collectStaticStrings(node.initializer.expression);
+              for (const str of strings) {
+                literals.push(`${propName}="${str}"`);
+              }
             }
           }
         }
@@ -596,11 +655,15 @@ describe('Storefront copy integrity & manifest guard', () => {
       'We had to take',
       'Your basket is empty.',
       'Your basket moved to',
+      'an item',
       'available — reduce the quantity to continue.',
       'each',
+      'item',
       'item(s))',
+      'items',
       'more to reach the minimum order for your area.',
       'out:',
+      'some items',
       'title="Change delivery area"',
       'title="Total"',
       'title="Your basket"',
@@ -621,6 +684,7 @@ describe('Storefront copy integrity & manifest guard', () => {
     'layout.tsx': new Set([
       'About',
       'About Munder Fresh',
+      'Account',
       'Account & Past Orders',
       'Basket',
       'Browse All Products',
@@ -634,13 +698,14 @@ describe('Storefront copy integrity & manifest guard', () => {
       'Select Community',
       'Shop',
       'Shopping & Orders',
+      'Sign in',
       'Your Basket',
       'title="Click to switch community or store"',
       '©',
       '▼',
       '📍',
     ]),
-    'mobile-cart-bar.tsx': new Set(['View Basket', 'added', '→']),
+    'mobile-cart-bar.tsx': new Set(['View Basket', 'added', 'item', 'items', '→']),
     'page.tsx': new Set([
       'Browse all',
       'Explore the Full Catalogue',
@@ -736,5 +801,24 @@ describe('Storefront copy integrity & manifest guard', () => {
     const unauthorized = literals.filter((lit) => !allowed.has(lit));
     expect(unauthorized).toContain('All orders include a complimentary gift.');
     expect(unauthorized).toContain('Every item is handpicked with care.');
+  });
+
+  test('Oscar bypass probe rejection: an unauthorized parenthesized JSX expression string in shop/page.tsx fails the AST scanner (Round 11)', () => {
+    // Oscar Round 10 / Round 11 probe: injecting an unauthorized claim wrapped in parens and type assertions:
+    // <p>{('Every order includes a complimentary gift.')}</p> into shop/page.tsx
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const shopSource = fs.readFileSync(shopPath, 'utf-8');
+
+    const simulatedOscarShop = shopSource.replace(
+      '</Card>',
+      "<p>{('Every order includes a complimentary gift.')}</p>\n<p>{((('Freshly harvested daily.') as string))}</p>\n<p>{('No hidden fees ' + 'ever.') satisfies string}</p></Card>",
+    );
+
+    const literals = extractJsxLiterals(shopPath, simulatedOscarShop);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorized = literals.filter((lit) => !allowed.has(lit));
+    expect(unauthorized).toContain('Every order includes a complimentary gift.');
+    expect(unauthorized).toContain('Freshly harvested daily.');
+    expect(unauthorized).toContain('No hidden fees ever.');
   });
 });
