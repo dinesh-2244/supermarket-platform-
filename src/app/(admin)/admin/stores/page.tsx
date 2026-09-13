@@ -42,7 +42,7 @@ export default async function StoresPage({
     <div className="space-y-6">
       <PageHeading
         title="Stores & settings"
-        subtitle="Per-store business settings. Money is stored in paise; these fields are paise too."
+        subtitle="Per-store business settings. Values are entered in rupees and stored internally in paise."
       />
 
       <StoreSwitcher stores={stores} storeId={storeId} basePath="/admin/stores" />

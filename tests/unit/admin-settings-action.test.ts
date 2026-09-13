@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { updateSettingsAction } from '@/app/(admin)/admin/actions';
 import * as stores from '@/modules/stores';
@@ -168,6 +170,99 @@ describe('Admin store settings rupee UX (updateSettingsAction)', () => {
 
       const result = await updateSettingsAction(undefined, form);
       expect(result).toBe('!Delivery fee is required');
+      expect(stores.updateSettings).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('M1: Admin stores page copy guidance regression guard', () => {
+    it('verifies page guidance states values are entered in rupees and stored in paise, rejecting old "fields are paise too" instruction', () => {
+      const pagePath = path.resolve(__dirname, '../../src/app/(admin)/admin/stores/page.tsx');
+      const content = fs.readFileSync(pagePath, 'utf-8');
+
+      expect(content).not.toContain('these fields are paise too');
+      expect(content).toContain('Values are entered in rupees and stored internally in paise.');
+    });
+  });
+
+  describe('M2: Ambiguous dual-field submission rejection', () => {
+    it('rejects submission when BOTH valid rupee and valid paise keys are supplied for deliveryFee', async () => {
+      const form = baseFormData();
+      form.set('deliveryFee', '200.00');
+      form.set('deliveryFeePaise', '20000');
+
+      const result = await updateSettingsAction(undefined, form);
+      expect(result.startsWith('!')).toBe(true);
+      expect(result).toMatch(/Cannot specify both deliveryFee .* and deliveryFeePaise/i);
+      expect(stores.updateSettings).not.toHaveBeenCalled();
+    });
+
+    it('rejects conflicting values (Oscar probe: deliveryFee=2.00 and deliveryFeePaise=999999) without silently saving raw paise', async () => {
+      const form = baseFormData();
+      form.set('deliveryFee', '2.00');
+      form.set('deliveryFeePaise', '999999');
+
+      const result = await updateSettingsAction(undefined, form);
+      expect(result.startsWith('!')).toBe(true);
+      expect(result).toMatch(/Cannot specify both deliveryFee .* and deliveryFeePaise/i);
+      expect(stores.updateSettings).not.toHaveBeenCalled();
+    });
+
+    it('rejects submission when BOTH valid rupee and valid paise keys are supplied for minOrder', async () => {
+      const form = baseFormData();
+      form.set('minOrder', '500.00');
+      form.set('minOrderPaise', '50000');
+
+      const result = await updateSettingsAction(undefined, form);
+      expect(result.startsWith('!')).toBe(true);
+      expect(result).toMatch(/Cannot specify both minOrder .* and minOrderPaise/i);
+      expect(stores.updateSettings).not.toHaveBeenCalled();
+    });
+
+    it('rejects submission when BOTH valid rupee and valid paise keys are supplied for priceVarianceAbsCap', async () => {
+      const form = baseFormData();
+      form.set('priceVarianceAbsCap', '50.00');
+      form.set('priceVarianceAbsCapPaise', '5000');
+
+      const result = await updateSettingsAction(undefined, form);
+      expect(result.startsWith('!')).toBe(true);
+      expect(result).toMatch(
+        /Cannot specify both priceVarianceAbsCap .* and priceVarianceAbsCapPaise/i,
+      );
+      expect(stores.updateSettings).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid rupee key when valid paise key is also present (does NOT silently fall back to old key) for deliveryFee', async () => {
+      const form = baseFormData();
+      form.set('deliveryFee', 'not-money');
+      form.set('deliveryFeePaise', '20000');
+
+      const result = await updateSettingsAction(undefined, form);
+      expect(result.startsWith('!')).toBe(true);
+      expect(result).toMatch(/Cannot specify both deliveryFee .* and deliveryFeePaise/i);
+      expect(stores.updateSettings).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid rupee key when valid paise key is also present (does NOT silently fall back to old key) for minOrder', async () => {
+      const form = baseFormData();
+      form.set('minOrder', 'not-money');
+      form.set('minOrderPaise', '50000');
+
+      const result = await updateSettingsAction(undefined, form);
+      expect(result.startsWith('!')).toBe(true);
+      expect(result).toMatch(/Cannot specify both minOrder .* and minOrderPaise/i);
+      expect(stores.updateSettings).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid rupee key when valid paise key is also present (does NOT silently fall back to old key) for priceVarianceAbsCap', async () => {
+      const form = baseFormData();
+      form.set('priceVarianceAbsCap', 'not-money');
+      form.set('priceVarianceAbsCapPaise', '5000');
+
+      const result = await updateSettingsAction(undefined, form);
+      expect(result.startsWith('!')).toBe(true);
+      expect(result).toMatch(
+        /Cannot specify both priceVarianceAbsCap .* and priceVarianceAbsCapPaise/i,
+      );
       expect(stores.updateSettings).not.toHaveBeenCalled();
     });
   });

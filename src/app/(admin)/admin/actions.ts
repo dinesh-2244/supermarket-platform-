@@ -255,23 +255,32 @@ export async function updateSettingsAction(_state: ActionState, form: FormData):
 
     // The form displays/inputs rupees with decimals (Delivery fee (₹), Minimum order (₹), Variance cap (₹)).
     // If rupee inputs are present, strictly parse to integer paise before reading paise.
-    if (form.has('deliveryFee') && !form.has('deliveryFeePaise')) {
-      const paise = parseRupeesToPaise(text(form, 'deliveryFee'), 'deliveryFee', 'Delivery fee');
-      form.set('deliveryFeePaise', String(paise));
-    }
+    // If BOTH old paise key and new rupee key are present in the same submission, reject as ambiguous.
+    const moneyPairs = [
+      { rupeeKey: 'deliveryFee', paiseKey: 'deliveryFeePaise', label: 'Delivery fee' },
+      { rupeeKey: 'minOrder', paiseKey: 'minOrderPaise', label: 'Minimum order' },
+      {
+        rupeeKey: 'priceVarianceAbsCap',
+        paiseKey: 'priceVarianceAbsCapPaise',
+        label: 'Variance cap',
+      },
+    ] as const;
 
-    if (form.has('minOrder') && !form.has('minOrderPaise')) {
-      const paise = parseRupeesToPaise(text(form, 'minOrder'), 'minOrder', 'Minimum order');
-      form.set('minOrderPaise', String(paise));
-    }
+    for (const { rupeeKey, paiseKey, label } of moneyPairs) {
+      const hasRupees = form.has(rupeeKey);
+      const hasPaise = form.has(paiseKey);
 
-    if (form.has('priceVarianceAbsCap') && !form.has('priceVarianceAbsCapPaise')) {
-      const paise = parseRupeesToPaise(
-        text(form, 'priceVarianceAbsCap'),
-        'priceVarianceAbsCap',
-        'Variance cap',
-      );
-      form.set('priceVarianceAbsCapPaise', String(paise));
+      if (hasRupees && hasPaise) {
+        throw new ValidationError(
+          `Cannot specify both ${rupeeKey} (rupees) and ${paiseKey} (paise) for ${label}`,
+          { field: rupeeKey, conflictingField: paiseKey },
+        );
+      }
+
+      if (hasRupees) {
+        const paise = parseRupeesToPaise(text(form, rupeeKey), rupeeKey, label);
+        form.set(paiseKey, String(paise));
+      }
     }
 
     const substitutionPolicy = text(form, 'substitutionPolicy');
@@ -489,12 +498,25 @@ export async function setPriceAction(_state: ActionState, form: FormData): Promi
 
     // The form displays/inputs rupees with decimals (MRP (₹) and Selling price (₹)).
     // If rupee inputs are present, strictly parse to integer paise before reading paise.
-    if (form.has('mrp') && !form.has('mrpPaise')) {
+    // If BOTH old paise key and new rupee key are present in the same submission, reject as ambiguous.
+    if (form.has('mrp') && form.has('mrpPaise')) {
+      throw new ValidationError('Cannot specify both mrp (rupees) and mrpPaise (paise) for MRP', {
+        field: 'mrp',
+        conflictingField: 'mrpPaise',
+      });
+    }
+    if (form.has('mrp')) {
       const paise = parseRupeesToPaise(text(form, 'mrp'), 'mrp', 'MRP');
       form.set('mrpPaise', String(paise));
     }
 
-    if (form.has('sellingPrice') && !form.has('sellingPricePaise')) {
+    if (form.has('sellingPrice') && form.has('sellingPricePaise')) {
+      throw new ValidationError(
+        'Cannot specify both sellingPrice (rupees) and sellingPricePaise (paise) for Selling price',
+        { field: 'sellingPrice', conflictingField: 'sellingPricePaise' },
+      );
+    }
+    if (form.has('sellingPrice')) {
       const paise = parseRupeesToPaise(text(form, 'sellingPrice'), 'sellingPrice', 'Selling price');
       form.set('sellingPricePaise', String(paise));
     }
