@@ -352,7 +352,8 @@ export function storeScopeFilter(
 export function scopedWhere<T extends Record<string, unknown>>(
   principal: Principal,
   extra: T,
-  field = 'storeId',
+  // `id` is for the Store table itself, whose own id is the store.
+  field: 'storeId' | 'id' = 'storeId',
 ): { AND: [ReturnType<typeof storeScopeFilter>, T] } {
   return { AND: [storeScopeFilter(principal, field), extra] };
 }
