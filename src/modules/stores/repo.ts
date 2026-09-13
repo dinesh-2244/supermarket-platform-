@@ -186,8 +186,9 @@ export async function listZones(
 ): Promise<readonly ZoneRecord[]> {
   return executor(db).deliveryZone.findMany({
     where: {
-      ...storeScopeFilter(principal),
-      ...(storeId !== null ? { storeId } : {}),
+      // `AND`, never a spread beside `storeId`: both are `storeId` conditions,
+      // and a spread keeps only the second — which silently turns the scope off.
+      AND: [storeScopeFilter(principal), storeId !== null ? { storeId } : {}],
     },
     orderBy: [{ storeId: 'asc' }, { sortKey: 'asc' }],
   });

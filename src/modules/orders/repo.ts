@@ -257,8 +257,12 @@ export async function listForPrincipal(
 ): Promise<QueueRow[]> {
   return executor(db).order.findMany({
     where: {
-      ...storeScopeFilter(principal),
-      ...(filter.storeId === undefined ? {} : { storeId: filter.storeId }),
+      // `AND`, never a spread beside `storeId`: both are `storeId` conditions,
+      // and a spread keeps only the second — which silently turns the scope off.
+      AND: [
+        storeScopeFilter(principal),
+        filter.storeId === undefined ? {} : { storeId: filter.storeId },
+      ],
       ...(filter.statuses === undefined || filter.statuses.length === 0
         ? {}
         : { status: { in: [...filter.statuses] } }),
@@ -338,7 +342,7 @@ export async function countByStatusAndVariance(
 ): Promise<OrderCountCell[]> {
   const rows = await executor(db).order.groupBy({
     by: ['status', 'priceVarianceFlagged'],
-    where: { ...storeScopeFilter(principal), storeId },
+    where: { AND: [storeScopeFilter(principal), { storeId }] },
     _count: { _all: true },
   });
   return rows.map((row) => ({

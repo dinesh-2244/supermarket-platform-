@@ -102,8 +102,12 @@ export async function listListings(
 ): Promise<readonly StoreProductRecord[]> {
   return executor(db).storeProduct.findMany({
     where: {
-      ...storeScopeFilter(principal),
-      ...(options.storeId !== undefined ? { storeId: options.storeId } : {}),
+      // `AND`, never a spread beside `storeId`: both are `storeId` conditions,
+      // and a spread keeps only the second — which silently turns the scope off.
+      AND: [
+        storeScopeFilter(principal),
+        options.storeId !== undefined ? { storeId: options.storeId } : {},
+      ],
       ...(options.listedOnly === true ? { isListed: true } : {}),
       ...(options.productIds !== undefined ? { productId: { in: [...options.productIds] } } : {}),
     },
@@ -128,7 +132,7 @@ export async function listListedProductIds(
   db?: DbExecutor,
 ): Promise<readonly string[]> {
   const rows = await executor(db).storeProduct.findMany({
-    where: { ...storeScopeFilter(principal), storeId, isListed: true },
+    where: { AND: [storeScopeFilter(principal), { storeId }], isListed: true },
     select: { productId: true },
     orderBy: { productId: 'asc' },
   });

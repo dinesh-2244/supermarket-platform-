@@ -168,8 +168,12 @@ export async function listItems(
 ): Promise<readonly InventoryRecord[]> {
   return executor(db).inventoryItem.findMany({
     where: {
-      ...storeScopeFilter(principal),
-      ...(options.storeId !== undefined ? { storeId: options.storeId } : {}),
+      // `AND`, never a spread beside `storeId`: both are `storeId` conditions,
+      // and a spread keeps only the second — which silently turns the scope off.
+      AND: [
+        storeScopeFilter(principal),
+        options.storeId !== undefined ? { storeId: options.storeId } : {},
+      ],
       ...(options.productIds !== undefined ? { productId: { in: [...options.productIds] } } : {}),
     },
     select: itemSelect,
@@ -188,8 +192,7 @@ export async function listLowStock(
 ): Promise<readonly InventoryRecord[]> {
   return executor(db).inventoryItem.findMany({
     where: {
-      ...storeScopeFilter(principal),
-      storeId,
+      AND: [storeScopeFilter(principal), { storeId }],
       websiteStock: { lte: threshold },
     },
     select: itemSelect,
@@ -216,8 +219,7 @@ export async function listLedger(
 ): Promise<readonly LedgerRecord[]> {
   return executor(db).stockLedger.findMany({
     where: {
-      ...storeScopeFilter(principal),
-      storeId: query.storeId,
+      AND: [storeScopeFilter(principal), { storeId: query.storeId }],
       ...(query.productId !== undefined ? { productId: query.productId } : {}),
       ...(query.reasons !== undefined ? { reason: { in: [...query.reasons] } } : {}),
       ...(query.actorId !== undefined ? { actorId: query.actorId } : {}),
@@ -296,7 +298,7 @@ export async function listImportRuns(
   db?: DbExecutor,
 ): Promise<readonly ImportRunRecord[]> {
   return executor(db).inventoryImport.findMany({
-    where: { ...storeScopeFilter(principal), storeId },
+    where: { AND: [storeScopeFilter(principal), { storeId }] },
     orderBy: { createdAt: 'desc' },
     take: limit,
   });
