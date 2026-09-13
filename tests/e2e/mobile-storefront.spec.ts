@@ -291,15 +291,18 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     await expect(thumbImg).toBeVisible();
     await expect(thumbImg).toHaveAttribute('src', '/seed/products/ragi-flour.svg');
 
-    // Verify quantity and remove controls meet >=44px touch targets
-    const updateBtn = cartRow
-      .locator('form')
-      .filter({ hasText: 'Update' })
-      .getByRole('button', { name: 'Update' });
-    await expect(updateBtn).toBeVisible();
-    const updateBox = await updateBtn.boundingBox();
-    expect(updateBox?.height).toBeGreaterThanOrEqual(44);
-    expect(updateBox?.width).toBeGreaterThanOrEqual(44);
+    // Verify quantity stepper controls (+/-) and remove button meet >=44px touch targets
+    const decBtn = cartRow.getByRole('button', { name: /decrease quantity/i });
+    await expect(decBtn).toBeVisible();
+    const decBox = await decBtn.boundingBox();
+    expect(decBox?.height).toBeGreaterThanOrEqual(44);
+    expect(decBox?.width).toBeGreaterThanOrEqual(44);
+
+    const incBtn = cartRow.getByRole('button', { name: /increase quantity/i });
+    await expect(incBtn).toBeVisible();
+    const incBox = await incBtn.boundingBox();
+    expect(incBox?.height).toBeGreaterThanOrEqual(44);
+    expect(incBox?.width).toBeGreaterThanOrEqual(44);
 
     const removeBtn = cartRow
       .locator('form')
@@ -560,11 +563,11 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     // 9. Assert zero horizontal overflow on this viewport
     await assertNoHorizontalScroll(page);
 
-    // 10. Verify fallback treatment for products without images
+    // 10. Verify fallback treatment for products without images (category-aware placeholder)
     await page.goto('/p/sona-masoori-rice-5kg');
-    await expect(page.getByRole('main').getByText('No photo yet')).toBeVisible();
+    await expect(page.getByRole('main').getByTestId('category-placeholder')).toBeVisible();
     await expect(
-      page.getByRole('main').getByText('Product image will appear once added'),
+      page.getByRole('main').getByText(/Product image will appear once added/i),
     ).toBeVisible();
     await assertNoHorizontalScroll(page);
   });
@@ -610,8 +613,8 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     await page.getByRole('button', { name: /shop store 1/i }).click();
     await expect(page).toHaveURL(/\/$|\/\?/);
 
-    // Add Whole Wheat Atta (clears ₹250 minimum order threshold with a single unit)
-    await page.goto('/p/whole-wheat-atta-5kg');
+    // Add Sona Masoori Rice (clears ₹250 minimum order threshold with a single unit and has high stock across workers)
+    await page.goto('/p/sona-masoori-rice-5kg');
     const addForm = page.locator('form').filter({ hasText: 'Add to basket' });
     await addForm.getByRole('button', { name: 'Add to basket' }).click();
     await expect(addForm.getByRole('status')).toContainText(/in your basket/i);
@@ -822,5 +825,152 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     );
 
     await assertNoHorizontalScroll(page);
+  });
+
+  test('Requirement 1: Cart line item has +/- quantity steppers that auto-update without manual Update button', async ({
+    page,
+  }) => {
+    // Select community first
+    await page.goto('/store/select');
+    await page.getByRole('button', { name: /shop store 1/i }).click();
+
+    // Add first item to cart
+    const firstAddBtn = page.getByRole('button', { name: /add .* to basket/i }).first();
+    await firstAddBtn.click();
+    // Wait for item to be added
+    await expect(page.getByRole('button', { name: /^increase quantity/i }).first()).toBeVisible();
+
+    // Go to cart
+    await page.goto('/cart');
+    const cartRow = page.locator('main ul li').first();
+    await expect(cartRow).toBeVisible();
+
+    // Ensure there is NO manual "Update" button in the cart row
+    await expect(cartRow.getByRole('button', { name: /^Update$/i })).toHaveCount(0);
+
+    // Increase quantity using '+' stepper button
+    const incBtn = cartRow.getByRole('button', { name: /increase quantity/i });
+    await expect(incBtn).toBeVisible();
+    await incBtn.click();
+    await expect(page.getByText(/subtotal \(2 item\(s\)\)/i)).toBeVisible();
+
+    // Decrease quantity using '-' stepper button
+    const decBtn = cartRow.getByRole('button', { name: /decrease quantity/i });
+    await expect(decBtn).toBeVisible();
+    await decBtn.click();
+    await expect(page.getByText(/subtotal \(1 item\(s\)\)/i)).toBeVisible();
+  });
+
+  test('Requirement 2: Mobile header layout at 320px and 375px has zero overlap between basket and community selector', async ({
+    page,
+  }) => {
+    // Helper to test a specific narrow viewport
+    const verifyNarrowHeader = async (width: number, height: number): Promise<void> => {
+      await page.setViewportSize({ width, height });
+
+      // First bind Store 1 community properly
+      await page.goto('/store/select');
+      await page.getByRole('button', { name: /shop store 1/i }).click();
+      await expect(page).toHaveURL(/\/$|\/\?/);
+      await expect(page.getByRole('heading', { name: /shopping at store 1/i })).toBeVisible();
+
+      // Verify no horizontal overflow
+      await assertNoHorizontalScroll(page);
+
+      // Verify header elements are all visible
+      const logoLink = page.getByRole('link', { name: /munder fresh home/i });
+      const shopLink = page.locator('header').getByRole('link', { name: 'Shop' });
+      const aboutLink = page.locator('header').getByRole('link', { name: 'About' });
+      const basketLink = page.locator('header').getByRole('link', { name: /^Basket/ });
+      const communityBtn = page.getByRole('button', { name: /change delivery area/i });
+
+      await expect(logoLink).toBeVisible();
+      await expect(shopLink).toBeVisible();
+      await expect(aboutLink).toBeVisible();
+      await expect(basketLink).toBeVisible();
+      await expect(communityBtn).toBeVisible();
+
+      // Retrieve bounding boxes
+      const basketBox = await basketLink.boundingBox();
+      const communityBox = await communityBtn.boundingBox();
+      const logoBox = await logoLink.boundingBox();
+
+      expect(basketBox).not.toBeNull();
+      expect(communityBox).not.toBeNull();
+      expect(logoBox).not.toBeNull();
+
+      if (basketBox && communityBox && logoBox) {
+        // Verify community selector is positioned below the top bar (below basket and logo) on mobile
+        expect(
+          communityBox.y,
+          `Community selector top (${communityBox.y}) must be below basket bottom (${basketBox.y + basketBox.height})`,
+        ).toBeGreaterThanOrEqual(basketBox.y + basketBox.height - 2);
+
+        // Verify community button does not overlap horizontally or vertically with basket button
+        const overlaps =
+          basketBox.x < communityBox.x + communityBox.width &&
+          basketBox.x + basketBox.width > communityBox.x &&
+          basketBox.y < communityBox.y + communityBox.height &&
+          basketBox.y + basketBox.height > communityBox.y;
+        expect(overlaps, 'Basket and Community selector must not overlap').toBe(false);
+      }
+    };
+
+    // Test 375px viewport (standard compact mobile)
+    await verifyNarrowHeader(375, 667);
+
+    // Test 320px viewport (narrow mobile)
+    await verifyNarrowHeader(320, 568);
+  });
+
+  test('Requirement 3: Distinct About Us page and Home vs Shop Information Architecture', async ({
+    page,
+  }) => {
+    // 3a: Verify dedicated /about page
+    await page.goto('/about');
+    await expect(
+      page.getByRole('heading', { name: /dedicated grocery for residential communities/i }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: /the two-community hub system/i }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: /real operational facts, no fabrications/i }),
+    ).toBeVisible();
+    await expect(page.getByText(/store 1 hub/i)).toBeVisible();
+    await expect(page.getByText(/store 2 hub/i)).toBeVisible();
+
+    // Verify footer link to About Us works
+    await page.goto('/');
+    const footerAboutLink = page
+      .locator('footer')
+      .getByRole('link', { name: /about munder fresh/i });
+    await expect(footerAboutLink).toBeVisible();
+    await footerAboutLink.click();
+    await expect(page).toHaveURL(/\/about$/);
+
+    // 3b: Verify Home reads as distinct landing section with clear CTA to Shop
+    await page.goto('/store/select');
+    await page.getByRole('button', { name: /shop store 1/i }).click();
+    await expect(page).toHaveURL(/\/$|\/\?/);
+    await expect(page.getByRole('heading', { name: /shopping at store 1/i })).toBeVisible();
+
+    // Home should have "Browse Full Shop" CTA
+    const homeShopCta = page.getByRole('link', { name: /browse full shop/i });
+    await expect(homeShopCta).toBeVisible();
+
+    // Home should have "Explore the Full Catalogue" / "Open Full Shop Catalogue" CTA
+    const openShopCta = page.getByRole('link', { name: /open full shop catalogue/i });
+    await expect(openShopCta).toBeVisible();
+
+    // Home should have the About Us callout banner
+    await expect(
+      page.getByRole('heading', { name: /why hyperlocal residential delivery/i }),
+    ).toBeVisible();
+
+    // Navigating to /shop brings the dedicated catalog browsing page
+    await openShopCta.click();
+    await expect(page).toHaveURL(/\/shop$/);
+    await expect(page.getByRole('heading', { name: /all products/i })).toBeVisible();
   });
 });

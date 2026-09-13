@@ -19,14 +19,17 @@ import {
 } from '@/storefront';
 import type { ReadCartMoveNotice } from '@/storefront';
 import { getCommunityConfigForStore } from '../communities';
-import { removeFromCartAction, setCartQuantityAction } from '../cart-actions';
+import { removeFromCartAction } from '../cart-actions';
+import { CartQuantityStepper } from './cart-quantity-stepper';
 import { noticeSentences } from '../cart-notices';
+import { CategoryPlaceholder } from '../category-placeholder';
+import { STOREFRONT_COPY_MANIFEST } from '../copy-manifest';
 import { ActionForm } from '../form';
 import { rupees, Card, PageHeading } from '../ui';
 
 export const metadata: Metadata = {
-  title: 'Your basket',
-  description: 'What you have chosen, priced by the shop that delivers to you.',
+  title: STOREFRONT_COPY_MANIFEST.cart.meta.title,
+  description: STOREFRONT_COPY_MANIFEST.cart.meta.description,
 };
 
 /**
@@ -119,11 +122,11 @@ export default async function CartPage(): Promise<React.ReactElement> {
             href="/shop"
             className="inline-flex min-h-[44px] items-center gap-1.5 py-2 text-xs font-semibold text-emerald-800 hover:text-emerald-900 transition mb-2"
           >
-            ← Continue shopping
+            {STOREFRONT_COPY_MANIFEST.cart.continueShopping}
           </Link>
           <PageHeading
-            title="Your basket"
-            subtitle="Prices and availability are checked against the shop every time you look."
+            title={STOREFRONT_COPY_MANIFEST.cart.heading.title}
+            subtitle={STOREFRONT_COPY_MANIFEST.cart.heading.subtitle}
           />
         </div>
         <Link
@@ -134,7 +137,9 @@ export default async function CartPage(): Promise<React.ReactElement> {
         >
           <span className="h-2 w-2 rounded-full bg-emerald-600 animate-pulse" aria-hidden="true" />
           <span className="font-semibold">{community.name}</span>
-          <span className="text-emerald-700 text-[11px]">· Change area →</span>
+          <span className="text-emerald-700 text-[11px]">
+            {STOREFRONT_COPY_MANIFEST.cart.changeArea}
+          </span>
         </Link>
       </div>
 
@@ -209,7 +214,7 @@ export default async function CartPage(): Promise<React.ReactElement> {
                 Proceed to checkout
               </Link>
               <p className="mt-2.5 text-center text-xs text-slate-500">
-                No account needed. You pay when your order is delivered.
+                {STOREFRONT_COPY_MANIFEST.cart.checkoutNotice}
               </p>
             </div>
 
@@ -228,7 +233,7 @@ export default async function CartPage(): Promise<React.ReactElement> {
                     d="M5 13l4 4L19 7"
                   />
                 </svg>
-                <span>Scheduled slot delivery</span>
+                <span>{STOREFRONT_COPY_MANIFEST.cart.scheduledSlotBadge}</span>
               </div>
               <div className="flex items-center gap-2">
                 <svg
@@ -244,7 +249,7 @@ export default async function CartPage(): Promise<React.ReactElement> {
                     d="M5 13l4 4L19 7"
                   />
                 </svg>
-                <span>Fresh daily quality guaranteed</span>
+                <span>{STOREFRONT_COPY_MANIFEST.cart.trustBadges.storeVerified}</span>
               </div>
               <div className="flex items-center gap-2">
                 <svg
@@ -260,7 +265,7 @@ export default async function CartPage(): Promise<React.ReactElement> {
                     d="M5 13l4 4L19 7"
                   />
                 </svg>
-                <span>Pay with Cash or UPI on delivery</span>
+                <span>{STOREFRONT_COPY_MANIFEST.cart.trustBadges.doorstepPayment}</span>
               </div>
             </div>
           </Card>
@@ -418,20 +423,7 @@ function CartRow({
             /* eslint-disable-next-line @next/next/no-img-element */
             <img src={imageUrl} alt="" className="h-full w-full object-contain" loading="lazy" />
           ) : (
-            <svg
-              className="h-8 w-8 text-slate-300"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
-              />
-            </svg>
+            <CategoryPlaceholder productSlug={line.slug} name={line.name} size="sm" />
           )}
         </Link>
       </div>
@@ -463,25 +455,12 @@ function CartRow({
 
         {/* Mobile-accessible interactive actions (>=44px touch targets) */}
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          <ActionForm
-            action={setCartQuantityAction}
-            submitLabel="Update"
-            className="flex items-center gap-1.5"
-            submitButtonClassName="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-xs hover:bg-slate-100 hover:border-slate-300 active:scale-95 transition disabled:opacity-50"
-          >
-            <input type="hidden" name="productId" value={line.productId} />
-            <label className="text-xs text-slate-600 flex items-center gap-1.5">
-              <span className="text-xs font-medium text-slate-500">Qty</span>
-              <input
-                name="qty"
-                type="number"
-                min={1}
-                max={MAX_LINE_QUANTITY}
-                defaultValue={line.qty}
-                className="h-11 w-16 rounded-xl border border-slate-300 bg-white px-2.5 text-center text-sm font-bold text-slate-900 shadow-xs focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
-              />
-            </label>
-          </ActionForm>
+          <CartQuantityStepper
+            productId={line.productId}
+            productName={line.name}
+            qty={line.qty}
+            maxQty={MAX_LINE_QUANTITY}
+          />
 
           <ActionForm
             action={removeFromCartAction}
