@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { MAX_SEARCH_QUERY_LENGTH } from '@/modules/catalog';
 import { currentStoreContext } from '@/storefront';
 import { searchShop } from '../catalogue';
+import { STOREFRONT_COPY_MANIFEST } from '../copy-manifest';
 import { pageNumber } from '../paging';
 import { Pager, ProductGrid } from '../product-card';
 import { Card, Empty, PageHeading } from '../ui';
@@ -73,10 +75,21 @@ export default async function SearchPage({
       ) : (
         <Card title={`${String(results.total)} result(s) for “${trimmed}”`}>
           {results.items.length === 0 ? (
-            <Empty>
-              Nothing matched “{trimmed}” at your shop. Try a shorter word, or check our category
-              aisles.
-            </Empty>
+            <div className="space-y-4 text-center py-2">
+              <Empty>
+                Nothing matched “{trimmed}” at your shop. Try a shorter word, or check our category
+                aisles.
+              </Empty>
+              <div className="pt-2">
+                <Link
+                  href={`/request-product?q=${encodeURIComponent(trimmed)}`}
+                  className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition"
+                >
+                  {STOREFRONT_COPY_MANIFEST.productRequest.searchPrompt.text}{' '}
+                  {STOREFRONT_COPY_MANIFEST.productRequest.searchPrompt.linkText}
+                </Link>
+              </div>
+            </div>
           ) : (
             <>
               <ProductGrid items={results.items} cartQuantities={cartQuantities} />
@@ -85,6 +98,17 @@ export default async function SearchPage({
                 pageCount={results.pageCount}
                 hrefFor={(next) => `/search?q=${encodeURIComponent(trimmed)}&page=${String(next)}`}
               />
+              <div className="mt-6 border-t border-slate-100 pt-4 text-center">
+                <p className="text-xs text-slate-500">
+                  {STOREFRONT_COPY_MANIFEST.productRequest.searchPrompt.text}{' '}
+                  <Link
+                    href={`/request-product?q=${encodeURIComponent(trimmed)}`}
+                    className="font-bold text-emerald-700 hover:underline"
+                  >
+                    {STOREFRONT_COPY_MANIFEST.productRequest.searchPrompt.linkText}
+                  </Link>
+                </p>
+              </div>
             </>
           )}
         </Card>

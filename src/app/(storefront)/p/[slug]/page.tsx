@@ -4,6 +4,7 @@ import { notFound, redirect } from 'next/navigation';
 import { currentStoreContext } from '@/storefront';
 import { MAX_LINE_QUANTITY } from '@/modules/cart';
 import { addToCartAction } from '../../cart-actions';
+import { CategoryPlaceholder } from '../../category-placeholder';
 import { productPage } from '../../catalogue';
 import { ActionForm } from '../../form';
 import { AvailabilityLabel } from '../../product-card';
@@ -87,24 +88,12 @@ export default async function ProductDetailPage({
         {/* Left Column: Image Showcase / Gallery */}
         <div className="rounded-3xl border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs">
           {page.images.length === 0 ? (
-            <div className="flex min-h-[280px] sm:min-h-[380px] flex-col items-center justify-center rounded-2xl bg-slate-50 p-8 text-center text-slate-400">
-              <svg
-                className="h-16 w-16 text-slate-300 mb-2"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
-                />
-              </svg>
-              <p className="text-sm font-semibold text-slate-500">No photo yet</p>
-              <p className="text-xs text-slate-400 mt-1">Product image will appear once added</p>
-            </div>
+            <CategoryPlaceholder
+              categorySlug={page.categorySlug ?? page.trail[0]?.slug}
+              productSlug={product.slug}
+              name={product.name}
+              size="lg"
+            />
           ) : (
             <div className="flex flex-col gap-3">
               {/* Primary Hero Image */}
