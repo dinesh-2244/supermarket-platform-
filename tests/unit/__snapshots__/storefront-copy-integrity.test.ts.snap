@@ -183,6 +183,44 @@ exports[`Storefront copy integrity & manifest guard > STOREFRONT_COPY_MANIFEST m
   "mobileCartBar": {
     "slotNotice": "Scheduled slot delivery",
   },
+  "productRequest": {
+    "form": {
+      "brandLabel": "Brand (Optional)",
+      "brandPlaceholder": "e.g. Nandini, Fortune, Tata...",
+      "chooseAreaLinkText": "Choose Community Area →",
+      "customerNameLabel": "Your Name (Optional)",
+      "customerNamePlaceholder": "e.g. Priya Sharma",
+      "customerPhoneLabel": "Mobile Number (Optional)",
+      "customerPhonePlaceholder": "10-digit Indian mobile number",
+      "noStoreSelectedPrompt": "Choose your delivery area first so we know which store to ask.",
+      "noteLabel": "Additional Notes or Details (Optional)",
+      "notePlaceholder": "Any specific variety, preference, or detail...",
+      "packSizeLabel": "Pack Size or Weight (Optional)",
+      "packSizePlaceholder": "e.g. 500g, 1kg, 1L, Pack of 4...",
+      "productNameLabel": "Product Name",
+      "productNamePlaceholder": "e.g. Sona Masoori Rice, Greek Yogurt, Basil Leaves...",
+      "submitButton": "Submit Request",
+    },
+    "hero": {
+      "badge": "Resident Catalogue Requests",
+      "subtitle": "Can't find an item in your store catalogue? Tell us what you'd like to see, and our store team will review it.",
+      "title": "Request a Product",
+    },
+    "meta": {
+      "description": "Tell us what grocery items, brands, or daily essentials you would like to see in your community store.",
+      "title": "Request a Product | Munder Fresh Hyperlocal Grocery",
+    },
+    "searchPrompt": {
+      "linkText": "Request a product for your store →",
+      "text": "Can't find what you're looking for?",
+    },
+    "success": {
+      "actionText": "Browse Store Catalogue →",
+      "description": "We've recorded your product request for your community store team to review.",
+      "submitAnotherText": "Request Another Product",
+      "title": "Thanks, we've received your request",
+    },
+  },
   "shop": {
     "meta": {
       "description": "Shop fresh groceries, daily staples, fruits, vegetables, dairy, and household essentials.",

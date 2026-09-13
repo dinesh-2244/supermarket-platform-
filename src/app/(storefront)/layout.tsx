@@ -299,6 +299,11 @@ export default async function StorefrontLayout({
                     Contact Us
                   </Link>
                 </li>
+                <li>
+                  <Link href="/request-product" className="hover:text-emerald-800">
+                    Request a Product
+                  </Link>
+                </li>
               </ul>
             </div>
 
