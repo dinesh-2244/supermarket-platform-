@@ -196,7 +196,7 @@ test.describe.serial('storefront', () => {
     ).trim();
     const term = name.split(' ').slice(0, 2).join(' ');
 
-    await page.getByRole('link', { name: 'Search' }).click();
+    await page.getByRole('searchbox', { name: 'Search grocery catalogue' }).first().press('Enter');
     await expect(page).toHaveURL(/\/search/);
     // An empty query prompts rather than dumping the catalogue.
     await expect(page.getByText(/type something above to search/i)).toBeVisible();
@@ -270,9 +270,10 @@ test.describe.serial('storefront', () => {
     await expect(addForm.getByRole('status')).toContainText(/in your basket/i);
 
     await page.goto('/cart');
-    const qtyForm = page.locator('form').filter({ hasText: 'Update' }).first();
-    await qtyForm.getByLabel('Qty').fill('3');
-    await qtyForm.getByRole('button', { name: 'Update' }).click();
+    const increaseBtn = page.getByRole('button', { name: /increase quantity/i }).first();
+    await increaseBtn.click();
+    await expect(page.getByText(/subtotal \(2 item\(s\)\)/i)).toBeVisible();
+    await increaseBtn.click();
     await expect(page.getByText(/subtotal \(3 item\(s\)\)/i)).toBeVisible();
 
     await page
@@ -351,12 +352,34 @@ test.describe.serial('storefront', () => {
     await expect(page.getByText(/subtotal \(2 item\(s\)\)/i)).toBeVisible();
   });
 
+  test('contact page is accessible from header and displays community store hubs', async ({
+    page,
+  }) => {
+    await page.goto('/locality');
+    await pickFirstArea(page);
+
+    await page.getByRole('link', { name: 'Contact' }).first().click();
+    await expect(page).toHaveURL(/\/contact/);
+    await expect(page.getByRole('heading', { level: 1, name: /contact us/i })).toBeVisible();
+    await expect(page.getByText(/Store 1 Community/i)).toBeVisible();
+    await expect(page.getByText(/Store 2 Community/i)).toBeVisible();
+    await expect(page.getByText(/In-App Support for Active Orders/i)).toBeVisible();
+  });
+
   test('the storefront does not scroll sideways on a small phone', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 780 });
     await page.goto('/locality');
     await pickFirstArea(page);
 
-    for (const path of ['/', '/locality', '/unserviceable', '/search?q=rice', '/cart']) {
+    for (const path of [
+      '/',
+      '/locality',
+      '/unserviceable',
+      '/search?q=rice',
+      '/cart',
+      '/about',
+      '/contact',
+    ]) {
       await page.goto(path);
       const overflows = await page.evaluate(
         () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,

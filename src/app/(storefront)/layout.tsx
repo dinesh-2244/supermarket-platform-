@@ -9,6 +9,7 @@ import {
 } from '@/storefront';
 import { clearAreaAction } from './actions';
 import { communityNameForStore, STORE_COMMUNITIES } from './communities';
+import { STOREFRONT_COPY_MANIFEST } from './copy-manifest';
 import { MobileCartBar } from './mobile-cart-bar';
 
 /**
@@ -36,61 +37,96 @@ export default async function StorefrontLayout({
   const communityName = communityNameForStore(store);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col antialiased">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col antialiased overflow-x-hidden">
       {/* Top Banner & Header */}
       <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur shadow-xs">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8">
           {/* Main Header Row */}
-          <div className="flex items-center justify-between gap-3 py-2.5 sm:py-3.5">
-            {/* Brand Logo & Community Pill */}
-            <div className="flex items-center gap-3 sm:gap-6 min-w-0">
-              <Link href="/" className="flex items-center gap-2 shrink-0">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-700 text-white font-black text-lg shadow-xs">
+          <div className="flex flex-wrap items-center justify-between gap-x-1.5 sm:gap-x-4 gap-y-2 py-2 sm:py-3.5">
+            {/* Brand Logo */}
+            <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+              <Link
+                href="/"
+                className="flex items-center gap-1.5 sm:gap-2 shrink-0"
+                aria-label="Munder Fresh Home"
+              >
+                <span className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl bg-emerald-700 text-white font-black text-sm sm:text-lg shadow-xs">
                   M
                 </span>
-                <span className="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900">
+                <span className="text-sm sm:text-xl font-extrabold tracking-tight text-slate-900">
                   Munder<span className="text-emerald-700">Fresh</span>
                 </span>
               </Link>
-
-              {/* Community Selector Header Control (D2) */}
-              <div className="min-w-0">
-                {context === null ? (
-                  <Link
-                    href="/store/select"
-                    className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-600/20 hover:bg-emerald-100 transition min-h-[44px] sm:min-h-0"
-                    aria-label="Select delivery community"
-                  >
-                    <span className="text-emerald-700">📍</span>
-                    <span className="truncate max-w-[140px] sm:max-w-none">Select Community ▼</span>
-                  </Link>
-                ) : (
-                  <form action={clearAreaAction} className="inline-block">
-                    <button
-                      type="submit"
-                      className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-left text-xs font-medium text-slate-800 hover:bg-slate-200/80 transition min-h-[44px] sm:min-h-0"
-                      aria-label="Change delivery area"
-                      title="Click to switch community or store"
-                    >
-                      <span className="text-emerald-700">📍</span>
-                      <span className="text-slate-500 hidden sm:inline">Delivering to:</span>
-                      <span className="font-semibold text-slate-900 truncate max-w-[140px] sm:max-w-[220px]">
-                        {communityName}
-                      </span>
-                      <span className="text-slate-400 text-[10px]">▼</span>
-                    </button>
-                  </form>
-                )}
-              </div>
             </div>
 
+            {/* Navigation Right: Shop, About, Basket, Account */}
+            <nav className="flex items-center gap-0.5 sm:gap-3 shrink-0 order-2 sm:order-3">
+              <Link
+                href="/shop"
+                className="inline-flex text-xs font-semibold text-slate-700 hover:text-emerald-800 px-1.5 sm:px-2 py-1.5 rounded-lg hover:bg-slate-100 transition min-h-[44px] items-center"
+              >
+                Shop
+              </Link>
+
+              <Link
+                href="/about"
+                className="inline-flex text-xs font-semibold text-slate-700 hover:text-emerald-800 px-1.5 sm:px-2 py-1.5 rounded-lg hover:bg-slate-100 transition min-h-[44px] items-center"
+              >
+                About
+              </Link>
+
+              <Link
+                href="/contact"
+                className="inline-flex text-xs font-semibold text-slate-700 hover:text-emerald-800 px-1.5 sm:px-2 py-1.5 rounded-lg hover:bg-slate-100 transition min-h-[44px] items-center"
+              >
+                Contact
+              </Link>
+
+              <Link
+                href="/cart"
+                className="relative inline-flex items-center gap-1 rounded-full bg-emerald-700 px-2.5 sm:px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 transition min-h-[44px]"
+                aria-label={`Basket${basketCount > 0 ? ` (${basketCount})` : ''}`}
+              >
+                <svg
+                  className="w-4 h-4 shrink-0"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
+                  />
+                </svg>
+                <span className="hidden sm:inline">Basket</span>
+                <span className="sr-only sm:hidden">Basket</span>
+                {basketCount === 0 ? null : (
+                  <span
+                    className="ml-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1 text-[11px] font-bold text-emerald-800"
+                    aria-label={`${String(basketCount)} item(s) in your basket`}
+                  >
+                    {basketCount}
+                  </span>
+                )}
+              </Link>
+
+              <Link
+                href="/account"
+                className="inline-flex items-center text-xs font-medium text-slate-600 hover:text-slate-900 px-1.5 sm:px-2 py-2 min-h-[44px]"
+              >
+                {customer === null ? 'Sign in' : 'Account'}
+              </Link>
+            </nav>
+
             {/* Desktop Universal Search Bar (D5) */}
-            <div className="hidden md:flex flex-1 max-w-lg mx-4">
+            <div className="hidden md:flex flex-1 max-w-sm lg:max-w-md mx-2 order-2">
               <form action="/search" method="get" className="w-full relative">
                 <input
                   type="search"
                   name="q"
-                  placeholder="Search fresh vegetables, milk, atta, fruits, snacks..."
+                  placeholder="Search fresh vegetables, milk, atta, fruits..."
                   className="w-full rounded-full border border-slate-300 bg-slate-50/70 py-2 pl-10 pr-4 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600/20 transition"
                   aria-label="Search grocery catalogue"
                 />
@@ -107,45 +143,46 @@ export default async function StorefrontLayout({
               </form>
             </div>
 
-            {/* Navigation Right: Search, Basket, Account */}
-            <nav className="flex items-center gap-2 sm:gap-4 shrink-0">
-              <Link
-                href="/search"
-                className="hidden sm:inline-flex text-xs font-semibold text-slate-700 hover:text-emerald-800 px-2 py-1.5"
-              >
-                Search
-              </Link>
-
-              <Link
-                href="/cart"
-                className="relative inline-flex items-center gap-1.5 rounded-full bg-emerald-700 px-3.5 py-2 text-xs font-semibold text-white hover:bg-emerald-800 transition min-h-[44px]"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
-                  />
-                </svg>
-                <span className="hidden sm:inline">Basket</span>
-                {basketCount === 0 ? null : (
-                  <span
-                    className="ml-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1 text-[11px] font-bold text-emerald-800"
-                    aria-label={`${String(basketCount)} item(s) in your basket`}
-                  >
-                    {basketCount}
+            {/* Community Selector Header Control (D2) */}
+            {/* On mobile (< sm): wraps cleanly as full-width delivery bar, avoiding overlap with logo and basket */}
+            {/* On desktop (sm+): sits next to logo */}
+            <div className="order-3 sm:order-1 w-full sm:w-auto min-w-0">
+              {context === null ? (
+                <Link
+                  href="/store/select"
+                  className="inline-flex w-full sm:w-auto items-center justify-between sm:justify-start gap-1.5 rounded-xl sm:rounded-full bg-emerald-50 px-3 py-2 sm:py-1.5 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-600/20 hover:bg-emerald-100 transition min-h-[44px] sm:min-h-0"
+                  aria-label="Select delivery community"
+                >
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-emerald-700 shrink-0">📍</span>
+                    <span className="truncate">Select Community</span>
                   </span>
-                )}
-              </Link>
-
-              <Link
-                href="/account"
-                className="inline-flex items-center text-xs font-medium text-slate-600 hover:text-slate-900 px-2 py-2 min-h-[44px]"
-              >
-                {customer === null ? 'Sign in' : 'Account'}
-              </Link>
-            </nav>
+                  <span className="text-emerald-700 text-xs font-bold shrink-0">Choose ▼</span>
+                </Link>
+              ) : (
+                <form action={clearAreaAction} className="w-full sm:w-auto">
+                  <button
+                    type="submit"
+                    className="inline-flex w-full sm:w-auto items-center justify-between sm:justify-start gap-1.5 rounded-xl sm:rounded-full bg-slate-100 px-3 py-2 sm:py-1.5 text-left text-xs font-medium text-slate-800 hover:bg-slate-200/80 transition min-h-[44px] sm:min-h-0"
+                    aria-label="Change delivery area"
+                    title="Click to switch community or store"
+                  >
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-emerald-700 shrink-0">📍</span>
+                      <span className="text-slate-500 hidden sm:inline shrink-0">
+                        Delivering to:
+                      </span>
+                      <span className="font-semibold text-slate-900 truncate max-w-[200px] sm:max-w-[160px] lg:max-w-[220px]">
+                        {communityName}
+                      </span>
+                    </span>
+                    <span className="text-emerald-700 sm:text-slate-400 text-xs sm:text-[10px] shrink-0">
+                      ▼
+                    </span>
+                  </button>
+                </form>
+              )}
+            </div>
           </div>
 
           {/* Mobile Search Bar Row (D5 - Thumb Zone) */}
@@ -205,14 +242,13 @@ export default async function StorefrontLayout({
                 </span>
               </div>
               <p className="mt-2 text-xs text-slate-500 leading-relaxed">
-                Dedicated hyperlocal grocery shopping for residential communities. Scheduled slot
-                delivery of fresh vegetables, fruits, dairy, staples, and daily household needs.
+                {STOREFRONT_COPY_MANIFEST.footer.brandDescription}
               </p>
             </div>
 
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                Communities Served
+                {STOREFRONT_COPY_MANIFEST.footer.communitiesHeading}
               </h3>
               <ul className="mt-3 space-y-2 text-xs text-slate-600">
                 {STORE_COMMUNITIES.map((community) => (
@@ -227,7 +263,7 @@ export default async function StorefrontLayout({
                     href="/unserviceable"
                     className="text-emerald-700 font-medium hover:underline"
                   >
-                    Living elsewhere? Request delivery →
+                    {STOREFRONT_COPY_MANIFEST.footer.unserviceableLink}
                   </Link>
                 </li>
               </ul>
@@ -244,6 +280,11 @@ export default async function StorefrontLayout({
                   </Link>
                 </li>
                 <li>
+                  <Link href="/about" className="hover:text-emerald-800 font-medium">
+                    About Munder Fresh
+                  </Link>
+                </li>
+                <li>
                   <Link href="/cart" className="hover:text-emerald-800">
                     Your Basket
                   </Link>
@@ -253,17 +294,20 @@ export default async function StorefrontLayout({
                     Account & Past Orders
                   </Link>
                 </li>
+                <li>
+                  <Link href="/contact" className="hover:text-emerald-800">
+                    Contact Us
+                  </Link>
+                </li>
               </ul>
             </div>
 
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                Quality Guarantee
+                {STOREFRONT_COPY_MANIFEST.footer.commitmentsTitle}
               </h3>
               <p className="mt-3 text-xs text-slate-500 leading-relaxed">
-                Prices and availability are verified from your community&apos;s dedicated store.
-                Free delivery options available on meeting order thresholds. Pay via Cash or UPI on
-                delivery.
+                {STOREFRONT_COPY_MANIFEST.footer.commitmentsDescription}
               </p>
             </div>
           </div>
