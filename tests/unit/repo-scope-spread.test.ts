@@ -65,29 +65,60 @@ function isWhereInitializer(node: ts.Node): boolean {
 }
 
 /**
- * Line numbers of every use of the identifier `scopedWhere` that is not the
- * callee of a call sitting directly as the initializer of a `where:` property.
- * Decided on the syntax tree, not on text: the call node itself must be the
- * property's initializer, so nothing can be wrapped around it or appended to
- * it. Import declarations are the one other place the name may appear.
+ * The local names under which `scopedWhere` is bound in this file: the import
+ * specifier's local name, alias or not. Every use of an alias is judged
+ * exactly like the real name. The alias itself is reported by the walk below:
+ * in `scopedWhere as x` the identifier `scopedWhere` is the specifier's
+ * `propertyName`, not its `name`, and nothing sanctions that — there is no
+ * reason to rename a function that must appear inline at every call site.
+ */
+function scopedWhereBindings(file: ts.SourceFile): Set<string> {
+  const names = new Set<string>(['scopedWhere']);
+  for (const statement of file.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (bindings === undefined || !ts.isNamedImports(bindings)) continue;
+    for (const spec of bindings.elements) {
+      if ((spec.propertyName ?? spec.name).text === 'scopedWhere') names.add(spec.name.text);
+    }
+  }
+  return names;
+}
+
+/**
+ * Line numbers of every use of `scopedWhere` — under its own name or any local
+ * alias of the import — that is not the callee of a call sitting directly as
+ * the initializer of a `where:` property. Decided on the syntax tree, not on
+ * text: the call node itself must be the property's initializer, so nothing
+ * can be wrapped around it or appended to it. The named-import specifier is
+ * the one other place the name may appear; a namespace member, a string key,
+ * a re-export or a destructured dynamic import are not it.
  */
 export function misusesScopedWhere(source: string): number[] {
   const file = ts.createSourceFile('guard.ts', source, ts.ScriptTarget.Latest, true);
   const lines: number[] = [];
+  const names = scopedWhereBindings(file);
+  const report = (node: ts.Node): void => {
+    lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
+  };
   const visit = (node: ts.Node): void => {
-    if (ts.isIdentifier(node) && node.text === 'scopedWhere') {
+    if (ts.isIdentifier(node) && names.has(node.text)) {
       const parent = node.parent;
-      const imported = ts.isImportSpecifier(parent) || ts.isImportClause(parent);
+      const isImportName = ts.isImportSpecifier(parent) && parent.name === node;
       const sanctioned =
         ts.isCallExpression(parent) && parent.expression === node && isWhereInitializer(parent);
-      if (!imported && !sanctioned) {
-        lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
-      }
+      if (!isImportName && !sanctioned) report(node);
+    } else if (
+      (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) &&
+      node.text === 'scopedWhere'
+    ) {
+      // `authz['scopedWhere']` and friends: the name as data, not as a binding.
+      report(node);
     }
     ts.forEachChild(node, visit);
   };
   visit(file);
-  return lines;
+  return [...new Set(lines)].sort((a, b) => a - b);
 }
 
 describe('repository store scoping', () => {
@@ -235,6 +266,42 @@ describe('repository store scoping', () => {
     expect(misusesScopedWhere(`const q = { scopedWhere };`)).toEqual([1]);
     expect(misusesScopedWhere(`const q = { where: scopedWhere };`)).toEqual([1]);
     expect(misusesScopedWhere(repo(`    where: widen(scopedWhere),`))).toEqual([4]);
+  });
+
+  it('follows the import binding, whatever it is called locally — OSCAR round 5', () => {
+    // The import is renamed, the honest call sites use the alias, and one
+    // site appends `.AND[1]` — the round-4 bypass, under a name the guard
+    // never looked at. The alias is a violation in itself (there is no reason
+    // to rename a function that must appear inline at every call site), and
+    // every use of the alias is checked exactly like the real name.
+    const aliased =
+      `import { scopedWhere as aliasedScopedWhere } from '../platform/index';\n` +
+      `export function a(principal, storeId) {\n` +
+      `  return prisma.order.findMany({ where: aliasedScopedWhere(principal, { storeId }) });\n` +
+      `}\n` +
+      `export function b(principal, storeId) {\n` +
+      `  return prisma.order.findMany({ where: aliasedScopedWhere(principal, { storeId }).AND[1] });\n` +
+      `}`;
+    expect(misusesScopedWhere(aliased)).toEqual([1, 6]);
+
+    // The same binding, reached other ways: a namespace import, a string key,
+    // a default-style re-export, a dynamic import destructure.
+    expect(
+      misusesScopedWhere(
+        `import * as authz from '../platform/index';\nconst q = { where: authz.scopedWhere(p, x) };`,
+      ),
+    ).toEqual([2]);
+    expect(
+      misusesScopedWhere(
+        `import * as authz from '../platform/index';\nconst q = { where: authz['scopedWhere'](p, x).AND[1] };`,
+      ),
+    ).toEqual([2]);
+    expect(
+      misusesScopedWhere(`const { scopedWhere: sw } = await import('../platform/index');`),
+    ).toEqual([1]);
+    expect(misusesScopedWhere(`export { scopedWhere as sw } from '../platform/index';`)).toEqual([
+      1,
+    ]);
     expect(
       misusesScopedWhere(
         `import * as authz from '../platform/index';\nconst q = { where: authz.scopedWhere(p, x).AND[1] };`,
