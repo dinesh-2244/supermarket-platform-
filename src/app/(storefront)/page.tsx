@@ -14,7 +14,7 @@ import { getCartQuantities } from './cart-quantities';
 export const metadata: Metadata = {
   title: 'Munder Fresh | Hyperlocal Grocery Platform',
   description:
-    'Farm-fresh groceries, daily essentials, dairy, staples, and fruits delivered to your community in scheduled slots.',
+    'Groceries, daily essentials, dairy, staples, and fruits delivered to your community in scheduled slots.',
 };
 
 /**
@@ -55,9 +55,8 @@ export default async function StorefrontHome({
               </span>
             </h1>
             <p className="mt-3 text-sm sm:text-base text-emerald-100 max-w-lg leading-relaxed">
-              Doorstep delivery of farm-fresh fruits &amp; vegetables, dairy, pulses, staples, and
-              daily home essentials. Picked fresh and delivered by your dedicated community store
-              hub.
+              Doorstep delivery of fruits &amp; vegetables, dairy, pulses, staples, and daily home
+              essentials — stocked and delivered by your dedicated community store hub.
             </p>
           </div>
           <div className="absolute -right-12 -bottom-12 opacity-15 pointer-events-none text-9xl">
@@ -81,9 +80,9 @@ export default async function StorefrontHome({
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
             <span className="text-2xl">🥦</span>
-            <h3 className="mt-2 text-xs sm:text-sm font-bold text-slate-900">Farm Fresh Daily</h3>
+            <h3 className="mt-2 text-xs sm:text-sm font-bold text-slate-900">Fresh Produce</h3>
             <p className="mt-0.5 text-[11px] text-slate-500">
-              Vegetables & fruits sourced every morning
+              Vegetables & fruits, stocked at your local hub
             </p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
@@ -111,8 +110,7 @@ export default async function StorefrontHome({
             </h2>
             <p className="mt-2 text-xs sm:text-sm text-slate-600 leading-relaxed">
               We operate dedicated mini-hubs for partner residential societies. Learn how our
-              two-community model delivers scheduled morning and evening slots with zero surprise
-              markups.
+              two-community model delivers scheduled morning and evening slots.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
@@ -198,9 +196,9 @@ export default async function StorefrontHome({
           <span className="rounded-md bg-white/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
             Daily Essentials
           </span>
-          <h2 className="mt-2 text-xl font-black">Morning Fresh Harvest</h2>
+          <h2 className="mt-2 text-xl font-black">Fruits, Vegetables &amp; Dairy</h2>
           <p className="mt-1 text-xs text-amber-50">
-            Local farm vegetables, milk &amp; bakery goods ready for breakfast slots.
+            Vegetables, milk &amp; bakery goods for your breakfast slot.
           </p>
           <Link
             href="/c/fruits-vegetables"
@@ -216,7 +214,7 @@ export default async function StorefrontHome({
           </span>
           <h2 className="mt-2 text-xl font-black">Kitchen Staples &amp; Grains</h2>
           <p className="mt-1 text-xs text-teal-50">
-            Rice, atta, edible oils &amp; dals at community-exclusive wholesale prices.
+            Rice, atta, edible oils &amp; dals at your community's everyday prices.
           </p>
           <Link
             href="/c/staples"

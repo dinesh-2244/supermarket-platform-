@@ -98,4 +98,74 @@ describe('Storefront copy integrity (M1 regression guard)', () => {
       ).toBe(false);
     }
   });
+
+  /**
+   * PR #46 (About/Home) went through three review rounds because each fix only
+   * addressed the exact phrase reported, not the underlying pattern — an
+   * absolute guarantee, or an operational claim (sourcing, stock presence, no
+   * markups, no cancellations) with nothing in the codebase backing it. These
+   * patterns lock in every phrase found across all three rounds so the same
+   * class of claim can't silently reappear on a future storefront page.
+   */
+  test('no storefront file contains unbacked sourcing/provenance claims', () => {
+    const patterns = [
+      /vetted local produc/i,
+      /daily fresh sourcing/i,
+      /sourced every morning/i,
+      /morning fresh sourcing/i,
+      /\bfarm[- ]fresh\b/i,
+      /\bpicked fresh\b/i,
+      /\blocal farm\b/i,
+      /\bmorning fresh harvest\b/i,
+    ];
+    for (const file of storefrontFiles) {
+      const content = fs.readFileSync(file, 'utf-8');
+      const relative = path.relative(process.cwd(), file);
+      for (const pattern of patterns) {
+        expect(
+          pattern.test(content),
+          `Found unbacked sourcing/provenance claim (${pattern.source}) in ${relative}`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  test('no storefront file claims an absolute stock/fulfillment guarantee', () => {
+    const patterns = [
+      /\bno missing items\b/i,
+      /\bactual physical stock\b/i,
+      /\bno lingering waits\b/i,
+      /never take orders we cannot fulfill/i,
+      /\bzero\s+unannounced substitutions\b/i,
+      /ensur\w*\s+(?:stock accuracy|timely fulfillment)/i,
+    ];
+    for (const file of storefrontFiles) {
+      const content = fs.readFileSync(file, 'utf-8');
+      const relative = path.relative(process.cwd(), file);
+      for (const pattern of patterns) {
+        expect(
+          pattern.test(content),
+          `Found unbacked stock/fulfillment guarantee (${pattern.source}) in ${relative}`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  test('no storefront file claims a pricing/cancellation policy that does not exist', () => {
+    const patterns = [
+      /\bsurprise markups?\b/i,
+      /\bcancellation penalt(?:y|ies)\b/i,
+      /\bwholesale prices?\b/i,
+    ];
+    for (const file of storefrontFiles) {
+      const content = fs.readFileSync(file, 'utf-8');
+      const relative = path.relative(process.cwd(), file);
+      for (const pattern of patterns) {
+        expect(
+          pattern.test(content),
+          `Found unbacked pricing/cancellation-policy claim (${pattern.source}) in ${relative}`,
+        ).toBe(false);
+      }
+    }
+  });
 });
