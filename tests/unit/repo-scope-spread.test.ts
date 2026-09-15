@@ -33,6 +33,7 @@ import { describe, expect, it } from 'vitest';
 const MODULES_DIR = join(process.cwd(), 'src', 'modules');
 const DEFINED_IN = join(MODULES_DIR, 'platform', 'authz', 'index.ts');
 const PLATFORM_INDEX = join(MODULES_DIR, 'platform', 'index.ts');
+const PLATFORM_INDEX_NO_EXT = join(MODULES_DIR, 'platform', 'index');
 
 function moduleFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
@@ -65,19 +66,27 @@ function isWhereInitializer(node: ts.Node): boolean {
 }
 
 /**
- * The local names under which `scopedWhere` is bound in this file: the import
- * specifier's local name, alias or not. Every use of an alias is judged
- * exactly like the real name. The alias itself is reported by the walk below:
- * in `scopedWhere as x` the identifier `scopedWhere` is the specifier's
- * `propertyName`, not its `name`, and nothing sanctions that — there is no
- * reason to rename a function that must appear inline at every call site.
+ * The local names under which the *genuine* `scopedWhere` is bound in this
+ * file: import specifiers whose imported name is `scopedWhere` **and** whose
+ * module specifier path-resolves, from the importing file, to
+ * platform/index.ts. Local spelling is never the identity — `import { safeScope
+ * as scopedWhere } from './scope-helper'` binds the name `scopedWhere` to
+ * something else entirely (OSCAR round 11) — so a local `scopedWhere` that is
+ * not one of these is judged like any other misuse. Aliases of the genuine
+ * import are tracked so every use of them is judged the same way; the alias
+ * itself is reported by the walk (its `scopedWhere` is the specifier's
+ * propertyName, not its name).
  */
-function scopedWhereBindings(file: ts.SourceFile): Set<string> {
-  const names = new Set<string>(['scopedWhere']);
+function genuineScopedWhereBindings(file: ts.SourceFile, fromFile: string): Set<string> {
+  const names = new Set<string>();
   for (const statement of file.statements) {
-    if (!ts.isImportDeclaration(statement)) continue;
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) {
+      continue;
+    }
+    const fromPlatform =
+      resolve(dirname(fromFile), statement.moduleSpecifier.text) === PLATFORM_INDEX_NO_EXT;
     const bindings = statement.importClause?.namedBindings;
-    if (bindings === undefined || !ts.isNamedImports(bindings)) continue;
+    if (!fromPlatform || bindings === undefined || !ts.isNamedImports(bindings)) continue;
     for (const spec of bindings.elements) {
       if ((spec.propertyName ?? spec.name).text === 'scopedWhere') names.add(spec.name.text);
     }
@@ -94,20 +103,24 @@ function scopedWhereBindings(file: ts.SourceFile): Set<string> {
  * the one other place the name may appear; a namespace member, a string key,
  * a re-export or a destructured dynamic import are not it.
  */
-export function misusesScopedWhere(source: string): number[] {
-  const file = ts.createSourceFile('guard.ts', source, ts.ScriptTarget.Latest, true);
+export function misusesScopedWhere(source: string, fromFile: string): number[] {
+  const file = ts.createSourceFile(fromFile, source, ts.ScriptTarget.Latest, true);
   const lines: number[] = [];
-  const names = scopedWhereBindings(file);
+  const genuine = genuineScopedWhereBindings(file, fromFile);
   const report = (node: ts.Node): void => {
     lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
   };
   const visit = (node: ts.Node): void => {
-    if (ts.isIdentifier(node) && names.has(node.text)) {
+    if (ts.isIdentifier(node) && (genuine.has(node.text) || node.text === 'scopedWhere')) {
       const parent = node.parent;
+      // The name `scopedWhere` bound to anything but the genuine import — a
+      // helper's export aliased to it, a local declaration — is a violation
+      // wherever it appears, including at its import.
+      const counterfeit = !genuine.has(node.text);
       const isImportName = ts.isImportSpecifier(parent) && parent.name === node;
       const sanctioned =
         ts.isCallExpression(parent) && parent.expression === node && isWhereInitializer(parent);
-      if (!isImportName && !sanctioned) report(node);
+      if (counterfeit || (!isImportName && !sanctioned)) report(node);
     } else if (
       (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) &&
       node.text === 'scopedWhere'
@@ -235,9 +248,9 @@ function takesPrincipal(fn: FunctionLike): boolean {
  * Reads in functions without a principal — by id, by token — are not
  * store-scoped reads and are not judged here.
  */
-export function unscopedReadsForPrincipal(source: string): number[] {
-  const file = ts.createSourceFile('repo.ts', source, ts.ScriptTarget.Latest, true);
-  const names = scopedWhereBindings(file);
+export function unscopedReadsForPrincipal(source: string, fromFile: string): number[] {
+  const file = ts.createSourceFile(fromFile, source, ts.ScriptTarget.Latest, true);
+  const names = genuineScopedWhereBindings(file, fromFile);
   const lines: number[] = [];
   const judge = (node: ts.Node): void => {
     if (
@@ -362,6 +375,9 @@ export function scopedWhereDeclarationsIn(source: string): number[] {
   return lines;
 }
 
+/** Where the snippet fixtures pretend to live, so `../platform/index` resolves. */
+const HERE = join(MODULES_DIR, 'orders', 'repo.ts');
+
 describe('repository store scoping', () => {
   const files = moduleFiles(MODULES_DIR).filter(
     (file) => file !== DEFINED_IN && file !== PLATFORM_INDEX,
@@ -382,7 +398,7 @@ describe('repository store scoping', () => {
   it('uses scopedWhere only as the direct value of a where: property', () => {
     const violations: string[] = [];
     for (const file of files) {
-      for (const line of misusesScopedWhere(readFileSync(file, 'utf8'))) {
+      for (const line of misusesScopedWhere(readFileSync(file, 'utf8'), file)) {
         violations.push(`${relative(process.cwd(), file)}:${line}`);
       }
     }
@@ -417,25 +433,32 @@ describe('repository store scoping', () => {
     expect(
       misusesScopedWhere(
         repo(`    where: scopedWhere(principal, { storeId, status: { in: statuses } }),`),
+        HERE,
       ),
     ).toEqual([]);
     expect(
-      misusesScopedWhere(repo(`    where: scopedWhere(principal, {\n      storeId,\n    }),`)),
+      misusesScopedWhere(
+        repo(`    where: scopedWhere(principal, {\n      storeId,\n    }),`),
+        HERE,
+      ),
     ).toEqual([]);
-    expect(misusesScopedWhere(repo(`    where:\n      scopedWhere(principal, {}, 'id'),`))).toEqual(
-      [],
-    );
-    expect(misusesScopedWhere(repo(`    'where': scopedWhere(principal, { storeId }),`))).toEqual(
-      [],
-    );
+    expect(
+      misusesScopedWhere(repo(`    where:\n      scopedWhere(principal, {}, 'id'),`), HERE),
+    ).toEqual([]);
+    expect(
+      misusesScopedWhere(repo(`    'where': scopedWhere(principal, { storeId }),`), HERE),
+    ).toEqual([]);
     // A nested relation filter is still a where.
     expect(
       misusesScopedWhere(
         repo(`    select: { order: { where: scopedWhere(principal, { storeId }) } },`),
+        HERE,
       ),
     ).toEqual([]);
     // The import line is not a use.
-    expect(misusesScopedWhere(`import { scopedWhere } from '../platform/index';`)).toEqual([]);
+    expect(misusesScopedWhere(`import { scopedWhere } from '../platform/index';`, HERE)).toEqual(
+      [],
+    );
   });
 
   it('rejects every other use of the name — by node shape, not text', () => {
@@ -443,6 +466,7 @@ describe('repository store scoping', () => {
     expect(
       misusesScopedWhere(
         repo(`    where: { ...scopedWhere(principal, { storeId }), AND: [other] },`),
+        HERE,
       ),
     ).toEqual([4]);
 
@@ -453,62 +477,64 @@ describe('repository store scoping', () => {
       `import { scopedWhere } from '../platform/index';\n` +
       `const scope = scopedWhere(principal, { storeId });\n` +
       `const q = { where: { ...scope, AND: [{ storeId }] } };`;
-    expect(misusesScopedWhere(parked)).toEqual([2]);
+    expect(misusesScopedWhere(parked, HERE)).toEqual([2]);
 
     // OSCAR's round-4 trick: the initializer still *starts* with the call, but
     // is a property/element access on it — `.AND[1]` selects the caller's own
     // branch and silently drops the principal scope. Typechecks, compiles.
     expect(
-      misusesScopedWhere(repo(`    where: scopedWhere(principal, { storeId }).AND[1],`)),
-    ).toEqual([4]);
-    expect(misusesScopedWhere(repo(`    where: scopedWhere(principal, { storeId }).AND,`))).toEqual(
-      [4],
-    );
-    expect(
-      misusesScopedWhere(repo(`    where: scopedWhere(principal, { storeId })['AND'][1],`)),
+      misusesScopedWhere(repo(`    where: scopedWhere(principal, { storeId }).AND[1],`), HERE),
     ).toEqual([4]);
     expect(
-      misusesScopedWhere(repo(`    where: scopedWhere(principal, { storeId })!.AND[1],`)),
+      misusesScopedWhere(repo(`    where: scopedWhere(principal, { storeId }).AND,`), HERE),
     ).toEqual([4]);
     expect(
-      misusesScopedWhere(repo(`    where: scopedWhere(principal, { storeId }) as never,`)),
+      misusesScopedWhere(repo(`    where: scopedWhere(principal, { storeId })['AND'][1],`), HERE),
+    ).toEqual([4]);
+    expect(
+      misusesScopedWhere(repo(`    where: scopedWhere(principal, { storeId })!.AND[1],`), HERE),
+    ).toEqual([4]);
+    expect(
+      misusesScopedWhere(repo(`    where: scopedWhere(principal, { storeId }) as never,`), HERE),
     ).toEqual([4]);
 
     // Any other wrapping of the call is the same shape of violation.
-    expect(misusesScopedWhere(repo(`    where: (scopedWhere(principal, { storeId })),`))).toEqual([
-      4,
-    ]);
     expect(
-      misusesScopedWhere(repo(`    where: await scopedWhere(principal, { storeId }),`)),
+      misusesScopedWhere(repo(`    where: (scopedWhere(principal, { storeId })),`), HERE),
     ).toEqual([4]);
     expect(
-      misusesScopedWhere(repo(`    where: widen(scopedWhere(principal, { storeId })),`)),
+      misusesScopedWhere(repo(`    where: await scopedWhere(principal, { storeId }),`), HERE),
     ).toEqual([4]);
     expect(
-      misusesScopedWhere(repo(`    where: cond ? scopedWhere(principal, { storeId }) : {},`)),
+      misusesScopedWhere(repo(`    where: widen(scopedWhere(principal, { storeId })),`), HERE),
     ).toEqual([4]);
     expect(
-      misusesScopedWhere(repo(`    where: scopedWhere(principal, { storeId }) ?? {},`)),
+      misusesScopedWhere(repo(`    where: cond ? scopedWhere(principal, { storeId }) : {},`), HERE),
     ).toEqual([4]);
-    expect(misusesScopedWhere(repo(`    where: scopedWhere(principal, { storeId })(),`))).toEqual([
-      4,
-    ]);
+    expect(
+      misusesScopedWhere(repo(`    where: scopedWhere(principal, { storeId }) ?? {},`), HERE),
+    ).toEqual([4]);
+    expect(
+      misusesScopedWhere(repo(`    where: scopedWhere(principal, { storeId })(),`), HERE),
+    ).toEqual([4]);
 
     // Right call, wrong property.
-    expect(misusesScopedWhere(repo(`    orderBy: scopedWhere(principal, { storeId }),`))).toEqual([
-      4,
-    ]);
     expect(
-      misusesScopedWhere(repo(`    where: { order: scopedWhere(principal, { storeId }) },`)),
+      misusesScopedWhere(repo(`    orderBy: scopedWhere(principal, { storeId }),`), HERE),
+    ).toEqual([4]);
+    expect(
+      misusesScopedWhere(repo(`    where: { order: scopedWhere(principal, { storeId }) },`), HERE),
     ).toEqual([4]);
 
     // Returned from a helper, forwarded, aliased, or passed as a value.
-    expect(misusesScopedWhere(`function scope(p) { return scopedWhere(p, extra); }`)).toEqual([1]);
-    expect(misusesScopedWhere(`run(principal, scopedWhere(principal, extra));`)).toEqual([1]);
-    expect(misusesScopedWhere(`const f = scopedWhere;`)).toEqual([1]);
-    expect(misusesScopedWhere(`const q = { scopedWhere };`)).toEqual([1]);
-    expect(misusesScopedWhere(`const q = { where: scopedWhere };`)).toEqual([1]);
-    expect(misusesScopedWhere(repo(`    where: widen(scopedWhere),`))).toEqual([4]);
+    expect(misusesScopedWhere(`function scope(p) { return scopedWhere(p, extra); }`, HERE)).toEqual(
+      [1],
+    );
+    expect(misusesScopedWhere(`run(principal, scopedWhere(principal, extra));`, HERE)).toEqual([1]);
+    expect(misusesScopedWhere(`const f = scopedWhere;`, HERE)).toEqual([1]);
+    expect(misusesScopedWhere(`const q = { scopedWhere };`, HERE)).toEqual([1]);
+    expect(misusesScopedWhere(`const q = { where: scopedWhere };`, HERE)).toEqual([1]);
+    expect(misusesScopedWhere(repo(`    where: widen(scopedWhere),`), HERE)).toEqual([4]);
   });
 
   it('a repo function handed a principal reads only through scoped(), where: scopedWhere(…) itself — OSCAR rounds 8–9', () => {
@@ -520,7 +546,7 @@ describe('repository store scoping', () => {
     // taking a `Principal` makes no read except through `scoped(...)`.
     const violations: string[] = [];
     for (const file of moduleFiles(MODULES_DIR).filter((f) => f.endsWith('/repo.ts'))) {
-      for (const line of unscopedReadsForPrincipal(readFileSync(file, 'utf8'))) {
+      for (const line of unscopedReadsForPrincipal(readFileSync(file, 'utf8'), file)) {
         violations.push(`${relative(process.cwd(), file)}:${line}`);
       }
     }
@@ -534,6 +560,7 @@ describe('repository store scoping', () => {
     expect(
       unscopedReadsForPrincipal(
         fn(`  return executor(db).order.groupBy({ by: ['status'], where: { storeId } });`),
+        HERE,
       ),
     ).toEqual([3]);
     // The honest shape.
@@ -542,20 +569,25 @@ describe('repository store scoping', () => {
         fn(
           `  return scoped(executor(db).order).groupBy({ by: ['status'], where: scopedWhere(principal, { storeId }) });`,
         ),
+        HERE,
       ),
     ).toEqual([]);
     // Scoped delegate, but the where forgotten (tsc refuses this too).
     expect(
-      unscopedReadsForPrincipal(fn(`  return scoped(executor(db).order).findMany({ take: 5 });`)),
+      unscopedReadsForPrincipal(
+        fn(`  return scoped(executor(db).order).findMany({ take: 5 });`),
+        HERE,
+      ),
     ).toEqual([3]);
     // Every read method, on a transaction or the client, not only executor(db).
     for (const m of ['findMany', 'findFirst', 'count', 'groupBy', 'aggregate']) {
       expect(
-        unscopedReadsForPrincipal(fn(`  return prisma.order.${m}({ where: { storeId } });`)),
+        unscopedReadsForPrincipal(fn(`  return prisma.order.${m}({ where: { storeId } });`), HERE),
       ).toEqual([3]);
       expect(
         unscopedReadsForPrincipal(
           fn(`  return tx.order.${m}({ where: scopedWhere(principal, { storeId }) });`),
+          HERE,
         ),
       ).toEqual([3]);
     }
@@ -566,11 +598,13 @@ describe('repository store scoping', () => {
         fn(
           `  return scoped(executor(db).order).groupBy({ by: ['status'], where: { storeId } as never });`,
         ),
+        HERE,
       ),
     ).toEqual([3]);
     expect(
       unscopedReadsForPrincipal(
         fn(`  return scoped(executor(db).order).findMany({ where: { storeId } as any });`),
+        HERE,
       ),
     ).toEqual([3]);
     expect(
@@ -578,6 +612,7 @@ describe('repository store scoping', () => {
         fn(
           `  return scoped(executor(db).order).findMany({ where: scopedWhere(principal, { storeId }) as never });`,
         ),
+        HERE,
       ),
     ).toEqual([3]);
     expect(
@@ -585,6 +620,7 @@ describe('repository store scoping', () => {
         fn(
           `  const w = scopedWhere(principal, { storeId });\n  return scoped(executor(db).order).findMany({ where: w });`,
         ),
+        HERE,
       ),
     ).toEqual([4]);
     expect(
@@ -592,6 +628,7 @@ describe('repository store scoping', () => {
         fn(
           `  return scoped(executor(db).order).findMany({ where: (scopedWhere(principal, { storeId })) });`,
         ),
+        HERE,
       ),
     ).toEqual([3]);
     // Arrow functions, function expressions and methods that take a principal
@@ -600,27 +637,29 @@ describe('repository store scoping', () => {
       `import { scoped, scopedWhere, type Principal } from '../platform/index';\n` +
       `export const count = async (principal: Principal, storeId: string) =>\n` +
       `  scoped(executor(db).order).count({ where: { storeId } as never });`;
-    expect(unscopedReadsForPrincipal(arrow)).toEqual([3]);
+    expect(unscopedReadsForPrincipal(arrow, HERE)).toEqual([3]);
     const expression =
       `export const list = async function (principal: Principal) {\n` +
       `  return executor(db).order.findMany({ where: { storeId: 'x' } });\n};`;
-    expect(unscopedReadsForPrincipal(expression)).toEqual([2]);
+    expect(unscopedReadsForPrincipal(expression, HERE)).toEqual([2]);
     const method =
       `export const repo = {\n` +
       `  async list(principal: Principal) {\n` +
       `    return scoped(executor(db).order).findMany({ where: { storeId: 'x' } as never });\n` +
       `  },\n};`;
-    expect(unscopedReadsForPrincipal(method)).toEqual([3]);
+    expect(unscopedReadsForPrincipal(method, HERE)).toEqual([3]);
     const honestArrow =
+      `import { scoped, scopedWhere, type Principal } from '../platform/index';\n` +
       `export const count = async (principal: Principal, storeId: string) =>\n` +
       `  scoped(executor(db).order).count({ where: scopedWhere(principal, { storeId }) });`;
-    expect(unscopedReadsForPrincipal(honestArrow)).toEqual([]);
+    expect(unscopedReadsForPrincipal(honestArrow, HERE)).toEqual([]);
     // A nested arrow inside a principal-taking function reads on its behalf.
     expect(
       unscopedReadsForPrincipal(
         fn(
           `  const read = () => executor(db).order.findMany({ where: { storeId } });\n  return read();`,
         ),
+        HERE,
       ),
     ).toEqual([3]);
 
@@ -629,6 +668,7 @@ describe('repository store scoping', () => {
     expect(
       unscopedReadsForPrincipal(
         `export async function findZone(id: string, db?: DbExecutor) {\n  return executor(db).deliveryZone.findUnique({ where: { id } });\n}`,
+        HERE,
       ),
     ).toEqual([]);
     // Two reads in one function: each judged.
@@ -638,6 +678,7 @@ describe('repository store scoping', () => {
           `  const a = await scoped(executor(db).order).findMany({ where: scopedWhere(principal, {}) });\n` +
             `  const b = await executor(db).order.count({ where: { storeId } });\n  return [a, b];`,
         ),
+        HERE,
       ),
     ).toEqual([4]);
   });
@@ -804,6 +845,54 @@ describe('repository store scoping', () => {
     ).toEqual([join(MODULES_DIR, 'platform', 'authz', 'index')]);
   });
 
+  it('a call site is judged by what its name resolves to, never by its spelling — OSCAR round 11', () => {
+    // A helper exporting `safeScope`, imported as `scopedWhere`. Every call
+    // site reads `scopedWhere(...)`; none of them is the genuine function.
+    const aliasedHelper =
+      `import { scoped, type Principal } from '../platform/index';\n` +
+      `import { safeScope as scopedWhere } from './scope-helper';\n` +
+      `export async function count(principal: Principal, storeId: string, db?: DbExecutor) {\n` +
+      `  return scoped(executor(db).order).groupBy({ by: ['status'], where: scopedWhere(principal, { storeId }) });\n` +
+      `}`;
+    // Rule 2: the name is a counterfeit at its import and at its use.
+    expect(misusesScopedWhere(aliasedHelper, HERE)).toEqual([2, 4]);
+    // Rule 5: the read's where is not the genuine scopedWhere.
+    expect(unscopedReadsForPrincipal(aliasedHelper, HERE)).toEqual([4]);
+
+    // The genuine import under the genuine name from the genuine module.
+    const genuine = aliasedHelper.replace(
+      `import { safeScope as scopedWhere } from './scope-helper';`,
+      `import { scopedWhere } from '../platform/index';`,
+    );
+    expect(misusesScopedWhere(genuine, HERE)).toEqual([]);
+    expect(unscopedReadsForPrincipal(genuine, HERE)).toEqual([]);
+
+    // Same remote name, wrong module: still a counterfeit.
+    const wrongModule = aliasedHelper.replace(
+      `import { safeScope as scopedWhere } from './scope-helper';`,
+      `import { scopedWhere } from './scope-helper';`,
+    );
+    expect(misusesScopedWhere(wrongModule, HERE)).toEqual([2, 4]);
+    expect(unscopedReadsForPrincipal(wrongModule, HERE)).toEqual([4]);
+    // Right module, imported under an alias: the alias is judged as the
+    // genuine function (rule 5 accepts it), the alias itself is reported (round 5).
+    const aliasOfGenuine = aliasedHelper
+      .replace(
+        `import { safeScope as scopedWhere } from './scope-helper';`,
+        `import { scopedWhere as sw } from '../platform/index';`,
+      )
+      .replace('where: scopedWhere(', 'where: sw(');
+    expect(misusesScopedWhere(aliasOfGenuine, HERE)).toEqual([2]);
+    expect(unscopedReadsForPrincipal(aliasOfGenuine, HERE)).toEqual([]);
+    // A local declaration under the name, with no import at all.
+    const local =
+      `export function scopedWhere(p, x) { return x as never; }\n` +
+      `export async function list(principal: Principal) {\n` +
+      `  return scoped(executor(db).order).findMany({ where: scopedWhere(principal, {}) });\n}`;
+    expect(misusesScopedWhere(local, HERE)).toEqual([1, 3]);
+    expect(unscopedReadsForPrincipal(local, HERE)).toEqual([3]);
+  });
+
   it('platform exports scopedWhere under its own name only — OSCAR round 6', () => {
     // The two files the scan above skips are the definition and the
     // re-export point. An aliased re-export there hands consumers the same
@@ -825,7 +914,7 @@ describe('repository store scoping', () => {
       'import { scopedWhere }',
       'import { safeScope }',
     );
-    expect(misusesScopedWhere(consumerHalf)).toEqual([]);
+    expect(misusesScopedWhere(consumerHalf, HERE)).toEqual([]);
 
     // The honest shapes: the definition, and the unaliased re-export.
     expect(misexportsScopedWhere(`export function scopedWhere(p, extra) { return {}; }`)).toEqual(
@@ -878,29 +967,32 @@ describe('repository store scoping', () => {
       `export function b(principal, storeId) {\n` +
       `  return prisma.order.findMany({ where: aliasedScopedWhere(principal, { storeId }).AND[1] });\n` +
       `}`;
-    expect(misusesScopedWhere(aliased)).toEqual([1, 6]);
+    expect(misusesScopedWhere(aliased, HERE)).toEqual([1, 6]);
 
     // The same binding, reached other ways: a namespace import, a string key,
     // a default-style re-export, a dynamic import destructure.
     expect(
       misusesScopedWhere(
         `import * as authz from '../platform/index';\nconst q = { where: authz.scopedWhere(p, x) };`,
+        HERE,
       ),
     ).toEqual([2]);
     expect(
       misusesScopedWhere(
         `import * as authz from '../platform/index';\nconst q = { where: authz['scopedWhere'](p, x).AND[1] };`,
+        HERE,
       ),
     ).toEqual([2]);
     expect(
-      misusesScopedWhere(`const { scopedWhere: sw } = await import('../platform/index');`),
+      misusesScopedWhere(`const { scopedWhere: sw } = await import('../platform/index');`, HERE),
     ).toEqual([1]);
-    expect(misusesScopedWhere(`export { scopedWhere as sw } from '../platform/index';`)).toEqual([
-      1,
-    ]);
+    expect(
+      misusesScopedWhere(`export { scopedWhere as sw } from '../platform/index';`, HERE),
+    ).toEqual([1]);
     expect(
       misusesScopedWhere(
         `import * as authz from '../platform/index';\nconst q = { where: authz.scopedWhere(p, x).AND[1] };`,
+        HERE,
       ),
     ).toEqual([2]);
   });
