@@ -26,6 +26,8 @@ import {
  */
 describe('Storefront copy integrity & manifest guard', () => {
   const storefrontDir = path.resolve(__dirname, '../../src/app/(storefront)');
+  const canonicalManifestPath = path.resolve(storefrontDir, 'copy-manifest.ts');
+  const canonicalManifestPathNoExt = path.resolve(storefrontDir, 'copy-manifest');
 
   function getFiles(dir: string): string[] {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -374,7 +376,9 @@ describe('Storefront copy integrity & manifest guard', () => {
       'formatCommunityDeliveryNote',
     ];
 
-    const nonManifestFiles = storefrontFiles.filter((file) => !file.endsWith('copy-manifest.ts'));
+    const nonManifestFiles = storefrontFiles.filter(
+      (file) => path.resolve(file) !== canonicalManifestPath,
+    );
     const nonManifestCombinedSource = nonManifestFiles
       .map((file) => fs.readFileSync(file, 'utf-8'))
       .join('\n');
@@ -672,7 +676,7 @@ describe('Storefront copy integrity & manifest guard', () => {
   function checkFormatterDefinitions(
     sourceOverride?: string,
   ): { formatter: string; violations: string[] }[] {
-    const manifestPath = path.join(storefrontDir, 'copy-manifest.ts');
+    const manifestPath = canonicalManifestPath;
     const content = sourceOverride ?? fs.readFileSync(manifestPath, 'utf-8');
     const sf = ts.createSourceFile(manifestPath, content, ts.ScriptTarget.Latest, true);
     const allowed = STOREFRONT_ALLOWED_LITERALS['copy-manifest.ts'] ?? new Set<string>();
@@ -874,31 +878,29 @@ describe('Storefront copy integrity & manifest guard', () => {
     const sf = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
     const literals: string[] = [];
 
-    const isCopyManifestFile = filePath.endsWith('copy-manifest.ts');
+    const isCopyManifestFile = path.resolve(filePath) === canonicalManifestPath;
 
-    function isCopyManifestModule(specText: string): boolean {
-      if (
-        specText === './copy-manifest' ||
-        specText === '../copy-manifest' ||
-        specText === '@/app/(storefront)/copy-manifest' ||
-        specText.endsWith('/copy-manifest') ||
-        specText === 'copy-manifest'
-      ) {
-        return true;
-      }
+    function isCopyManifestModule(specText: string, importingFilePath: string = filePath): boolean {
       try {
-        const dir = path.dirname(
-          path.isAbsolute(filePath) ? filePath : path.resolve(storefrontDir, filePath),
-        );
-        const resolved = path.resolve(dir, specText);
-        const target = path.join(storefrontDir, 'copy-manifest');
-        if (resolved === target || resolved === `${target}.ts`) {
-          return true;
+        let resolved: string;
+        if (specText.startsWith('@/')) {
+          const projectRoot = path.resolve(storefrontDir, '../../..');
+          resolved = path.resolve(projectRoot, 'src', specText.slice(2));
+        } else if (specText.startsWith('.')) {
+          const importingDir = path.dirname(
+            path.isAbsolute(importingFilePath)
+              ? importingFilePath
+              : path.resolve(storefrontDir, importingFilePath),
+          );
+          resolved = path.resolve(importingDir, specText);
+        } else {
+          return false;
         }
+
+        return resolved === canonicalManifestPath || resolved === canonicalManifestPathNoExt;
       } catch {
-        // ignore
+        return false;
       }
-      return false;
     }
 
     interface LexicalBinding {
@@ -1052,7 +1054,7 @@ describe('Storefront copy integrity & manifest guard', () => {
         if (!ts.isImportDeclaration(stmt)) continue;
         const moduleSpec = stmt.moduleSpecifier;
         if (!ts.isStringLiteral(moduleSpec)) continue;
-        if (!isCopyManifestModule(moduleSpec.text)) continue;
+        if (!isCopyManifestModule(moduleSpec.text, filePath)) continue;
 
         const bindings = stmt.importClause?.namedBindings;
         if (!bindings || !ts.isNamedImports(bindings)) continue;
@@ -1509,7 +1511,7 @@ describe('Storefront copy integrity & manifest guard', () => {
               ts.isStringLiteral(importDecl.moduleSpecifier)
             ) {
               const specText = importDecl.moduleSpecifier.text;
-              if (!isCopyManifestModule(specText)) {
+              if (!isCopyManifestModule(specText, filePath)) {
                 literals.push(`unapproved-formatter-import:${node.getText(sf)} from ${specText}`);
               }
             }
@@ -1568,7 +1570,8 @@ describe('Storefront copy integrity & manifest guard', () => {
   test('all storefront components importing STOREFRONT_COPY_MANIFEST strictly forbid unauthorized inline literals via dynamic AST scan', () => {
     // Dynamically discover every .tsx file under src/app/(storefront) that imports STOREFRONT_COPY_MANIFEST
     const manifestConsumerFiles = storefrontFiles.filter((filePath) => {
-      if (!filePath.endsWith('.tsx') || filePath.endsWith('copy-manifest.ts')) return false;
+      if (!filePath.endsWith('.tsx') || path.resolve(filePath) === canonicalManifestPath)
+        return false;
       const content = fs.readFileSync(filePath, 'utf-8');
       return (
         /import\s+.*STOREFRONT_COPY_MANIFEST.*from/s.test(content) ||
@@ -1882,7 +1885,7 @@ export default async function ShopPage`,
     // Oscar Round 17 evidence mutant:
     // agents/oscar-reviewer-mtolwvnc/evidence/pr46-round17-formatter-body-bypass.txt
     // Prepending 'Every order includes a complimentary gift. ' inside formatShopSubtitle body in copy-manifest.ts
-    const manifestPath = path.join(storefrontDir, 'copy-manifest.ts');
+    const manifestPath = canonicalManifestPath;
     const originalSource = fs.readFileSync(manifestPath, 'utf-8');
 
     const probeSource = originalSource.replace(
@@ -1903,7 +1906,7 @@ export default async function ShopPage`,
   });
 
   test('Oscar bypass probe rejection: unauthorized hardcoded suffix string inside formatter body fails definition AST scanner (Round 18)', () => {
-    const manifestPath = path.join(storefrontDir, 'copy-manifest.ts');
+    const manifestPath = canonicalManifestPath;
     const originalSource = fs.readFileSync(manifestPath, 'utf-8');
 
     const probeSource = originalSource.replace(
@@ -1922,7 +1925,7 @@ export default async function ShopPage`,
   });
 
   test('Oscar bypass probe rejection: unauthorized internal variable inside formatter body fails definition AST scanner (Round 18)', () => {
-    const manifestPath = path.join(storefrontDir, 'copy-manifest.ts');
+    const manifestPath = canonicalManifestPath;
     const originalSource = fs.readFileSync(manifestPath, 'utf-8');
 
     const probeSource = originalSource.replace(
@@ -1943,7 +1946,7 @@ export default async function ShopPage`,
   });
 
   test('Oscar bypass probe rejection: corrupted formatter definition in copy-manifest causes call site in shop/page.tsx to reject the reference (Round 18)', () => {
-    const manifestPath = path.join(storefrontDir, 'copy-manifest.ts');
+    const manifestPath = canonicalManifestPath;
     const originalManifest = fs.readFileSync(manifestPath, 'utf-8');
 
     const corruptedManifest = originalManifest.replace(
@@ -2110,5 +2113,129 @@ export default async function ShopPage`,
 
     expect(unauthorized.length).toBeGreaterThan(0);
     expect(unauthorized.some((lit) => lit.includes('unapproved-formatter-import:'))).toBe(true);
+  });
+
+  test('only the single canonical copy-manifest.ts exists in the storefront hierarchy (Round 20)', () => {
+    const manifestNamedFiles = storefrontFiles.filter((file) =>
+      path.basename(file).startsWith('copy-manifest.'),
+    );
+    expect(manifestNamedFiles).toEqual([canonicalManifestPath]);
+  });
+
+  test('Oscar bypass probe rejection: sibling/nested file named copy-manifest.ts imported for formatters fails exact canonical path resolution (Round 20)', () => {
+    // Oscar Round 19 evidence mutant:
+    // agents/oscar-reviewer-mtolwvnc/evidence/pr46-round19-copy-manifest-suffix-import-bypass.txt
+    // An unrelated file at ./evil/copy-manifest.ts (or sibling/nested path ending in copy-manifest)
+    // exporting an unaliased formatShopSubtitle with unauthorized copy, imported by shop/page.tsx
+    // and called with legitimate manifest arguments.
+    const shopPath = path.join(storefrontDir, 'shop/page.tsx');
+    const originalSource = fs.readFileSync(shopPath, 'utf-8');
+
+    // Mutant 1: importing from nested ./evil/copy-manifest
+    const probeSourceNested = originalSource.replace(
+      "import { STOREFRONT_COPY_MANIFEST, formatShopSubtitle } from '../copy-manifest';",
+      "import { STOREFRONT_COPY_MANIFEST } from '../copy-manifest';\nimport { formatShopSubtitle } from './evil/copy-manifest';",
+    );
+
+    expect(probeSourceNested).not.toEqual(originalSource);
+
+    const literalsNested = extractJsxLiterals(shopPath, probeSourceNested);
+    const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+    const unauthorizedNested = literalsNested.filter((lit) => !allowed.has(lit));
+
+    expect(unauthorizedNested.length).toBeGreaterThan(0);
+    expect(
+      unauthorizedNested.some((lit) =>
+        lit.includes('unapproved-formatter-import:formatShopSubtitle from ./evil/copy-manifest'),
+      ),
+    ).toBe(true);
+
+    // Mutant 2: importing from sibling ./copy-manifest (relative to shop/page.tsx)
+    const probeSourceSibling = originalSource.replace(
+      "import { STOREFRONT_COPY_MANIFEST, formatShopSubtitle } from '../copy-manifest';",
+      "import { STOREFRONT_COPY_MANIFEST } from '../copy-manifest';\nimport { formatShopSubtitle } from './copy-manifest';",
+    );
+
+    expect(probeSourceSibling).not.toEqual(originalSource);
+
+    const literalsSibling = extractJsxLiterals(shopPath, probeSourceSibling);
+    const unauthorizedSibling = literalsSibling.filter((lit) => !allowed.has(lit));
+
+    expect(unauthorizedSibling.length).toBeGreaterThan(0);
+    expect(
+      unauthorizedSibling.some((lit) =>
+        lit.includes('unapproved-formatter-import:formatShopSubtitle from ./copy-manifest'),
+      ),
+    ).toBe(true);
+
+    // Mutant 3: importing via aliased path pointing to an evil nested copy-manifest
+    const probeSourceAliased = originalSource.replace(
+      "import { STOREFRONT_COPY_MANIFEST, formatShopSubtitle } from '../copy-manifest';",
+      "import { STOREFRONT_COPY_MANIFEST } from '../copy-manifest';\nimport { formatShopSubtitle } from '@/app/(storefront)/shop/evil/copy-manifest';",
+    );
+
+    expect(probeSourceAliased).not.toEqual(originalSource);
+
+    const literalsAliased = extractJsxLiterals(shopPath, probeSourceAliased);
+    const unauthorizedAliased = literalsAliased.filter((lit) => !allowed.has(lit));
+
+    expect(unauthorizedAliased.length).toBeGreaterThan(0);
+    expect(
+      unauthorizedAliased.some((lit) =>
+        lit.includes(
+          'unapproved-formatter-import:formatShopSubtitle from @/app/(storefront)/shop/evil/copy-manifest',
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  test('Oscar bypass probe rejection: actual rogue copy-manifest.ts on disk is rejected by import-binding resolution and structural uniqueness (Round 20)', () => {
+    const evilDir = path.join(storefrontDir, 'shop', 'evil');
+    const evilFile = path.join(evilDir, 'copy-manifest.ts');
+    const shopPath = path.join(storefrontDir, 'shop', 'page.tsx');
+    const originalShopSource = fs.readFileSync(shopPath, 'utf-8');
+
+    fs.mkdirSync(evilDir, { recursive: true });
+    fs.writeFileSync(
+      evilFile,
+      `export function formatShopSubtitle(_approved: string): string {\n  return 'Every order includes a complimentary gift.';\n}\n`,
+      'utf-8',
+    );
+
+    try {
+      // 1. Structural check: only the one canonical copy-manifest.ts is allowed
+      const filesNow = getFiles(storefrontDir);
+      const manifestNamedFiles = filesNow.filter((file) =>
+        path.basename(file).startsWith('copy-manifest.'),
+      );
+      expect(manifestNamedFiles.length).toBeGreaterThan(1);
+
+      // 2. Importing from the rogue copy-manifest in shop/page.tsx
+      const probeSource = originalShopSource.replace(
+        "import { STOREFRONT_COPY_MANIFEST, formatShopSubtitle } from '../copy-manifest';",
+        "import { STOREFRONT_COPY_MANIFEST } from '../copy-manifest';\nimport { formatShopSubtitle } from './evil/copy-manifest';",
+      );
+      const literals = extractJsxLiterals(shopPath, probeSource);
+      const allowed = STOREFRONT_ALLOWED_LITERALS['shop/page.tsx'] ?? new Set<string>();
+      const unauthorized = literals.filter((lit) => !allowed.has(lit));
+
+      expect(unauthorized.length).toBeGreaterThan(0);
+      expect(
+        unauthorized.some((lit) =>
+          lit.includes('unapproved-formatter-import:formatShopSubtitle from ./evil/copy-manifest'),
+        ),
+      ).toBe(true);
+
+      // 3. Scanning the rogue copy-manifest.ts itself as a non-canonical file
+      const evilLiterals = extractJsxLiterals(evilFile);
+      expect(
+        evilLiterals.some((lit) => lit.includes('shadowed-formatter:formatShopSubtitle')),
+      ).toBe(true);
+      expect(
+        evilLiterals.some((lit) => lit.includes('Every order includes a complimentary gift.')),
+      ).toBe(true);
+    } finally {
+      fs.rmSync(evilDir, { recursive: true, force: true });
+    }
   });
 });
