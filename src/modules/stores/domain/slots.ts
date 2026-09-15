@@ -182,6 +182,16 @@ function wallClockMinute(instant: number, timeZone: string): number {
   return (((local % DAY_MS) + DAY_MS) % DAY_MS) / MINUTE_MS;
 }
 
+/** The store's calendar date at `instant`, as `YYYY-MM-DD`. */
+function localDate(instant: number, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(instant));
+}
+
 /**
  * Does the window `[start, end)` sit inside the hours **on the wall clock**?
  *
@@ -189,9 +199,12 @@ function wallClockMinute(instant: number, timeZone: string): number {
  * across a spring-forward the window is an hour later on the wall when it ends
  * than arithmetic on its start says — a 60-minute window at 00:00 ends at
  * what the clock calls 02:00 — and the door may well have shut by then (OSCAR
- * M2 on PR #57). A window ending exactly at midnight belongs to its own day
- * (1440, not 0); one whose clock end is not after its clock start has crossed
- * midnight, and no hours inside one day hold it.
+ * M2 on PR #57). And not minute-of-day alone: a window long enough to reach
+ * the next calendar **date** reads as a small minute number there — a
+ * whole-day window at a shift day's midnight ends at 01:00 the day after —
+ * so the end must land on the start's own date, or be exactly the midnight
+ * that closes it (OSCAR round 3). Within the date, a clock end not after the
+ * clock start (a fall-back's repeated hour) does not fit either.
  */
 function insideHours(
   start: number,
@@ -201,9 +214,14 @@ function insideHours(
   closeMinuteOfDay: number,
 ): boolean {
   const opensAt = wallClockMinute(start, timeZone);
+  if (opensAt < openMinuteOfDay) return false;
+  const date = localDate(start, timeZone);
   const rawEnd = wallClockMinute(end, timeZone);
-  const closesAt = rawEnd === 0 ? MINUTES_PER_DAY : rawEnd;
-  return opensAt >= openMinuteOfDay && closesAt > opensAt && closesAt <= closeMinuteOfDay;
+  if (rawEnd === 0) {
+    // Exactly midnight: the one that closes this date, not a later one.
+    return localDate(end - MINUTE_MS, timeZone) === date && MINUTES_PER_DAY <= closeMinuteOfDay;
+  }
+  return localDate(end, timeZone) === date && rawEnd > opensAt && rawEnd <= closeMinuteOfDay;
 }
 
 /**

@@ -447,6 +447,24 @@ describe('opening hours — only windows inside them are offered', () => {
     expect(fallBack.map((s) => s.toISOString())).not.toContain('2026-10-25T23:00:00.000Z');
     expect(fallBack.map((s) => s.toISOString())).toContain('2026-10-25T21:30:00.000Z');
 
+    // OSCAR round 3: minute-of-day alone cannot see a window that ends on the
+    // next *date*. London, full-day hours, a 1440-minute window at the shift
+    // day's midnight (00:00Z) ends at 00:00Z the next day — which the clock
+    // calls 01:00 on 30 March: numerically 0 → 60, really the day after.
+    const wholeDay = slotGrid({
+      ...hours,
+      timeZone: 'Europe/London',
+      slotLengthMinutes: 1440,
+      openMinuteOfDay: 0,
+      closeMinuteOfDay: 1440,
+      from: new Date('2026-03-29T00:00:00Z'),
+      horizonDays: 2,
+    });
+    expect(wholeDay.map((s) => s.toISOString())).not.toContain('2026-03-29T00:00:00.000Z');
+    // The next day's whole-day window ends exactly at the following midnight
+    // and is offered.
+    expect(wholeDay.map((s) => s.toISOString())).toContain('2026-03-29T23:00:00.000Z');
+
     // A window that ends exactly at midnight belongs to its own day.
     const toMidnight = slotGrid({
       ...hours,
