@@ -316,7 +316,13 @@ interface StoreSeed {
   code: string;
   name: string;
   address: Prisma.InputJsonValue;
-  settings: { deliveryFeePaise: number; minOrderPaise: number; slotCapacity: number };
+  settings: {
+    deliveryFeePaise: number;
+    minOrderPaise: number;
+    slotCapacity: number;
+    openMinuteOfDay: number;
+    closeMinuteOfDay: number;
+  };
   /** Products this store does NOT list, so the two catalogues only partly overlap. */
   unlistedSkus: readonly string[];
   /** Discount applied to MRP for this store's selling price, in basis points. */
@@ -339,7 +345,13 @@ const STORES: readonly StoreSeed[] = [
       pincode: '560011',
     },
     // Real business terms (2026-09-13): ₹200 minimum, free delivery — both stores.
-    settings: { deliveryFeePaise: 0, minOrderPaise: 20_000, slotCapacity: 10 },
+    settings: {
+      deliveryFeePaise: 0,
+      minOrderPaise: 20_000,
+      slotCapacity: 10,
+      openMinuteOfDay: 600,
+      closeMinuteOfDay: 1200,
+    },
     unlistedSkus: ['8901234500189', '8901234500202'],
     discountBp: 500,
     zones: [
@@ -371,7 +383,13 @@ const STORES: readonly StoreSeed[] = [
       state: 'Karnataka',
       pincode: '560038',
     },
-    settings: { deliveryFeePaise: 0, minOrderPaise: 20_000, slotCapacity: 14 },
+    settings: {
+      deliveryFeePaise: 0,
+      minOrderPaise: 20_000,
+      slotCapacity: 14,
+      openMinuteOfDay: 600,
+      closeMinuteOfDay: 1200,
+    },
     unlistedSkus: ['8901234500011', '8901234500134'],
     discountBp: 300,
     zones: [

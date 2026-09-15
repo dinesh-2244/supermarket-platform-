@@ -129,12 +129,100 @@ export function assertSlotLength(slotLengthMinutes: number): void {
   }
 }
 
+/**
+ * Opening hours as minutes after local midnight: `open ≤ start` and
+ * `start + slotLength ≤ close` for every window offered. Whole minutes, inside
+ * one day, and wide enough to hold at least one window — a store whose hours
+ * fit no slot would offer nothing every day and never say why.
+ */
+export function assertOpeningHours(
+  openMinuteOfDay: number,
+  closeMinuteOfDay: number,
+  slotLengthMinutes: number,
+): void {
+  const whole = Number.isInteger(openMinuteOfDay) && Number.isInteger(closeMinuteOfDay);
+  if (
+    !whole ||
+    openMinuteOfDay < 0 ||
+    closeMinuteOfDay > MINUTES_PER_DAY ||
+    openMinuteOfDay >= closeMinuteOfDay
+  ) {
+    throw new ValidationError(
+      'Opening hours must be whole minutes after midnight, opening before closing, within one day',
+      { openMinuteOfDay, closeMinuteOfDay },
+    );
+  }
+  if (closeMinuteOfDay - openMinuteOfDay < slotLengthMinutes) {
+    throw new ValidationError(
+      'Opening hours must be long enough for at least one delivery window',
+      {
+        openMinuteOfDay,
+        closeMinuteOfDay,
+        slotLengthMinutes,
+      },
+    );
+  }
+}
+
 export interface SlotGridInput {
   readonly from: Date;
   readonly slotLengthMinutes: number;
   readonly timeZone: string;
+  /** Opening hours, minutes after local midnight (10:00 = 600). */
+  readonly openMinuteOfDay: number;
+  /** Closing time, minutes after local midnight (20:00 = 1200). */
+  readonly closeMinuteOfDay: number;
   readonly horizonDays?: number;
   readonly leadMinutes?: number;
+}
+
+/** Minutes past midnight on the store's wall clock at `instant`. */
+function wallClockMinute(instant: number, timeZone: string): number {
+  const local = instant + zoneOffsetMs(new Date(instant), timeZone);
+  return (((local % DAY_MS) + DAY_MS) % DAY_MS) / MINUTE_MS;
+}
+
+/** The store's calendar date at `instant`, as `YYYY-MM-DD`. */
+function localDate(instant: number, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(instant));
+}
+
+/**
+ * Does the window `[start, end)` sit inside the hours **on the wall clock**?
+ *
+ * Both ends are read off the clock at their own instant. Not `start + length`:
+ * across a spring-forward the window is an hour later on the wall when it ends
+ * than arithmetic on its start says — a 60-minute window at 00:00 ends at
+ * what the clock calls 02:00 — and the door may well have shut by then (OSCAR
+ * M2 on PR #57). And not minute-of-day alone: a window long enough to reach
+ * the next calendar **date** reads as a small minute number there — a
+ * whole-day window at a shift day's midnight ends at 01:00 the day after —
+ * so the end must land on the start's own date, or be exactly the midnight
+ * that closes it (OSCAR round 3). Within the date, a clock end not after the
+ * clock start (a fall-back's repeated hour) does not fit either.
+ */
+function insideHours(
+  start: number,
+  end: number,
+  timeZone: string,
+  openMinuteOfDay: number,
+  closeMinuteOfDay: number,
+): boolean {
+  const opensAt = wallClockMinute(start, timeZone);
+  if (opensAt < openMinuteOfDay) return false;
+  const date = localDate(start, timeZone);
+  const rawEnd = wallClockMinute(end, timeZone);
+  if (rawEnd === 0) {
+    // Exactly midnight. A length divides the day, so this can only be the
+    // midnight that closes the start's date — and 1440 has to be inside hours.
+    return MINUTES_PER_DAY <= closeMinuteOfDay;
+  }
+  return localDate(end, timeZone) === date && rawEnd > opensAt && rawEnd <= closeMinuteOfDay;
 }
 
 /**
@@ -145,8 +233,9 @@ export interface SlotGridInput {
  * slot that can be offered is exactly a slot that can be booked.
  */
 export function slotGrid(input: SlotGridInput): Date[] {
-  const { from, slotLengthMinutes, timeZone } = input;
+  const { from, slotLengthMinutes, timeZone, openMinuteOfDay, closeMinuteOfDay } = input;
   assertSlotLength(slotLengthMinutes);
+  assertOpeningHours(openMinuteOfDay, closeMinuteOfDay, slotLengthMinutes);
   if (Number.isNaN(from.getTime())) {
     throw new ValidationError('Slots need a valid instant to start from', {});
   }
@@ -179,8 +268,18 @@ export function slotGrid(input: SlotGridInput): Date[] {
   for (let day = firstDay; day <= latest;) {
     const nextDay = localDayStart(new Date(day + DAY_MS + 2 * 60 * MINUTE_MS), timeZone).getTime();
 
+    // The opening hours are a **filter over that anchored grid**, not a second
+    // anchor: a window is offered when it is one the full day would offer *and*
+    // it sits inside the hours on the store's wall clock. Judged on the wall
+    // clock (`zoneOffsetMs` at the window itself) rather than as minutes since
+    // the day's midnight, so that on a DST-shift day "10:00" is still 10:00 on
+    // the wall — the day is an hour shorter or longer, the door opens when the
+    // clock on it says so.
     for (let cursor = day; cursor < nextDay && cursor <= latest; cursor += step) {
-      if (cursor >= earliest) slots.push(new Date(cursor));
+      if (cursor < earliest) continue;
+      if (!insideHours(cursor, cursor + step, timeZone, openMinuteOfDay, closeMinuteOfDay))
+        continue;
+      slots.push(new Date(cursor));
     }
 
     // A DST-shortened day could otherwise fail to advance.

@@ -40,6 +40,8 @@ describe('Admin store settings rupee UX (updateSettingsAction)', () => {
     form.set('minOrder', '500');
     form.set('slotLengthMinutes', '60');
     form.set('slotCapacity', '10');
+    form.set('openMinuteOfDay', '600');
+    form.set('closeMinuteOfDay', '1200');
     form.set('priceVariancePercentBp', '500');
     form.set('priceVarianceAbsCap', '50');
     form.set('lowStockThreshold', '5');
@@ -108,6 +110,8 @@ describe('Admin store settings rupee UX (updateSettingsAction)', () => {
       form.set('priceVarianceAbsCapPaise', '4000');
       form.set('slotLengthMinutes', '30');
       form.set('slotCapacity', '5');
+      form.set('openMinuteOfDay', '600');
+      form.set('closeMinuteOfDay', '1200');
       form.set('priceVariancePercentBp', '200');
       form.set('lowStockThreshold', '2');
       form.set('substitutionPolicy', 'ASK_CUSTOMER');

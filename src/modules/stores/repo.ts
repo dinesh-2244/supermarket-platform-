@@ -48,6 +48,8 @@ export interface SettingsRecord {
   readonly minOrderPaise: number;
   readonly slotLengthMinutes: number;
   readonly slotCapacity: number;
+  readonly openMinuteOfDay: number;
+  readonly closeMinuteOfDay: number;
   readonly substitutionPolicy: 'NONE' | 'ASK_CUSTOMER' | 'STAFF_DISCRETION';
   readonly posMode: 'MANUAL' | 'ADAPTER';
   readonly priceVariancePercentBp: number;
@@ -148,6 +150,24 @@ export async function findSettings(
   db?: DbExecutor,
 ): Promise<SettingsRecord | null> {
   return executor(db).storeSettings.findUnique({ where: { storeId } });
+}
+
+/**
+ * The settings row, locked for the rest of the transaction — so a rule that
+ * spans fields (opening hours) is judged on the row as it will be, not on a
+ * copy another update may already have changed.
+ */
+export async function lockSettings(tx: Tx, storeId: string): Promise<SettingsRecord | null> {
+  const rows = await auditedExecutor(tx).$queryRaw<SettingsRecord[]>`
+    SELECT "id", "storeId", "deliveryFeePaise", "minOrderPaise", "slotLengthMinutes",
+           "slotCapacity", "openMinuteOfDay", "closeMinuteOfDay", "substitutionPolicy",
+           "posMode", "priceVariancePercentBp", "priceVarianceAbsCapPaise",
+           "isAcceptingOrders", "lowStockThreshold"
+    FROM "StoreSettings"
+    WHERE "storeId" = ${storeId}
+    FOR UPDATE
+  `;
+  return rows[0] ?? null;
 }
 
 export async function updateSettingsRow(

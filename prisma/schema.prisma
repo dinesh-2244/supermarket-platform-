@@ -161,6 +161,12 @@ model StoreSettings {
   minOrderPaise            Int                @default(0)
   slotLengthMinutes        Int                @default(60)
   slotCapacity             Int                @default(10)
+  /// Opening hours as minutes after local midnight (10:00 = 600, 20:00 = 1200).
+  /// The slot grid offers only windows that start at or after `open` and end
+  /// at or before `close` on the store's wall clock — the published hours are
+  /// an enforced fact, not copy (decision 2026-09-14).
+  openMinuteOfDay          Int                @default(600)
+  closeMinuteOfDay         Int                @default(1200)
   substitutionPolicy       SubstitutionPolicy @default(ASK_CUSTOMER)
   posMode                  PosMode            @default(MANUAL)
   /// Price-variance tolerance (R6): effective threshold is the LOWER of

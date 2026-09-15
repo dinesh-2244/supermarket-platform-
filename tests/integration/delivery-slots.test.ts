@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getPrisma, type Principal } from '@/modules/platform';
 import { addItem, ensureCart } from '@/modules/cart';
 import { availableSlots, placeOrder } from '@/modules/checkout';
-import { slotGridFor } from '@/modules/stores';
+import { slotGridFor, updateSettings } from '@/modules/stores';
 import {
   createCategory,
   createDeliveryArea,
@@ -191,6 +191,111 @@ describe('availableSlots', () => {
         data: { slotLengthMinutes: 60 },
       });
     }
+  });
+});
+
+describe('opening hours are enforced, not copy', () => {
+  const istClock = (d: Date): string =>
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(d);
+
+  it('offers only windows inside the store’s hours, on its wall clock', async () => {
+    // Seeded/default hours: 10:00–20:00. NOW is 11:30 IST; two hours' lead
+    // means 14:00 is the first, 19:00 the last, of today.
+    const today = (await slotGridFor(bound, storeId, NOW, { horizonDays: 1 })).starts.filter(
+      (d) => d.getTime() < NOW.getTime() + 12 * 3600_000,
+    );
+    expect(today.map(istClock)).toEqual(['14:00', '15:00', '16:00', '17:00', '18:00', '19:00']);
+
+    // Close at 15:00 and the door shuts: 14:00 is the only window left today.
+    await prisma.storeSettings.updateMany({ where: { storeId }, data: { closeMinuteOfDay: 900 } });
+    try {
+      const shorter = (await slotGridFor(bound, storeId, NOW, { horizonDays: 1 })).starts.filter(
+        (d) => d.getTime() < NOW.getTime() + 12 * 3600_000,
+      );
+      expect(shorter.map(istClock)).toEqual(['14:00']);
+      // …and placeOrder asks the same grid, so 15:00 is not bookable either.
+      const token = await basket();
+      await expect(
+        placeOrder(guest, order(token, new Date('2026-12-01T09:30:00Z'), '9700000011')),
+      ).rejects.toThrow(/not available/i);
+    } finally {
+      await prisma.storeSettings.updateMany({
+        where: { storeId },
+        data: { closeMinuteOfDay: 1200 },
+      });
+    }
+  });
+
+  it('refuses hours the settings screen cannot honour, judged on the resulting row', async () => {
+    const admin: Principal = { kind: 'user', userId: 'admin', role: 'SUPER_ADMIN', storeId: null };
+    // Only one bound sent: still checked against the other as it stands.
+    await expect(updateSettings(admin, storeId, { closeMinuteOfDay: 600 })).rejects.toThrow(
+      /opening hours/i,
+    );
+    await expect(updateSettings(admin, storeId, { openMinuteOfDay: 1200 })).rejects.toThrow(
+      /opening hours/i,
+    );
+    await expect(updateSettings(admin, storeId, { closeMinuteOfDay: 1441 })).rejects.toThrow(
+      /opening hours/i,
+    );
+    // A slot length the hours cannot hold is the same rule from the other side.
+    await expect(
+      updateSettings(admin, storeId, {
+        openMinuteOfDay: 1140,
+        closeMinuteOfDay: 1200,
+        slotLengthMinutes: 90,
+      }),
+    ).rejects.toThrow(/at least one delivery window/i);
+    const row = await prisma.storeSettings.findUniqueOrThrow({ where: { storeId } });
+    expect(row).toMatchObject({
+      openMinuteOfDay: 600,
+      closeMinuteOfDay: 1200,
+      slotLengthMinutes: 60,
+    });
+    // A real change goes through and is what the grid honours next.
+    await updateSettings(admin, storeId, { openMinuteOfDay: 660 });
+    try {
+      const starts = (await slotGridFor(bound, storeId, new Date('2026-12-02T00:00:00Z'))).starts;
+      expect(istClock(starts[0]!)).toBe('11:00');
+    } finally {
+      await updateSettings(admin, storeId, { openMinuteOfDay: 600 });
+    }
+  });
+});
+
+describe('the hours invariant under concurrent partial updates (OSCAR M1)', () => {
+  it('two overlapping partial updates cannot land on an invalid combined row', async () => {
+    const admin: Principal = { kind: 'user', userId: 'admin', role: 'SUPER_ADMIN', storeId: null };
+    // Barrier: hold the settings row locked while both updates are started,
+    // so that any read done *before* the update's own lock is a read of the
+    // old row (600/1200) for both — each alone a valid change, together not.
+    let racing: Promise<PromiseSettledResult<unknown>[]> | null = null;
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT 1 FROM "StoreSettings" WHERE "storeId" = ${storeId} FOR UPDATE`;
+      racing = Promise.allSettled([
+        updateSettings(admin, storeId, { openMinuteOfDay: 1000 }),
+        updateSettings(admin, storeId, { closeMinuteOfDay: 800 }),
+      ]);
+      // Both are now started and past whatever they do before their own lock.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      // Returning commits and releases the barrier: they go through one at a time.
+    });
+    const results = await racing!;
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((r) => r.status === 'rejected');
+    expect(rejected?.status === 'rejected' && String(rejected.reason)).toMatch(/opening hours/i);
+    const row = await prisma.storeSettings.findUniqueOrThrow({ where: { storeId } });
+    expect(row.openMinuteOfDay).toBeLessThan(row.closeMinuteOfDay);
+    expect([
+      [1000, 1200],
+      [600, 800],
+    ]).toContainEqual([row.openMinuteOfDay, row.closeMinuteOfDay]);
+    await updateSettings(admin, storeId, { openMinuteOfDay: 600, closeMinuteOfDay: 1200 });
   });
 });
 
