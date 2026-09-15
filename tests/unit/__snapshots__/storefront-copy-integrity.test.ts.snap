@@ -41,7 +41,7 @@ exports[`Storefront copy integrity & manifest guard > STOREFRONT_COPY_MANIFEST m
       "title": "About Us | Munder Fresh Hyperlocal Grocery",
     },
     "serviceBoundary": {
-      "description": "Because we operate dedicated store hubs paired with specific residential partners, we only accept orders from addresses within our serviceable zones.",
+      "description": "Because we operate dedicated store hubs serving specific residential communities, we only accept orders from addresses within our serviceable zones.",
       "title": "Living Outside Our Current Communities?",
     },
   },
@@ -95,7 +95,7 @@ exports[`Storefront copy integrity & manifest guard > STOREFRONT_COPY_MANIFEST m
     },
     "communityHubs": {
       "badge": "Community Store Hubs",
-      "description": "Munder Fresh operates dedicated store hubs paired directly with our partner residential communities.",
+      "description": "Munder Fresh operates dedicated store hubs serving residential communities.",
       "hubCardTemplate": "Dedicated store hub serving {hubName}. Contact channels and operating hours will be listed here once assigned.",
       "title": "Our Dedicated Store Hubs",
     },
@@ -126,7 +126,7 @@ exports[`Storefront copy integrity & manifest guard > STOREFRONT_COPY_MANIFEST m
   "home": {
     "aboutPreview": {
       "badge": "About Our Model",
-      "description": "We operate dedicated store hubs for partner residential societies. Learn how our two-community model delivers scheduled morning and evening slots.",
+      "description": "We operate dedicated store hubs serving residential societies. Learn how our two-community model delivers scheduled morning and evening slots.",
       "title": "Hyperlocal Grocery Built for Residential Communities",
     },
     "activeWelcome": {
@@ -164,7 +164,7 @@ exports[`Storefront copy integrity & manifest guard > STOREFRONT_COPY_MANIFEST m
     },
     "promise": {
       "badge": "The Munder Fresh Promise",
-      "description": "We partner directly with residential societies to fulfill orders from dedicated local hubs. Choose a scheduled delivery window that fits your day, with catalogue listings and prices scoped to your community's store-recorded availability.",
+      "description": "We serve residential societies directly from dedicated local hubs. Choose a scheduled delivery window that fits your day, with catalogue listings and prices scoped to your community's store-recorded availability.",
       "title": "Why Hyperlocal Residential Delivery?",
     },
     "promoBanners": {

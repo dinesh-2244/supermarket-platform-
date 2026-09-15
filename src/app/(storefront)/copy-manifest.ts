@@ -69,13 +69,13 @@ export const STOREFRONT_COPY_MANIFEST = {
       badge: 'About Our Model',
       title: 'Hyperlocal Grocery Built for Residential Communities',
       description:
-        'We operate dedicated store hubs for partner residential societies. Learn how our two-community model delivers scheduled morning and evening slots.',
+        'We operate dedicated store hubs serving residential societies. Learn how our two-community model delivers scheduled morning and evening slots.',
     },
     promise: {
       badge: 'The Munder Fresh Promise',
       title: 'Why Hyperlocal Residential Delivery?',
       description:
-        "We partner directly with residential societies to fulfill orders from dedicated local hubs. Choose a scheduled delivery window that fits your day, with catalogue listings and prices scoped to your community's store-recorded availability.",
+        "We serve residential societies directly from dedicated local hubs. Choose a scheduled delivery window that fits your day, with catalogue listings and prices scoped to your community's store-recorded availability.",
     },
   },
   shop: {
@@ -136,7 +136,7 @@ export const STOREFRONT_COPY_MANIFEST = {
     serviceBoundary: {
       title: 'Living Outside Our Current Communities?',
       description:
-        'Because we operate dedicated store hubs paired with specific residential partners, we only accept orders from addresses within our serviceable zones.',
+        'Because we operate dedicated store hubs serving specific residential communities, we only accept orders from addresses within our serviceable zones.',
     },
   },
   contact: {
@@ -163,8 +163,7 @@ export const STOREFRONT_COPY_MANIFEST = {
     communityHubs: {
       badge: 'Community Store Hubs',
       title: 'Our Dedicated Store Hubs',
-      description:
-        'Munder Fresh operates dedicated store hubs paired directly with our partner residential communities.',
+      description: 'Munder Fresh operates dedicated store hubs serving residential communities.',
       hubCardTemplate:
         'Dedicated store hub serving {hubName}. Contact channels and operating hours will be listed here once assigned.',
     },
