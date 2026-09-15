@@ -9,7 +9,8 @@
  */
 import {
   getPrisma,
-  storeScopeFilter,
+  scoped,
+  scopedWhere,
   type DbExecutor,
   type Principal,
   type Tx,
@@ -100,13 +101,12 @@ export async function listListings(
   options: ListListingsOptions,
   db?: DbExecutor,
 ): Promise<readonly StoreProductRecord[]> {
-  return executor(db).storeProduct.findMany({
-    where: {
-      ...storeScopeFilter(principal),
+  return scoped(executor(db).storeProduct).findMany({
+    where: scopedWhere(principal, {
       ...(options.storeId !== undefined ? { storeId: options.storeId } : {}),
       ...(options.listedOnly === true ? { isListed: true } : {}),
       ...(options.productIds !== undefined ? { productId: { in: [...options.productIds] } } : {}),
-    },
+    }),
     select: listingSelect,
     orderBy: [{ storeId: 'asc' }, { productId: 'asc' }],
     take: options.limit ?? 500,
@@ -127,8 +127,8 @@ export async function listListedProductIds(
   storeId: string,
   db?: DbExecutor,
 ): Promise<readonly string[]> {
-  const rows = await executor(db).storeProduct.findMany({
-    where: { ...storeScopeFilter(principal), storeId, isListed: true },
+  const rows = await scoped(executor(db).storeProduct).findMany({
+    where: scopedWhere(principal, { storeId, isListed: true }),
     select: { productId: true },
     orderBy: { productId: 'asc' },
   });

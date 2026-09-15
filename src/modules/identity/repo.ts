@@ -9,7 +9,8 @@
  */
 import {
   getPrisma,
-  storeScopeFilter,
+  scoped,
+  scopedWhere,
   type DbExecutor,
   type Principal,
   type Tx,
@@ -189,12 +190,12 @@ export async function listVisibleUsers(
   manageableRoles: readonly UserRole[],
   db?: DbExecutor,
 ): Promise<readonly UserRecord[]> {
-  return executor(db).user.findMany({
-    where: {
-      ...storeScopeFilter(principal),
+  return scoped(executor(db).user).findMany({
+    where: scopedWhere(
+      principal,
       // A super-admin manages every role, so this is unrestricted for them.
-      ...(manageableRoles.length === 0 ? { id: '' } : { role: { in: [...manageableRoles] } }),
-    },
+      manageableRoles.length === 0 ? { id: '' } : { role: { in: [...manageableRoles] } },
+    ),
     select: publicUserSelect,
     orderBy: [{ isActive: 'desc' }, { email: 'asc' }],
   });

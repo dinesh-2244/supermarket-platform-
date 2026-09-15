@@ -9,7 +9,8 @@
  */
 import {
   getPrisma,
-  storeScopeFilter,
+  scoped,
+  scopedWhere,
   type DbExecutor,
   type Principal,
   type Tx,
@@ -150,16 +151,13 @@ export async function listForPrincipal(
   storeId: string,
   filter: { statuses?: readonly ProductRequestStatus[]; limit?: number },
 ): Promise<ProductRequestRow[]> {
-  return executor(db).productRequest.findMany({
-    where: {
-      // `AND`, not a spread: the scope filter and the store asked for are both
-      // `storeId` conditions, and spreading one over the other keeps only the
-      // second — which silently turns the scope off.
-      AND: [storeScopeFilter(principal), { storeId }],
+  return scoped(executor(db).productRequest).findMany({
+    where: scopedWhere(principal, {
+      storeId,
       ...(filter.statuses === undefined || filter.statuses.length === 0
         ? {}
         : { status: { in: [...filter.statuses] } }),
-    },
+    }),
     select: requestSelect,
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: filter.limit ?? 200,
@@ -172,8 +170,8 @@ export async function findForPrincipal(
   principal: Principal,
   requestId: string,
 ): Promise<(ProductRequestRow & { readonly history: readonly ProductRequestHistoryRow[] }) | null> {
-  const row = await executor(db).productRequest.findFirst({
-    where: { id: requestId, ...storeScopeFilter(principal) },
+  const row = await scoped(executor(db).productRequest).findFirst({
+    where: scopedWhere(principal, { id: requestId }),
     select: {
       ...requestSelect,
       statusHistory: { select: historySelect, orderBy: { createdAt: 'asc' } },
@@ -190,9 +188,9 @@ export async function countByStatus(
   principal: Principal,
   storeId: string,
 ): Promise<{ status: ProductRequestStatus; count: number }[]> {
-  const rows = await executor(db).productRequest.groupBy({
+  const rows = await scoped(executor(db).productRequest).groupBy({
     by: ['status'],
-    where: { AND: [storeScopeFilter(principal), { storeId }] },
+    where: scopedWhere(principal, { storeId }),
     _count: { _all: true },
   });
   return rows.map((row) => ({ status: row.status, count: row._count._all }));

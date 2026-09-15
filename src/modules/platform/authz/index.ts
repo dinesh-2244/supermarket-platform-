@@ -324,13 +324,67 @@ export function isUnscoped(principal: Principal): boolean {
  * Every store-bound list goes through this rather than hand-written filters:
  * a forgotten filter is an IDOR, and `{}` for an unscoped principal is the only
  * case where "no condition" is correct.
+ *
+ * **Module-private, on purpose.** The fragment is only safe inside the `AND`
+ * that `scopedWhere` builds; exported, it could be wrapped by any function in
+ * this file or re-exported under any name, and no rule about *names* catches
+ * that (OSCAR, PR #50 round 7). So it has no `export`, and a unit test holds
+ * that this identifier appears nowhere in the file but its own definition and
+ * inside `scopedWhere` — the one door stays the one door.
  */
-export function storeScopeFilter(
+function storeScopeFilter(
   principal: Principal,
   field = 'storeId',
 ): Record<string, { in: readonly string[] }> | Record<string, never> {
   const ids = allowedStoreIds(principal);
   return ids === null ? {} : { [field]: { in: ids } };
+}
+
+/**
+ * A complete Prisma `where` for a store-bound read: the principal's scope
+ * **and** the caller's conditions, as two members of one `AND`.
+ *
+ * This is the only way a repository applies the scope. Spreading the filter
+ * beside a `storeId` condition — `{ ...storeScopeFilter(p), storeId }` —
+ * produced two `storeId` keys and kept the second, so the scope was silently
+ * gone; and any text guard against that shape can be aliased around. Putting
+ * both in an `AND` makes the overwrite impossible to write, whatever the
+ * caller's conditions are called, and a unit test refuses any other use of
+ * `storeScopeFilter` outside this file.
+ *
+ * Use it as the whole `where`, never spread: `{ ...scopedWhere(p, x), AND }`
+ * would overwrite the `AND` the scope lives in. Nested `AND`/`OR` inside
+ * `extra` are fine — they sit inside the outer `AND` untouched.
+ */
+/**
+ * The brand on a `where` that `scopedWhere` built. A class with a private
+ * member rather than a symbol property: TypeScript drops private members
+ * from an object spread and refuses a literal that names one, so
+ * `{ ...scopedWhere(p, x), AND: [] }` and `{ AND: [...], scoped: true }` are
+ * both unbranded — where a symbol-keyed brand would have survived the spread.
+ * `declare` keeps it out of the emitted class; no value is ever an instance.
+ */
+class ScopedBrand {
+  declare private readonly scoped: true;
+}
+
+/**
+ * A `where` that `scopedWhere` built — and only it. Nothing but the cast
+ * inside `scopedWhere` produces this type, so a `where` parameter typed
+ * `ScopedWhere` refuses a hand-written `{ storeId }`, a selection off the
+ * result, a spread of it, or anything else, at compile time.
+ */
+export type ScopedWhere<T = Record<string, unknown>> = {
+  AND: [ReturnType<typeof storeScopeFilter>, T];
+} & ScopedBrand;
+
+export function scopedWhere<T extends Record<string, unknown>>(
+  principal: Principal,
+  extra: T,
+  // `id` is for the Store table itself, whose own id is the store.
+  field: 'storeId' | 'id' = 'storeId',
+): ScopedWhere<T> {
+  return { AND: [storeScopeFilter(principal, field), extra] } as unknown as ScopedWhere<T>;
 }
 
 /** True when this principal may act on data belonging to `storeId`. */
