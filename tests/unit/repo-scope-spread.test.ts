@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
@@ -279,6 +279,87 @@ export function unscopedReadsForPrincipal(source: string): number[] {
   };
   visit(file);
   return [...new Set(lines)].sort((a, b) => a - b);
+}
+
+/**
+ * Where a file gets `scopedWhere` from, and what it does with the name — the
+ * provenance chain (OSCAR round 10). Three hops, each judged on its own file:
+ *
+ * 1. a **consumer** imports the name only from platform/index.ts (resolved
+ *    from the importing file's path, not matched as text);
+ * 2. **platform/index.ts** only passes it through: an unaliased export
+ *    specifier in an `export { … } from './authz/index'` — never a
+ *    declaration of its own under that name;
+ * 3. **authz/index.ts** declares it exactly once, as an exported function.
+ *
+ * A counterfeit anywhere on the chain — a local `function scopedWhere` in
+ * platform/index.ts, a consumer importing from a helper module, a second
+ * declaration in authz — breaks the hop it lives on, whatever it is named
+ * elsewhere.
+ */
+export function scopedWhereImportsOf(source: string, fromFile: string): string[] {
+  const file = ts.createSourceFile(fromFile, source, ts.ScriptTarget.Latest, true);
+  const origins: string[] = [];
+  for (const statement of file.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) {
+      continue;
+    }
+    const bindings = statement.importClause?.namedBindings;
+    if (bindings === undefined || !ts.isNamedImports(bindings)) continue;
+    for (const spec of bindings.elements) {
+      if ((spec.propertyName ?? spec.name).text === 'scopedWhere') {
+        origins.push(resolve(dirname(fromFile), statement.moduleSpecifier.text));
+      }
+    }
+  }
+  return origins;
+}
+
+/** Line numbers on which platform/index.ts does anything with the name but pass it through from authz. */
+export function counterfeitsInPlatformIndex(source: string): number[] {
+  const file = ts.createSourceFile('platform-index.ts', source, ts.ScriptTarget.Latest, true);
+  const lines: number[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && node.text === 'scopedWhere') {
+      const spec = node.parent;
+      const declaration = spec.parent.parent;
+      const passThrough =
+        ts.isExportSpecifier(spec) &&
+        spec.propertyName === undefined &&
+        spec.name === node &&
+        ts.isExportDeclaration(declaration) &&
+        declaration.moduleSpecifier !== undefined &&
+        ts.isStringLiteral(declaration.moduleSpecifier) &&
+        declaration.moduleSpecifier.text === './authz/index';
+      if (!passThrough)
+        lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
+    } else if (
+      (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) &&
+      node.text === 'scopedWhere'
+    ) {
+      lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return [...new Set(lines)].sort((a, b) => a - b);
+}
+
+/** The exported top-level function declarations named `scopedWhere` in authz/index.ts — there must be exactly one. */
+export function scopedWhereDeclarationsIn(source: string): number[] {
+  const file = ts.createSourceFile('authz.ts', source, ts.ScriptTarget.Latest, true);
+  const lines: number[] = [];
+  for (const statement of file.statements) {
+    const declared =
+      (ts.isFunctionDeclaration(statement) && statement.name?.text === 'scopedWhere') ||
+      (ts.isVariableStatement(statement) &&
+        statement.declarationList.declarations.some(
+          (d) => ts.isIdentifier(d.name) && d.name.text === 'scopedWhere',
+        )) ||
+      (ts.isClassDeclaration(statement) && statement.name?.text === 'scopedWhere');
+    if (declared) lines.push(file.getLineAndCharacterOfPosition(statement.getStart(file)).line + 1);
+  }
+  return lines;
 }
 
 describe('repository store scoping', () => {
@@ -644,6 +725,83 @@ describe('repository store scoping', () => {
     // A nested function inside scopedWhere that leaks it out is still inside
     // scopedWhere lexically — but scopedWhere returning anything other than
     // the AND shape is rule 2's business at every call site, not this rule's.
+  });
+
+  it('scopedWhere reaches a consumer only along one chain: authz defines, platform passes through, consumers import from platform — OSCAR round 10', () => {
+    // Hop 3: authz/index.ts declares it exactly once, as an exported function.
+    const authz = readFileSync(DEFINED_IN, 'utf8');
+    expect(scopedWhereDeclarationsIn(authz)).toHaveLength(1);
+    expect(misexportsScopedWhere(authz)).toEqual([]);
+    // Hop 2: platform/index.ts only passes it through from authz.
+    expect(counterfeitsInPlatformIndex(readFileSync(PLATFORM_INDEX, 'utf8'))).toEqual([]);
+    // Hop 1: every consumer that imports it, imports it from platform/index.ts.
+    const violations: string[] = [];
+    for (const file of files) {
+      for (const origin of scopedWhereImportsOf(readFileSync(file, 'utf8'), file)) {
+        if (origin !== PLATFORM_INDEX.replace(/\.ts$/, '')) {
+          violations.push(`${relative(process.cwd(), file)} <- ${relative(process.cwd(), origin)}`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+
+    // OSCAR's round-10 counterfeit: the re-export removed and a local
+    // function of the same name installed in platform/index.ts.
+    const counterfeit =
+      `import { type Principal } from './authz/index';\n` +
+      `export function scopedWhere<T>(principal: Principal, extra: T) {\n` +
+      `  return extra as never;\n` +
+      `}`;
+    expect(counterfeitsInPlatformIndex(counterfeit)).toEqual([2]);
+    // Other shapes of the same thing.
+    expect(counterfeitsInPlatformIndex(`export const scopedWhere = (p, x) => x;`)).toEqual([1]);
+    expect(counterfeitsInPlatformIndex(`export { scopedWhere } from './scope-helper';`)).toEqual([
+      1,
+    ]);
+    expect(
+      counterfeitsInPlatformIndex(`export { safe as scopedWhere } from './authz/index';`),
+    ).toEqual([1]);
+    expect(
+      counterfeitsInPlatformIndex(
+        `import { scopedWhere } from './authz/index';\nexport { scopedWhere };`,
+      ),
+    ).toEqual([1, 2]);
+    expect(
+      counterfeitsInPlatformIndex(
+        `export * as authz from './authz/index';\nexport const scopedWhere = authz['scopedWhere'];`,
+      ),
+    ).toEqual([2]);
+    // The honest pass-through.
+    expect(
+      counterfeitsInPlatformIndex(
+        `export { authorize, scopedWhere, type ScopedWhere } from './authz/index';`,
+      ),
+    ).toEqual([]);
+
+    // A second definition in authz, or a const one, is not "exactly one function".
+    expect(
+      scopedWhereDeclarationsIn(
+        `export function scopedWhere(p, x) { return {}; }\nexport const scopedWhere2 = 1;`,
+      ),
+    ).toEqual([1]);
+    expect(
+      scopedWhereDeclarationsIn(
+        `export function scopedWhere(p, x) { return {}; }\nfunction scopedWhere(p, x) { return x; }`,
+      ),
+    ).toEqual([1, 2]);
+    expect(scopedWhereDeclarationsIn(`export const scopedWhere = (p, x) => x;`)).toEqual([1]);
+
+    // A consumer importing it from anywhere but platform/index.ts.
+    const here = join(MODULES_DIR, 'orders', 'repo.ts');
+    expect(scopedWhereImportsOf(`import { scopedWhere } from '../platform/index';`, here)).toEqual([
+      join(MODULES_DIR, 'platform', 'index'),
+    ]);
+    expect(scopedWhereImportsOf(`import { scopedWhere } from './scope';`, here)).toEqual([
+      join(MODULES_DIR, 'orders', 'scope'),
+    ]);
+    expect(
+      scopedWhereImportsOf(`import { scopedWhere as sw } from '../platform/authz/index';`, here),
+    ).toEqual([join(MODULES_DIR, 'platform', 'authz', 'index')]);
   });
 
   it('platform exports scopedWhere under its own name only — OSCAR round 6', () => {
