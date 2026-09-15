@@ -287,8 +287,12 @@ function redeclaredWithin(body: ts.Node, name: string): boolean {
  * satisfies the brand, because `never` is assignable to anything, and no type
  * can refuse a deliberate cast (OSCAR round 9). A read made any other way on
  * a principal's behalf is one that could have left the scope out (round 8).
- * Reads in functions without a principal — by id, by token — are not
- * store-scoped reads and are not judged here.
+ * The call's first argument must be the enclosing function's own `Principal`
+ * parameter, by binding (round 12), and no function nested inside may
+ * declare a `Principal` of its own — a closure that does re-binds scope to
+ * whatever its caller passes (round 13). Reads in functions without a
+ * principal — by id, by token — are not store-scoped reads and are not
+ * judged here.
  */
 export function unscopedReadsForPrincipal(source: string, fromFile: string): number[] {
   const file = ts.createSourceFile(fromFile, source, ts.ScriptTarget.Latest, true);
@@ -336,28 +340,25 @@ export function unscopedReadsForPrincipal(source: string, fromFile: string): num
         lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
       }
     }
-    ts.forEachChild(node, (child) => {
-      // A nested function that takes its own Principal is judged against that.
-      if (isFunctionLike(child) && takesPrincipal(child) && child.body !== undefined) {
-        judgeFunction(child, child.body);
-      } else {
-        judge(child);
-      }
-    });
+    // A function nested inside a principal-taking one must not declare a
+    // Principal of its own: whatever its caller hands it replaces the outer
+    // principal for every read inside — `(principal: Principal) => …` called
+    // with `{ kind: 'system' }` (OSCAR round 13). There is no reason for a
+    // scoped-read helper to re-declare what it can close over, so the nested
+    // parameter is the violation, and its body is still judged against the
+    // outer function's own parameter.
+    if (isFunctionLike(node) && node !== body.parent && takesPrincipal(node)) {
+      lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
+    }
+    ts.forEachChild(node, judge);
   };
   let body: ts.Node = file;
   let principals = new Set<string>();
-  const judgeFunction = (fn: FunctionLike, fnBody: ts.Node): void => {
-    const outer = { body, principals };
-    body = fnBody;
-    principals = new Set(principalParams(fn).filter((n) => n !== ''));
-    judge(fnBody);
-    body = outer.body;
-    principals = outer.principals;
-  };
   const visit = (node: ts.Node): void => {
     if (isFunctionLike(node) && takesPrincipal(node) && node.body !== undefined) {
-      judgeFunction(node, node.body);
+      body = node.body;
+      principals = new Set(principalParams(node).filter((n) => n !== ''));
+      judge(node.body);
       return;
     }
     ts.forEachChild(node, visit);
@@ -780,6 +781,10 @@ describe('repository store scoping', () => {
         HERE,
       ),
     ).toEqual([4]);
+    // OSCAR round 13: a nested closure that declares its OWN Principal, called
+    // with a literal — the outer manager's principal is discarded. The nested
+    // parameter is the violation (line 3); the read inside is judged against
+    // the outer function's parameter, which the closure has shadowed (line 3).
     expect(
       unscopedReadsForPrincipal(
         fn(
@@ -788,10 +793,34 @@ describe('repository store scoping', () => {
         ),
         HERE,
       ),
+    ).toEqual([3]);
+    expect(
+      unscopedReadsForPrincipal(
+        fn(
+          `  const read = (p: Principal) => scoped(executor(db).order).findMany({ where: scopedWhere(p, { storeId }) });\n` +
+            `  return read({ kind: 'system' });`,
+        ),
+        HERE,
+      ),
+    ).toEqual([3]);
+    // A nested closure that closes over the outer principal is fine.
+    expect(
+      unscopedReadsForPrincipal(
+        fn(
+          `  const read = () => scoped(executor(db).order).findMany({ where: scopedWhere(principal, { storeId }) });\n` +
+            `  return read();`,
+        ),
+        HERE,
+      ),
     ).toEqual([]);
-    // (…a nested function with its own Principal parameter is judged against
-    // that parameter; what its caller passes it is the caller's business —
-    // here the outer function, which makes no read itself.)
+    // A nested function that declares a Principal but reads nothing is still a
+    // violation: the shape itself is what re-binds scope.
+    expect(
+      unscopedReadsForPrincipal(
+        fn(`  const noop = (principal: Principal) => principal;\n  return noop(principal);`),
+        HERE,
+      ),
+    ).toEqual([3]);
     // A destructured Principal parameter has no name to bind to.
     expect(
       unscopedReadsForPrincipal(
