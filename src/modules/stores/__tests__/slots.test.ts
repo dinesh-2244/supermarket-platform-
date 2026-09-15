@@ -433,6 +433,20 @@ describe('opening hours — only windows inside them are offered', () => {
     });
     expect(wider.map((s) => s.toISOString())).toContain('2026-03-29T00:00:00.000Z');
 
+    // A fall-back day is 25 hours long, so 90-minute windows anchored to its
+    // midnight put a last one at 23:00 that ends at 00:30 the next day. Full-day
+    // hours do not hold it: it crosses midnight into the next day's grid.
+    const fallBack = slotGrid({
+      ...hours,
+      timeZone: 'Europe/London',
+      slotLengthMinutes: 90,
+      openMinuteOfDay: 0,
+      closeMinuteOfDay: 1440,
+      from: new Date('2026-10-24T23:00:00Z'), // 00:00 BST, 25 October
+    });
+    expect(fallBack.map((s) => s.toISOString())).not.toContain('2026-10-25T23:00:00.000Z');
+    expect(fallBack.map((s) => s.toISOString())).toContain('2026-10-25T21:30:00.000Z');
+
     // A window that ends exactly at midnight belongs to its own day.
     const toMidnight = slotGrid({
       ...hours,
