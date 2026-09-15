@@ -25,21 +25,19 @@ export default async function RequestProductPage({
       ? await getStore(principal, context.serviceability.storeId).catch(() => null)
       : null;
 
-  const { hero } = STOREFRONT_COPY_MANIFEST.productRequest;
-
   return (
     <div className="mx-auto max-w-2xl space-y-8 py-2 sm:py-6">
       {/* Header */}
       <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-800 via-emerald-700 to-teal-800 px-6 py-10 sm:px-10 sm:py-12 text-white shadow-md">
         <div className="relative z-10">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold backdrop-blur">
-            {hero.badge}
+            {STOREFRONT_COPY_MANIFEST.productRequest.hero.badge}
           </span>
           <h1 className="mt-3 text-2xl sm:text-4xl font-black tracking-tight leading-tight">
-            {hero.title}
+            {STOREFRONT_COPY_MANIFEST.productRequest.hero.title}
           </h1>
           <p className="mt-2 text-xs sm:text-sm text-emerald-100 leading-relaxed max-w-lg">
-            {hero.subtitle}
+            {STOREFRONT_COPY_MANIFEST.productRequest.hero.subtitle}
           </p>
           {store ? (
             <div className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-1.5 text-xs font-medium text-emerald-50 backdrop-blur-xs">

@@ -48,13 +48,28 @@ describe('Product Requests UI: Storefront Copy Manifest Integrity', () => {
     );
 
     expect(pageSource).toContain('title: STOREFRONT_COPY_MANIFEST.productRequest.meta.title');
-    expect(pageSource).toContain('{hero.title}');
-    expect(pageSource).toContain('{hero.subtitle}');
+    expect(
+      pageSource.includes('{hero.title}') ||
+        pageSource.includes('{STOREFRONT_COPY_MANIFEST.productRequest.hero.title}'),
+    ).toBe(true);
+    expect(
+      pageSource.includes('{hero.subtitle}') ||
+        pageSource.includes('{STOREFRONT_COPY_MANIFEST.productRequest.hero.subtitle}'),
+    ).toBe(true);
 
     expect(formSource).toContain('STOREFRONT_COPY_MANIFEST.productRequest');
-    expect(formSource).toContain('{successCopy.title}');
-    expect(formSource).toContain('{successCopy.description}');
-    expect(formSource).toContain('{formCopy.productNameLabel}');
+    expect(
+      formSource.includes('{successCopy.title}') ||
+        formSource.includes('{STOREFRONT_COPY_MANIFEST.productRequest.success.title}'),
+    ).toBe(true);
+    expect(
+      formSource.includes('{successCopy.description}') ||
+        formSource.includes('{STOREFRONT_COPY_MANIFEST.productRequest.success.description}'),
+    ).toBe(true);
+    expect(
+      formSource.includes('{formCopy.productNameLabel}') ||
+        formSource.includes('{STOREFRONT_COPY_MANIFEST.productRequest.form.productNameLabel}'),
+    ).toBe(true);
   });
 
   test('request-product form handles resetting and requesting another product', () => {
