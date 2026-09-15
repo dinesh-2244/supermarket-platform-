@@ -240,6 +240,8 @@ interface Judge {
   readonly principal: ts.Type;
 }
 
+let lastProgram: ts.Program | undefined;
+
 function loadJudge(virtual: ReadonlyMap<string, string>): Judge {
   const config = ts.getParsedCommandLineOfConfigFile(
     join(process.cwd(), 'tsconfig.json'),
@@ -263,7 +265,11 @@ function loadJudge(virtual: ReadonlyMap<string, string>): Judge {
     DEFINED_IN,
     ...virtual.keys(),
   ];
-  const program = ts.createProgram(roots, options, host);
+  // Every Program shares the same platform and Prisma types; handing the
+  // previous one over lets TypeScript reuse what it already parsed and
+  // bound, which is most of the cost on a cold CI runner.
+  const program = ts.createProgram(roots, options, host, lastProgram);
+  lastProgram = program;
   const checker = program.getTypeChecker();
   const authz = program.getSourceFile(DEFINED_IN);
   if (authz === undefined) throw new Error('platform/authz/index.ts is not in the program');
@@ -844,7 +850,7 @@ describe('repository store scoping', () => {
       ],
       ...everyMethod,
     ]);
-  });
+  }, 60_000);
 
   it('the brand and the scoped delegate are named nowhere outside platform', () => {
     // `as ScopedWhere<…>` in a repository would forge the brand; nothing
@@ -1056,7 +1062,7 @@ describe('repository store scoping', () => {
       [aliasOfGenuine, []],
       [local, [3]],
     ]);
-  });
+  }, 60_000);
 
   it('a Principal is a Principal however it is spelled — OSCAR round 14', () => {
     // The guard asks the TypeChecker whether a parameter's type is assignable
@@ -1117,7 +1123,7 @@ describe('repository store scoping', () => {
         ],
       ]),
     );
-  });
+  }, 60_000);
 
   it('platform exports scopedWhere under its own name only — OSCAR round 6', () => {
     // The two files the scan above skips are the definition and the
