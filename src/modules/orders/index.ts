@@ -5,6 +5,7 @@
  * `service.ts`, `repo.ts` and `domain/` are module-private.
  */
 export {
+  announceTransition,
   applyTransition,
   cancelByStore,
   confirmationDetails,
@@ -19,9 +20,13 @@ export {
   queueForStore,
   slotUsage,
   staffOrder,
-  // `transition` is deliberately NOT exported: it is the in-transaction
-  // primitive and authorizes nothing, so the only way to reach it from
-  // outside this module is through `applyTransition`, which does (R1).
+  // `transition` is the in-transaction primitive and **authorizes nothing**.
+  // It was withheld from this surface until Phase 5 (R1); `fulfillment` now
+  // drives the lifecycle from inside its own transactions and must authorize
+  // against the locked order's store *before* calling it, exactly as
+  // `applyTransition` does. `app/` never calls it — the boundary lint keeps
+  // pages on the public wrappers.
+  transition,
   type CancelResult,
   type ConfirmationDetails,
   type CreatedOrder,
@@ -34,6 +39,20 @@ export {
 } from './service';
 
 export type { NewOrderLine, QueueRow, StaffOrderRow } from './repo';
+
+// The order/line rows `fulfillment` works on. `orders` owns `Order` and
+// `OrderLine`; these are the only writes to them a peer may make, and every
+// one takes a `Tx`.
+export {
+  addStockRestored,
+  listPickLines,
+  lockOrder,
+  lockPickLine,
+  setLineOutcome,
+  type LockedOrderRow,
+  type OrderLineStatus,
+  type PickLineRow,
+} from './repo';
 
 export {
   assertTransition,

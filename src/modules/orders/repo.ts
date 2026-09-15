@@ -558,6 +558,81 @@ export async function findByTrackingToken(
 }
 
 /** What a restore needs to know about a line: how much is still outstanding. */
+/** A line as picking sees it: what was ordered, what has been recorded so far. */
+export interface PickLineRow {
+  readonly id: string;
+  readonly orderId: string;
+  readonly productId: string;
+  readonly nameSnapshot: string;
+  readonly packSizeSnapshot: string;
+  readonly qtyOrdered: number;
+  readonly qtyPicked: number | null;
+  readonly lineStatus: OrderLineStatus;
+  readonly substituteProductId: string | null;
+  readonly stockRestoredQty: number;
+}
+
+export type OrderLineStatus = 'PENDING' | 'PICKED' | 'SHORT' | 'SUBSTITUTED' | 'UNAVAILABLE';
+
+const pickLineSelect = {
+  id: true,
+  orderId: true,
+  productId: true,
+  nameSnapshot: true,
+  packSizeSnapshot: true,
+  qtyOrdered: true,
+  qtyPicked: true,
+  lineStatus: true,
+  substituteProductId: true,
+  stockRestoredQty: true,
+} as const;
+
+/** Every line of the order, in a stable order, for the picking screen and the completion check. */
+export async function listPickLines(db: DbExecutor, orderId: string): Promise<PickLineRow[]> {
+  return executor(db).orderLine.findMany({
+    where: { orderId },
+    select: pickLineSelect,
+    orderBy: [{ nameSnapshot: 'asc' }, { id: 'asc' }],
+  });
+}
+
+/**
+ * One line, locked for the transaction — by id **and** order, so a line id
+ * from another order is "no such line" rather than a write to it. Raw SQL
+ * because Prisma has no `FOR UPDATE`.
+ */
+export async function lockPickLine(
+  tx: Tx,
+  orderId: string,
+  lineId: string,
+): Promise<PickLineRow | null> {
+  const rows = await auditedExecutor(tx).$queryRaw<PickLineRow[]>`
+    SELECT "id", "orderId", "productId", "nameSnapshot", "packSizeSnapshot",
+           "qtyOrdered", "qtyPicked", "lineStatus", "substituteProductId", "stockRestoredQty"
+    FROM "OrderLine"
+    WHERE "id" = ${lineId} AND "orderId" = ${orderId}
+    FOR UPDATE
+  `;
+  return rows[0] ?? null;
+}
+
+/** Record what picking found on the shelf for one line. */
+export async function setLineOutcome(
+  tx: Tx,
+  lineId: string,
+  outcome: {
+    readonly lineStatus: Exclude<OrderLineStatus, 'PENDING'>;
+    readonly qtyPicked: number;
+    readonly substituteProductId: string | null;
+  },
+): Promise<PickLineRow> {
+  return auditedExecutor(tx).orderLine.update({
+    where: { id: lineId },
+    data: outcome,
+    select: pickLineSelect,
+  });
+}
+
 export interface RestorableLine {
   readonly id: string;
   readonly productId: string;
