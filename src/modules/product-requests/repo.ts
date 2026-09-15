@@ -9,6 +9,7 @@
  */
 import {
   getPrisma,
+  scoped,
   scopedWhere,
   type DbExecutor,
   type Principal,
@@ -150,7 +151,7 @@ export async function listForPrincipal(
   storeId: string,
   filter: { statuses?: readonly ProductRequestStatus[]; limit?: number },
 ): Promise<ProductRequestRow[]> {
-  return executor(db).productRequest.findMany({
+  return scoped(executor(db).productRequest).findMany({
     where: scopedWhere(principal, {
       storeId,
       ...(filter.statuses === undefined || filter.statuses.length === 0
@@ -169,7 +170,7 @@ export async function findForPrincipal(
   principal: Principal,
   requestId: string,
 ): Promise<(ProductRequestRow & { readonly history: readonly ProductRequestHistoryRow[] }) | null> {
-  const row = await executor(db).productRequest.findFirst({
+  const row = await scoped(executor(db).productRequest).findFirst({
     where: scopedWhere(principal, { id: requestId }),
     select: {
       ...requestSelect,
@@ -187,7 +188,7 @@ export async function countByStatus(
   principal: Principal,
   storeId: string,
 ): Promise<{ status: ProductRequestStatus; count: number }[]> {
-  const rows = await executor(db).productRequest.groupBy({
+  const rows = await scoped(executor(db).productRequest).groupBy({
     by: ['status'],
     where: scopedWhere(principal, { storeId }),
     _count: { _all: true },

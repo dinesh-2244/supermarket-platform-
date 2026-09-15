@@ -10,6 +10,7 @@
 import {
   getPrisma,
   selectForUpdate,
+  scoped,
   scopedWhere,
   type DbExecutor,
   type LockedInventoryRow,
@@ -166,7 +167,7 @@ export async function listItems(
   options: { storeId?: string; productIds?: readonly string[]; limit?: number },
   db?: DbExecutor,
 ): Promise<readonly InventoryRecord[]> {
-  return executor(db).inventoryItem.findMany({
+  return scoped(executor(db).inventoryItem).findMany({
     where: scopedWhere(principal, {
       ...(options.storeId !== undefined ? { storeId: options.storeId } : {}),
       ...(options.productIds !== undefined ? { productId: { in: [...options.productIds] } } : {}),
@@ -185,7 +186,7 @@ export async function listLowStock(
   limit: number,
   db?: DbExecutor,
 ): Promise<readonly InventoryRecord[]> {
-  return executor(db).inventoryItem.findMany({
+  return scoped(executor(db).inventoryItem).findMany({
     where: scopedWhere(principal, { storeId, websiteStock: { lte: threshold } }),
     select: itemSelect,
     orderBy: [{ websiteStock: 'asc' }, { productId: 'asc' }],
@@ -209,7 +210,7 @@ export async function listLedger(
   query: LedgerQuery,
   db?: DbExecutor,
 ): Promise<readonly LedgerRecord[]> {
-  return executor(db).stockLedger.findMany({
+  return scoped(executor(db).stockLedger).findMany({
     where: scopedWhere(principal, {
       storeId: query.storeId,
       ...(query.productId !== undefined ? { productId: query.productId } : {}),
@@ -289,7 +290,7 @@ export async function listImportRuns(
   limit: number,
   db?: DbExecutor,
 ): Promise<readonly ImportRunRecord[]> {
-  return executor(db).inventoryImport.findMany({
+  return scoped(executor(db).inventoryImport).findMany({
     where: scopedWhere(principal, { storeId }),
     orderBy: { createdAt: 'desc' },
     take: limit,

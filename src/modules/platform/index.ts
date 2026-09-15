@@ -42,6 +42,8 @@ export {
   tryAdvisoryXactLock,
   type Tx,
   withTransaction,
+  scoped,
+  type ScopedReads,
 } from './db/index';
 
 export {
@@ -99,6 +101,7 @@ export {
   type Principal,
   type Resource,
   scopedWhere,
+  type ScopedWhere,
   type UserRole,
 } from './authz/index';
 

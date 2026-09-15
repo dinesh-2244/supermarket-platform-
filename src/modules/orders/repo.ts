@@ -10,6 +10,7 @@
 import {
   getPrisma,
   type Prisma,
+  scoped,
   scopedWhere,
   type DbExecutor,
   type Principal,
@@ -255,7 +256,7 @@ export async function listForPrincipal(
   principal: Principal,
   filter: { storeId?: string; statuses?: readonly OrderStatus[]; limit?: number },
 ): Promise<QueueRow[]> {
-  return executor(db).order.findMany({
+  return scoped(executor(db).order).findMany({
     where: scopedWhere(principal, {
       ...(filter.storeId === undefined ? {} : { storeId: filter.storeId }),
       ...(filter.statuses === undefined || filter.statuses.length === 0
@@ -335,7 +336,7 @@ export async function countByStatusAndVariance(
   principal: Principal,
   storeId: string,
 ): Promise<OrderCountCell[]> {
-  const rows = await executor(db).order.groupBy({
+  const rows = await scoped(executor(db).order).groupBy({
     by: ['status', 'priceVarianceFlagged'],
     where: scopedWhere(principal, { storeId }),
     _count: { _all: true },
@@ -386,7 +387,7 @@ export async function findForPrincipal(
   principal: Principal,
   orderId: string,
 ): Promise<StaffOrderRow | null> {
-  const rows = await executor(db).order.findMany({
+  const rows = await scoped(executor(db).order).findMany({
     where: scopedWhere(principal, { id: orderId }),
     select: {
       ...queueSelect,

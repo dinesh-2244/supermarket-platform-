@@ -9,6 +9,7 @@
  */
 import {
   getPrisma,
+  scoped,
   scopedWhere,
   type DbExecutor,
   type Principal,
@@ -73,7 +74,7 @@ export async function listVisibleStores(
   principal: Principal,
   db?: DbExecutor,
 ): Promise<readonly StoreRecord[]> {
-  return executor(db).store.findMany({
+  return scoped(executor(db).store).findMany({
     where: scopedWhere(principal, {}, 'id'),
     select: storeSelect,
     orderBy: { code: 'asc' },
@@ -90,7 +91,7 @@ export async function countVisibleStores(
   principal: Principal,
   db?: DbExecutor,
 ): Promise<{ active: number; inactive: number }> {
-  const rows = await executor(db).store.groupBy({
+  const rows = await scoped(executor(db).store).groupBy({
     by: ['isActive'],
     where: scopedWhere(principal, {}, 'id'),
     _count: { _all: true },
@@ -184,7 +185,7 @@ export async function listZones(
   storeId: string | null,
   db?: DbExecutor,
 ): Promise<readonly ZoneRecord[]> {
-  return executor(db).deliveryZone.findMany({
+  return scoped(executor(db).deliveryZone).findMany({
     where: scopedWhere(principal, storeId !== null ? { storeId } : {}),
     orderBy: [{ storeId: 'asc' }, { sortKey: 'asc' }],
   });

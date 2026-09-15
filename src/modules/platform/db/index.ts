@@ -1,5 +1,6 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Prisma, PrismaClient } from '@prisma/client';
+import type { ScopedWhere } from '../authz/index';
 import { getConfig } from '../config/index';
 import { childLogger } from '../logger/index';
 import { EXPECTED_MIGRATIONS } from './expected-migrations';
@@ -460,3 +461,57 @@ export async function checkDbHealth(client: PrismaClient = getPrisma()): Promise
 
 export { EXPECTED_MIGRATIONS };
 export { Prisma };
+
+type ReadArgs<
+  D,
+  F extends 'findMany' | 'findFirst' | 'count' | 'groupBy' | 'aggregate',
+> = Prisma.Args<D, F>;
+
+type WhereOf<D, F extends 'findMany' | 'findFirst' | 'count' | 'groupBy' | 'aggregate'> = Extract<
+  NonNullable<ReadArgs<D, F> extends { where?: infer W } ? W : never>,
+  Record<string, unknown>
+>;
+
+/**
+ * The read methods of a Prisma delegate, each requiring a `where` that
+ * `scopedWhere` built. Prisma's own argument and result types are kept, so a
+ * `select` still narrows the rows; only `where` is tightened to the brand.
+ * `scoped(delegate)` is the identity at runtime.
+ */
+export interface ScopedReads<D> {
+  findMany<A extends ReadArgs<D, 'findMany'>>(
+    args: Prisma.SelectSubset<A, ReadArgs<D, 'findMany'>> & {
+      where: ScopedWhere<WhereOf<D, 'findMany'>>;
+    },
+  ): Prisma.PrismaPromise<Prisma.Result<D, A, 'findMany'>>;
+  findFirst<A extends ReadArgs<D, 'findFirst'>>(
+    args: Prisma.SelectSubset<A, ReadArgs<D, 'findFirst'>> & {
+      where: ScopedWhere<WhereOf<D, 'findFirst'>>;
+    },
+  ): Prisma.PrismaPromise<Prisma.Result<D, A, 'findFirst'>>;
+  count<A extends ReadArgs<D, 'count'>>(
+    args: Prisma.SelectSubset<A, ReadArgs<D, 'count'>> & {
+      where: ScopedWhere<WhereOf<D, 'count'>>;
+    },
+  ): Prisma.PrismaPromise<Prisma.Result<D, A, 'count'>>;
+  groupBy<A extends ReadArgs<D, 'groupBy'>>(
+    args: Prisma.SelectSubset<A, ReadArgs<D, 'groupBy'>> & {
+      where: ScopedWhere<WhereOf<D, 'groupBy'>>;
+    },
+  ): Prisma.PrismaPromise<Prisma.Result<D, A, 'groupBy'>>;
+  aggregate<A extends ReadArgs<D, 'aggregate'>>(
+    args: Prisma.SelectSubset<A, ReadArgs<D, 'aggregate'>> & {
+      where: ScopedWhere<WhereOf<D, 'aggregate'>>;
+    },
+  ): Prisma.PrismaPromise<Prisma.Result<D, A, 'aggregate'>>;
+}
+
+/**
+ * A delegate whose reads take only a `ScopedWhere`. The one way a repository
+ * reads on a principal's behalf: with `where` typed to the brand, a read that
+ * forgets the scope — `where: { storeId }` with no `scopedWhere` anywhere —
+ * does not compile (OSCAR, PR #50 round 8). Presence, not just correct use.
+ */
+export function scoped<D extends object>(delegate: D): ScopedReads<D> {
+  return delegate as unknown as ScopedReads<D>;
+}

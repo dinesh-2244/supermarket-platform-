@@ -356,13 +356,26 @@ function storeScopeFilter(
  * would overwrite the `AND` the scope lives in. Nested `AND`/`OR` inside
  * `extra` are fine — they sit inside the outer `AND` untouched.
  */
+declare const scopedBrand: unique symbol;
+
+/**
+ * A `where` that `scopedWhere` built — and only it. The brand is a phantom
+ * type (no runtime property): nothing but the cast inside `scopedWhere` can
+ * produce a value of this type, so a `where` parameter typed `ScopedWhere`
+ * refuses a hand-written `{ storeId }`, a selection off the result, or
+ * anything else, at compile time.
+ */
+export type ScopedWhere<T = Record<string, unknown>> = {
+  AND: [ReturnType<typeof storeScopeFilter>, T];
+} & { readonly [scopedBrand]: true };
+
 export function scopedWhere<T extends Record<string, unknown>>(
   principal: Principal,
   extra: T,
   // `id` is for the Store table itself, whose own id is the store.
   field: 'storeId' | 'id' = 'storeId',
-): { AND: [ReturnType<typeof storeScopeFilter>, T] } {
-  return { AND: [storeScopeFilter(principal, field), extra] };
+): ScopedWhere<T> {
+  return { AND: [storeScopeFilter(principal, field), extra] } as ScopedWhere<T>;
 }
 
 /** True when this principal may act on data belonging to `storeId`. */

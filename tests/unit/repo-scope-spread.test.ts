@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
@@ -155,10 +155,11 @@ export function misexportsScopedWhere(source: string): number[] {
   return [...new Set(lines)].sort((a, b) => a - b);
 }
 
-/** Is `node` inside the declaration of the function named `name`? */
-function withinFunction(node: ts.Node, name: string): boolean {
+/** Is `node` inside the function or type-alias declaration named `name`? */
+function withinDeclaration(node: ts.Node, name: string): boolean {
   for (let cursor: ts.Node | undefined = node.parent; cursor; cursor = cursor.parent) {
     if (ts.isFunctionDeclaration(cursor) && cursor.name?.text === name) return true;
+    if (ts.isTypeAliasDeclaration(cursor) && cursor.name.text === name) return true;
   }
   return false;
 }
@@ -166,7 +167,8 @@ function withinFunction(node: ts.Node, name: string): boolean {
 /**
  * For the file that defines `storeScopeFilter`: every identifier of that name
  * must be either the name of its own **unexported** function declaration, or
- * sit inside the declaration of `scopedWhere` (body or signature). Anything
+ * sit inside the declaration of `scopedWhere` (body or signature) or of the
+ * `ScopedWhere` type that spells its result's shape. Anything
  * else — an `export` on the definition, a second wrapper, an alias, an export
  * list, a method — hands the raw fragment out under some other name, which no
  * rule about the name `scopedWhere` can see (OSCAR round 7).
@@ -181,9 +183,74 @@ export function misplacesStoreScopeFilter(source: string): number[] {
         ts.isFunctionDeclaration(parent) &&
         parent.name === node &&
         !(parent.modifiers ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
-      if (!definition && !withinFunction(node, 'scopedWhere')) {
+      // Its own definition; the body/signature of `scopedWhere`; or the
+      // `ScopedWhere` type, which names it only to spell the result's shape.
+      if (
+        !definition &&
+        !withinDeclaration(node, 'scopedWhere') &&
+        !withinDeclaration(node, 'ScopedWhere')
+      ) {
         lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
       }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return [...new Set(lines)].sort((a, b) => a - b);
+}
+
+const READ_METHODS = new Set(['findMany', 'findFirst', 'count', 'groupBy', 'aggregate']);
+
+function takesPrincipal(fn: ts.FunctionDeclaration): boolean {
+  return fn.parameters.some(
+    (p) =>
+      p.type !== undefined &&
+      ts.isTypeReferenceNode(p.type) &&
+      ts.isIdentifier(p.type.typeName) &&
+      p.type.typeName.text === 'Principal',
+  );
+}
+
+/**
+ * For a repository file: inside every function declaration that takes a
+ * `Principal`, each call to a read method (`findMany`, `findFirst`, `count`,
+ * `groupBy`, `aggregate`) must be made on `scoped(…)` and carry a `where:`
+ * property in its argument. A read made any other way on a principal's
+ * behalf is one that could have left the scope out (OSCAR round 8). Reads in
+ * functions without a principal — by id, by token — are not store-scoped
+ * reads and are not judged here.
+ */
+export function unscopedReadsForPrincipal(source: string): number[] {
+  const file = ts.createSourceFile('repo.ts', source, ts.ScriptTarget.Latest, true);
+  const lines: number[] = [];
+  const judge = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      READ_METHODS.has(node.expression.name.text)
+    ) {
+      const target = node.expression.expression;
+      const viaScoped =
+        ts.isCallExpression(target) &&
+        ts.isIdentifier(target.expression) &&
+        target.expression.text === 'scoped';
+      const arg = node.arguments[0];
+      const hasWhere =
+        arg !== undefined &&
+        ts.isObjectLiteralExpression(arg) &&
+        arg.properties.some(
+          (p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === 'where',
+        );
+      if (!viaScoped || !hasWhere) {
+        lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
+      }
+    }
+    ts.forEachChild(node, judge);
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isFunctionDeclaration(node) && takesPrincipal(node) && node.body !== undefined) {
+      judge(node.body);
+      return;
     }
     ts.forEachChild(node, visit);
   };
@@ -340,6 +407,88 @@ describe('repository store scoping', () => {
     expect(misusesScopedWhere(repo(`    where: widen(scopedWhere),`))).toEqual([4]);
   });
 
+  it('a repo function handed a principal reads only through scoped(), with a where — OSCAR round 8', () => {
+    // Every rule so far keys on `scopedWhere` being *present* and used right.
+    // A read that simply omits it — `where: { storeId }`, no scope anywhere —
+    // is invisible to them. Two things close that: the type system (a
+    // `scoped(delegate)` read takes only a `ScopedWhere`, so a raw where does
+    // not compile) and this rule, which holds that a repository function
+    // taking a `Principal` makes no read except through `scoped(...)`.
+    const violations: string[] = [];
+    for (const file of moduleFiles(MODULES_DIR).filter((f) => f.endsWith('/repo.ts'))) {
+      for (const line of unscopedReadsForPrincipal(readFileSync(file, 'utf8'))) {
+        violations.push(`${relative(process.cwd(), file)}:${line}`);
+      }
+    }
+    expect(violations).toEqual([]);
+
+    const fn = (body: string): string =>
+      `import { scoped, scopedWhere, type Principal } from '../platform/index';\n` +
+      `export async function count(principal: Principal, storeId: string, db?: DbExecutor) {\n` +
+      `${body}\n}`;
+    // OSCAR's round-8 case: the scope simply left out.
+    expect(
+      unscopedReadsForPrincipal(
+        fn(`  return executor(db).order.groupBy({ by: ['status'], where: { storeId } });`),
+      ),
+    ).toEqual([3]);
+    // The honest shape.
+    expect(
+      unscopedReadsForPrincipal(
+        fn(
+          `  return scoped(executor(db).order).groupBy({ by: ['status'], where: scopedWhere(principal, { storeId }) });`,
+        ),
+      ),
+    ).toEqual([]);
+    // Scoped delegate, but the where forgotten (tsc refuses this too).
+    expect(
+      unscopedReadsForPrincipal(fn(`  return scoped(executor(db).order).findMany({ take: 5 });`)),
+    ).toEqual([3]);
+    // Every read method, on a transaction or the client, not only executor(db).
+    for (const m of ['findMany', 'findFirst', 'count', 'groupBy', 'aggregate']) {
+      expect(
+        unscopedReadsForPrincipal(fn(`  return prisma.order.${m}({ where: { storeId } });`)),
+      ).toEqual([3]);
+      expect(
+        unscopedReadsForPrincipal(
+          fn(`  return tx.order.${m}({ where: scopedWhere(principal, { storeId }) });`),
+        ),
+      ).toEqual([3]);
+    }
+    // A read in a helper the principal-taking function calls is that helper's
+    // business; a function without a principal (a read by id) is not covered.
+    expect(
+      unscopedReadsForPrincipal(
+        `export async function findZone(id: string, db?: DbExecutor) {\n  return executor(db).deliveryZone.findUnique({ where: { id } });\n}`,
+      ),
+    ).toEqual([]);
+    // Two reads in one function: each judged.
+    expect(
+      unscopedReadsForPrincipal(
+        fn(
+          `  const a = await scoped(executor(db).order).findMany({ where: scopedWhere(principal, {}) });\n` +
+            `  const b = await executor(db).order.count({ where: { storeId } });\n  return [a, b];`,
+        ),
+      ),
+    ).toEqual([4]);
+  });
+
+  it('the brand and the scoped delegate are named nowhere outside platform', () => {
+    // `as ScopedWhere<…>` in a repository would forge the brand; nothing
+    // outside platform has a reason to name either type.
+    const violations: string[] = [];
+    for (const file of files.filter((f) => !f.includes(`${sep}platform${sep}`))) {
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          if (/\b(ScopedWhere|ScopedReads|scopedBrand)\b/.test(line)) {
+            violations.push(`${relative(process.cwd(), file)}:${i + 1}`);
+          }
+        });
+    }
+    expect(violations).toEqual([]);
+  });
+
   it('the definition file uses storeScopeFilter only to define it and inside scopedWhere — OSCAR round 7', () => {
     // Exported, the primitive can be wrapped by any function in its own file
     // and re-exported under any name — no rule about names catches that. So
@@ -371,6 +520,18 @@ describe('repository store scoping', () => {
           `  return { AND: [storeScopeFilter(p), extra] };\n}`,
       ),
     ).toEqual([]);
+
+    // The `ScopedWhere` type may spell the result's shape; another type may not.
+    expect(
+      misplacesStoreScopeFilter(
+        `function storeScopeFilter(p) { return {}; }\nexport type ScopedWhere<T> = { AND: [ReturnType<typeof storeScopeFilter>, T] };`,
+      ),
+    ).toEqual([]);
+    expect(
+      misplacesStoreScopeFilter(
+        `function storeScopeFilter(p) { return {}; }\nexport type Scope = ReturnType<typeof storeScopeFilter>;`,
+      ),
+    ).toEqual([2]);
 
     // Exporting the definition is itself the violation.
     expect(misplacesStoreScopeFilter(`export function storeScopeFilter(p) { return {}; }`)).toEqual(

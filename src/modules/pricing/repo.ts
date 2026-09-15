@@ -9,6 +9,7 @@
  */
 import {
   getPrisma,
+  scoped,
   scopedWhere,
   type DbExecutor,
   type Principal,
@@ -100,7 +101,7 @@ export async function listListings(
   options: ListListingsOptions,
   db?: DbExecutor,
 ): Promise<readonly StoreProductRecord[]> {
-  return executor(db).storeProduct.findMany({
+  return scoped(executor(db).storeProduct).findMany({
     where: scopedWhere(principal, {
       ...(options.storeId !== undefined ? { storeId: options.storeId } : {}),
       ...(options.listedOnly === true ? { isListed: true } : {}),
@@ -126,7 +127,7 @@ export async function listListedProductIds(
   storeId: string,
   db?: DbExecutor,
 ): Promise<readonly string[]> {
-  const rows = await executor(db).storeProduct.findMany({
+  const rows = await scoped(executor(db).storeProduct).findMany({
     where: scopedWhere(principal, { storeId, isListed: true }),
     select: { productId: true },
     orderBy: { productId: 'asc' },
