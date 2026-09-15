@@ -406,6 +406,43 @@ describe('opening hours — only windows inside them are offered', () => {
     expect(slots[0]).toEqual(new Date('2026-03-29T09:00:00Z'));
   });
 
+  it('judges the window’s real end on the wall clock, not start + length (OSCAR M2)', () => {
+    // Europe/London, 2026-03-29, hours 00:00–01:00. The 60-minute window at
+    // local 00:00 (00:00Z) ends at 01:00Z, which the wall clock calls 02:00 —
+    // the shift happened inside it. Start + 60 minutes says 01:00 and would
+    // offer it; the door had been shut an hour by then.
+    const shiftNight = slotGrid({
+      ...hours,
+      timeZone: 'Europe/London',
+      openMinuteOfDay: 0,
+      closeMinuteOfDay: 60,
+      from: new Date('2026-03-29T00:00:00Z'),
+    });
+    expect(shiftNight.map((s) => s.toISOString())).not.toContain('2026-03-29T00:00:00.000Z');
+    // The same window the night after is a plain hour and is offered.
+    expect(shiftNight.map((s) => s.toISOString())).toContain('2026-03-29T23:00:00.000Z');
+
+    // Hours wide enough to hold the stretched window still offer it: 00:00
+    // to 02:00 on the wall holds a window that ends at 02:00 on the wall.
+    const wider = slotGrid({
+      ...hours,
+      timeZone: 'Europe/London',
+      openMinuteOfDay: 0,
+      closeMinuteOfDay: 120,
+      from: new Date('2026-03-29T00:00:00Z'),
+    });
+    expect(wider.map((s) => s.toISOString())).toContain('2026-03-29T00:00:00.000Z');
+
+    // A window that ends exactly at midnight belongs to its own day.
+    const toMidnight = slotGrid({
+      ...hours,
+      openMinuteOfDay: 1380,
+      closeMinuteOfDay: 1440,
+      from: new Date('2026-02-28T18:30:00Z'),
+    });
+    expect(toMidnight.map(istWallClock)).toEqual(['23:00']);
+  });
+
   it('refuses hours that are not a whole-minute window inside one day', () => {
     const from = new Date('2026-03-01T06:00:00Z');
     for (const [open, close] of [

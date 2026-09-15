@@ -268,6 +268,37 @@ describe('opening hours are enforced, not copy', () => {
   });
 });
 
+describe('the hours invariant under concurrent partial updates (OSCAR M1)', () => {
+  it('two overlapping partial updates cannot land on an invalid combined row', async () => {
+    const admin: Principal = { kind: 'user', userId: 'admin', role: 'SUPER_ADMIN', storeId: null };
+    // Barrier: hold the settings row locked while both updates are started,
+    // so that any read done *before* the update's own lock is a read of the
+    // old row (600/1200) for both — each alone a valid change, together not.
+    let racing: Promise<PromiseSettledResult<unknown>[]> | null = null;
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT 1 FROM "StoreSettings" WHERE "storeId" = ${storeId} FOR UPDATE`;
+      racing = Promise.allSettled([
+        updateSettings(admin, storeId, { openMinuteOfDay: 1000 }),
+        updateSettings(admin, storeId, { closeMinuteOfDay: 800 }),
+      ]);
+      // Both are now started and past whatever they do before their own lock.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      // Returning commits and releases the barrier: they go through one at a time.
+    });
+    const results = await racing!;
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((r) => r.status === 'rejected');
+    expect(rejected?.status === 'rejected' && String(rejected.reason)).toMatch(/opening hours/i);
+    const row = await prisma.storeSettings.findUniqueOrThrow({ where: { storeId } });
+    expect(row.openMinuteOfDay).toBeLessThan(row.closeMinuteOfDay);
+    expect([
+      [1000, 1200],
+      [600, 800],
+    ]).toContainEqual([row.openMinuteOfDay, row.closeMinuteOfDay]);
+    await updateSettings(admin, storeId, { openMinuteOfDay: 600, closeMinuteOfDay: 1200 });
+  });
+});
+
 describe('the capacity gate in placeOrder', () => {
   it('refuses a slot outside the offered grid', async () => {
     const token = await basket();

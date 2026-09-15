@@ -305,21 +305,27 @@ export async function updateSettings(
   const data = pickEditableSettings(input);
   assertEditableSettings(data);
 
-  const before = await repo.findSettings(storeId);
-  if (before === null) throw new NotFoundError('Store settings not found', { storeId });
-
-  if (Object.keys(data).length === 0) return before;
-
-  // The hours and the slot length are one rule (`assertOpeningHours`, shared
-  // with the grid): judged on what the row will *be*, since an update may
-  // carry any one of the three and leave the others as they are.
-  assertOpeningHours(
-    data.openMinuteOfDay ?? before.openMinuteOfDay,
-    data.closeMinuteOfDay ?? before.closeMinuteOfDay,
-    data.slotLengthMinutes ?? before.slotLengthMinutes,
-  );
+  if (Object.keys(data).length === 0) {
+    const current = await repo.findSettings(storeId);
+    if (current === null) throw new NotFoundError('Store settings not found', { storeId });
+    return current;
+  }
 
   return withTransaction(async (tx) => {
+    // Lock first, then judge the rule that spans fields on the row as it will
+    // be: the hours and the slot length are one rule (`assertOpeningHours`,
+    // shared with the grid), and an update may carry any one of the three.
+    // Judged before the lock, two partial updates — one moving `open`, one
+    // moving `close` — each pass against the old row and together land on an
+    // impossible one (OSCAR M1 on PR #57).
+    const before = await repo.lockSettings(tx, storeId);
+    if (before === null) throw new NotFoundError('Store settings not found', { storeId });
+    assertOpeningHours(
+      data.openMinuteOfDay ?? before.openMinuteOfDay,
+      data.closeMinuteOfDay ?? before.closeMinuteOfDay,
+      data.slotLengthMinutes ?? before.slotLengthMinutes,
+    );
+
     const after = await repo.updateSettingsRow(tx, storeId, { ...data });
     await writeAuditLog(tx, {
       principal,

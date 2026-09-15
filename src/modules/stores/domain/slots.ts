@@ -183,6 +183,30 @@ function wallClockMinute(instant: number, timeZone: string): number {
 }
 
 /**
+ * Does the window `[start, end)` sit inside the hours **on the wall clock**?
+ *
+ * Both ends are read off the clock at their own instant. Not `start + length`:
+ * across a spring-forward the window is an hour later on the wall when it ends
+ * than arithmetic on its start says — a 60-minute window at 00:00 ends at
+ * what the clock calls 02:00 — and the door may well have shut by then (OSCAR
+ * M2 on PR #57). A window ending exactly at midnight belongs to its own day
+ * (1440, not 0); one whose clock end is not after its clock start has crossed
+ * midnight, and no hours inside one day hold it.
+ */
+function insideHours(
+  start: number,
+  end: number,
+  timeZone: string,
+  openMinuteOfDay: number,
+  closeMinuteOfDay: number,
+): boolean {
+  const opensAt = wallClockMinute(start, timeZone);
+  const rawEnd = wallClockMinute(end, timeZone);
+  const closesAt = rawEnd === 0 ? MINUTES_PER_DAY : rawEnd;
+  return opensAt >= openMinuteOfDay && closesAt > opensAt && closesAt <= closeMinuteOfDay;
+}
+
+/**
  * Every slot start a shopper may choose, in order.
  *
  * This is the **single definition** of "is that a real window": both the picker
@@ -234,8 +258,8 @@ export function slotGrid(input: SlotGridInput): Date[] {
     // clock on it says so.
     for (let cursor = day; cursor < nextDay && cursor <= latest; cursor += step) {
       if (cursor < earliest) continue;
-      const opensAt = wallClockMinute(cursor, timeZone);
-      if (opensAt < openMinuteOfDay || opensAt + slotLengthMinutes > closeMinuteOfDay) continue;
+      if (!insideHours(cursor, cursor + step, timeZone, openMinuteOfDay, closeMinuteOfDay))
+        continue;
       slots.push(new Date(cursor));
     }
 
