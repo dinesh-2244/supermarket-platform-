@@ -481,7 +481,7 @@ describe('repository store scoping', () => {
       readFileSync(file, 'utf8')
         .split('\n')
         .forEach((line, i) => {
-          if (/\b(ScopedWhere|ScopedReads|scopedBrand)\b/.test(line)) {
+          if (/\b(ScopedWhere|ScopedReads|ScopedBrand)\b/.test(line)) {
             violations.push(`${relative(process.cwd(), file)}:${i + 1}`);
           }
         });

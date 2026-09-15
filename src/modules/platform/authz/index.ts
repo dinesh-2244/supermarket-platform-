@@ -356,18 +356,27 @@ function storeScopeFilter(
  * would overwrite the `AND` the scope lives in. Nested `AND`/`OR` inside
  * `extra` are fine — they sit inside the outer `AND` untouched.
  */
-declare const scopedBrand: unique symbol;
+/**
+ * The brand on a `where` that `scopedWhere` built. A class with a private
+ * member rather than a symbol property: TypeScript drops private members
+ * from an object spread and refuses a literal that names one, so
+ * `{ ...scopedWhere(p, x), AND: [] }` and `{ AND: [...], scoped: true }` are
+ * both unbranded — where a symbol-keyed brand would have survived the spread.
+ * `declare` keeps it out of the emitted class; no value is ever an instance.
+ */
+class ScopedBrand {
+  declare private readonly scoped: true;
+}
 
 /**
- * A `where` that `scopedWhere` built — and only it. The brand is a phantom
- * type (no runtime property): nothing but the cast inside `scopedWhere` can
- * produce a value of this type, so a `where` parameter typed `ScopedWhere`
- * refuses a hand-written `{ storeId }`, a selection off the result, or
- * anything else, at compile time.
+ * A `where` that `scopedWhere` built — and only it. Nothing but the cast
+ * inside `scopedWhere` produces this type, so a `where` parameter typed
+ * `ScopedWhere` refuses a hand-written `{ storeId }`, a selection off the
+ * result, a spread of it, or anything else, at compile time.
  */
 export type ScopedWhere<T = Record<string, unknown>> = {
   AND: [ReturnType<typeof storeScopeFilter>, T];
-} & { readonly [scopedBrand]: true };
+} & ScopedBrand;
 
 export function scopedWhere<T extends Record<string, unknown>>(
   principal: Principal,
@@ -375,7 +384,7 @@ export function scopedWhere<T extends Record<string, unknown>>(
   // `id` is for the Store table itself, whose own id is the store.
   field: 'storeId' | 'id' = 'storeId',
 ): ScopedWhere<T> {
-  return { AND: [storeScopeFilter(principal, field), extra] } as ScopedWhere<T>;
+  return { AND: [storeScopeFilter(principal, field), extra] } as unknown as ScopedWhere<T>;
 }
 
 /** True when this principal may act on data belonging to `storeId`. */
