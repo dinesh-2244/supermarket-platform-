@@ -201,7 +201,19 @@ export function misplacesStoreScopeFilter(source: string): number[] {
 
 const READ_METHODS = new Set(['findMany', 'findFirst', 'count', 'groupBy', 'aggregate']);
 
-function takesPrincipal(fn: ts.FunctionDeclaration): boolean {
+type FunctionLike =
+  ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | ts.MethodDeclaration;
+
+function isFunctionLike(node: ts.Node): node is FunctionLike {
+  return (
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node) ||
+    ts.isMethodDeclaration(node)
+  );
+}
+
+function takesPrincipal(fn: FunctionLike): boolean {
   return fn.parameters.some(
     (p) =>
       p.type !== undefined &&
@@ -212,16 +224,20 @@ function takesPrincipal(fn: ts.FunctionDeclaration): boolean {
 }
 
 /**
- * For a repository file: inside every function declaration that takes a
- * `Principal`, each call to a read method (`findMany`, `findFirst`, `count`,
- * `groupBy`, `aggregate`) must be made on `scoped(…)` and carry a `where:`
- * property in its argument. A read made any other way on a principal's
- * behalf is one that could have left the scope out (OSCAR round 8). Reads in
- * functions without a principal — by id, by token — are not store-scoped
- * reads and are not judged here.
+ * For a repository file: inside every function — declaration, expression,
+ * arrow or method — that takes a `Principal`, each call to a read method
+ * (`findMany`, `findFirst`, `count`, `groupBy`, `aggregate`) must be made on
+ * `scoped(…)` and its argument must carry a `where:` whose initializer **is**
+ * a `scopedWhere(…)` call — not merely present: `where: { storeId } as never`
+ * satisfies the brand, because `never` is assignable to anything, and no type
+ * can refuse a deliberate cast (OSCAR round 9). A read made any other way on
+ * a principal's behalf is one that could have left the scope out (round 8).
+ * Reads in functions without a principal — by id, by token — are not
+ * store-scoped reads and are not judged here.
  */
 export function unscopedReadsForPrincipal(source: string): number[] {
   const file = ts.createSourceFile('repo.ts', source, ts.ScriptTarget.Latest, true);
+  const names = scopedWhereBindings(file);
   const lines: number[] = [];
   const judge = (node: ts.Node): void => {
     if (
@@ -235,20 +251,27 @@ export function unscopedReadsForPrincipal(source: string): number[] {
         ts.isIdentifier(target.expression) &&
         target.expression.text === 'scoped';
       const arg = node.arguments[0];
-      const hasWhere =
-        arg !== undefined &&
-        ts.isObjectLiteralExpression(arg) &&
-        arg.properties.some(
-          (p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === 'where',
-        );
-      if (!viaScoped || !hasWhere) {
+      const where =
+        arg !== undefined && ts.isObjectLiteralExpression(arg)
+          ? arg.properties.find(
+              (p) =>
+                ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === 'where',
+            )
+          : undefined;
+      const whereIsScopedWhere =
+        where !== undefined &&
+        ts.isPropertyAssignment(where) &&
+        ts.isCallExpression(where.initializer) &&
+        ts.isIdentifier(where.initializer.expression) &&
+        names.has(where.initializer.expression.text);
+      if (!viaScoped || !whereIsScopedWhere) {
         lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
       }
     }
     ts.forEachChild(node, judge);
   };
   const visit = (node: ts.Node): void => {
-    if (ts.isFunctionDeclaration(node) && takesPrincipal(node) && node.body !== undefined) {
+    if (isFunctionLike(node) && takesPrincipal(node) && node.body !== undefined) {
       judge(node.body);
       return;
     }
@@ -407,7 +430,7 @@ describe('repository store scoping', () => {
     expect(misusesScopedWhere(repo(`    where: widen(scopedWhere),`))).toEqual([4]);
   });
 
-  it('a repo function handed a principal reads only through scoped(), with a where — OSCAR round 8', () => {
+  it('a repo function handed a principal reads only through scoped(), where: scopedWhere(…) itself — OSCAR rounds 8–9', () => {
     // Every rule so far keys on `scopedWhere` being *present* and used right.
     // A read that simply omits it — `where: { storeId }`, no scope anywhere —
     // is invisible to them. Two things close that: the type system (a
@@ -455,6 +478,71 @@ describe('repository store scoping', () => {
         ),
       ).toEqual([3]);
     }
+    // OSCAR round 9: `as never` is assignable to anything, so the brand alone
+    // cannot stop a deliberate cast. The where must BE the scopedWhere call.
+    expect(
+      unscopedReadsForPrincipal(
+        fn(
+          `  return scoped(executor(db).order).groupBy({ by: ['status'], where: { storeId } as never });`,
+        ),
+      ),
+    ).toEqual([3]);
+    expect(
+      unscopedReadsForPrincipal(
+        fn(`  return scoped(executor(db).order).findMany({ where: { storeId } as any });`),
+      ),
+    ).toEqual([3]);
+    expect(
+      unscopedReadsForPrincipal(
+        fn(
+          `  return scoped(executor(db).order).findMany({ where: scopedWhere(principal, { storeId }) as never });`,
+        ),
+      ),
+    ).toEqual([3]);
+    expect(
+      unscopedReadsForPrincipal(
+        fn(
+          `  const w = scopedWhere(principal, { storeId });\n  return scoped(executor(db).order).findMany({ where: w });`,
+        ),
+      ),
+    ).toEqual([4]);
+    expect(
+      unscopedReadsForPrincipal(
+        fn(
+          `  return scoped(executor(db).order).findMany({ where: (scopedWhere(principal, { storeId })) });`,
+        ),
+      ),
+    ).toEqual([3]);
+    // Arrow functions, function expressions and methods that take a principal
+    // are judged the same way as declarations.
+    const arrow =
+      `import { scoped, scopedWhere, type Principal } from '../platform/index';\n` +
+      `export const count = async (principal: Principal, storeId: string) =>\n` +
+      `  scoped(executor(db).order).count({ where: { storeId } as never });`;
+    expect(unscopedReadsForPrincipal(arrow)).toEqual([3]);
+    const expression =
+      `export const list = async function (principal: Principal) {\n` +
+      `  return executor(db).order.findMany({ where: { storeId: 'x' } });\n};`;
+    expect(unscopedReadsForPrincipal(expression)).toEqual([2]);
+    const method =
+      `export const repo = {\n` +
+      `  async list(principal: Principal) {\n` +
+      `    return scoped(executor(db).order).findMany({ where: { storeId: 'x' } as never });\n` +
+      `  },\n};`;
+    expect(unscopedReadsForPrincipal(method)).toEqual([3]);
+    const honestArrow =
+      `export const count = async (principal: Principal, storeId: string) =>\n` +
+      `  scoped(executor(db).order).count({ where: scopedWhere(principal, { storeId }) });`;
+    expect(unscopedReadsForPrincipal(honestArrow)).toEqual([]);
+    // A nested arrow inside a principal-taking function reads on its behalf.
+    expect(
+      unscopedReadsForPrincipal(
+        fn(
+          `  const read = () => executor(db).order.findMany({ where: { storeId } });\n  return read();`,
+        ),
+      ),
+    ).toEqual([3]);
+
     // A read in a helper the principal-taking function calls is that helper's
     // business; a function without a principal (a read by id) is not covered.
     expect(
