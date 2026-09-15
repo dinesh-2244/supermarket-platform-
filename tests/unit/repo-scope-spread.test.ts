@@ -226,14 +226,56 @@ function isFunctionLike(node: ts.Node): node is FunctionLike {
   );
 }
 
+/** The names of a function's `Principal`-typed parameters (plain identifiers only). */
+function principalParams(fn: FunctionLike): string[] {
+  return fn.parameters
+    .filter(
+      (p) =>
+        p.type !== undefined &&
+        ts.isTypeReferenceNode(p.type) &&
+        ts.isIdentifier(p.type.typeName) &&
+        p.type.typeName.text === 'Principal',
+    )
+    .map((p) => (ts.isIdentifier(p.name) ? p.name.text : ''));
+}
+
 function takesPrincipal(fn: FunctionLike): boolean {
-  return fn.parameters.some(
-    (p) =>
-      p.type !== undefined &&
-      ts.isTypeReferenceNode(p.type) &&
-      ts.isIdentifier(p.type.typeName) &&
-      p.type.typeName.text === 'Principal',
-  );
+  return principalParams(fn).length > 0;
+}
+
+/**
+ * Is `name` declared anywhere inside `body` — a `const`/`let`/`var`, a nested
+ * function's parameter, a function declaration, a catch clause? If so, an
+ * identifier `name` further down may be that declaration rather than the
+ * function's own parameter, and the guard does not try to work out which.
+ */
+function redeclaredWithin(body: ts.Node, name: string): boolean {
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (
+      (ts.isVariableDeclaration(node) || ts.isBindingElement(node) || ts.isParameter(node)) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === name
+    ) {
+      found = true;
+    } else if (
+      (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
+      node.name?.text === name
+    ) {
+      found = true;
+    } else if (
+      ts.isCatchClause(node) &&
+      node.variableDeclaration !== undefined &&
+      ts.isIdentifier(node.variableDeclaration.name) &&
+      node.variableDeclaration.name.text === name
+    ) {
+      found = true;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(body);
+  return found;
 }
 
 /**
@@ -271,21 +313,51 @@ export function unscopedReadsForPrincipal(source: string, fromFile: string): num
                 ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === 'where',
             )
           : undefined;
-      const whereIsScopedWhere =
+      const call =
         where !== undefined &&
         ts.isPropertyAssignment(where) &&
-        ts.isCallExpression(where.initializer) &&
-        ts.isIdentifier(where.initializer.expression) &&
-        names.has(where.initializer.expression.text);
-      if (!viaScoped || !whereIsScopedWhere) {
+        ts.isCallExpression(where.initializer)
+          ? where.initializer
+          : undefined;
+      const whereIsScopedWhere =
+        call !== undefined && ts.isIdentifier(call.expression) && names.has(call.expression.text);
+      // The right function in the right place, with the right value: its first
+      // argument is the enclosing function's own Principal parameter — by
+      // binding, not spelling. Not a literal (`{ kind: 'system' }` scopes
+      // nothing — OSCAR round 12), not another variable, not a call result,
+      // and not a name the body has redeclared.
+      const first = call?.arguments[0];
+      const withOwnPrincipal =
+        first !== undefined &&
+        ts.isIdentifier(first) &&
+        principals.has(first.text) &&
+        !redeclaredWithin(body, first.text);
+      if (!viaScoped || !whereIsScopedWhere || !withOwnPrincipal) {
         lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
       }
     }
-    ts.forEachChild(node, judge);
+    ts.forEachChild(node, (child) => {
+      // A nested function that takes its own Principal is judged against that.
+      if (isFunctionLike(child) && takesPrincipal(child) && child.body !== undefined) {
+        judgeFunction(child, child.body);
+      } else {
+        judge(child);
+      }
+    });
+  };
+  let body: ts.Node = file;
+  let principals = new Set<string>();
+  const judgeFunction = (fn: FunctionLike, fnBody: ts.Node): void => {
+    const outer = { body, principals };
+    body = fnBody;
+    principals = new Set(principalParams(fn).filter((n) => n !== ''));
+    judge(fnBody);
+    body = outer.body;
+    principals = outer.principals;
   };
   const visit = (node: ts.Node): void => {
     if (isFunctionLike(node) && takesPrincipal(node) && node.body !== undefined) {
-      judge(node.body);
+      judgeFunction(node, node.body);
       return;
     }
     ts.forEachChild(node, visit);
@@ -659,6 +731,73 @@ describe('repository store scoping', () => {
         fn(
           `  const read = () => executor(db).order.findMany({ where: { storeId } });\n  return read();`,
         ),
+        HERE,
+      ),
+    ).toEqual([3]);
+
+    // OSCAR round 12: the genuine helper, in the right place, with the wrong
+    // principal. `{ kind: 'system' }` is unscoped; the caller's own is what
+    // the read is on behalf of.
+    expect(
+      unscopedReadsForPrincipal(
+        fn(
+          `  return scoped(executor(db).order).findMany({ where: scopedWhere({ kind: 'system' }, { storeId }) });`,
+        ),
+        HERE,
+      ),
+    ).toEqual([3]);
+    expect(
+      unscopedReadsForPrincipal(
+        fn(
+          `  return scoped(executor(db).order).findMany({ where: scopedWhere(SYSTEM, { storeId }) });`,
+        ),
+        HERE,
+      ),
+    ).toEqual([3]);
+    expect(
+      unscopedReadsForPrincipal(
+        fn(
+          `  return scoped(executor(db).order).findMany({ where: scopedWhere(principalFor(storeId), { storeId }) });`,
+        ),
+        HERE,
+      ),
+    ).toEqual([3]);
+    expect(
+      unscopedReadsForPrincipal(
+        fn(
+          `  const principal2 = principal;\n  return scoped(executor(db).order).findMany({ where: scopedWhere(principal2, { storeId }) });`,
+        ),
+        HERE,
+      ),
+    ).toEqual([4]);
+    // The parameter's name, redeclared in the body: the guard does not work
+    // out which one the call means, and refuses.
+    expect(
+      unscopedReadsForPrincipal(
+        fn(
+          `  const principal = { kind: 'system' } as const;\n  return scoped(executor(db).order).findMany({ where: scopedWhere(principal, { storeId }) });`,
+        ),
+        HERE,
+      ),
+    ).toEqual([4]);
+    expect(
+      unscopedReadsForPrincipal(
+        fn(
+          `  const read = (principal: Principal) => scoped(executor(db).order).findMany({ where: scopedWhere(principal, { storeId }) });\n` +
+            `  return read({ kind: 'system' });`,
+        ),
+        HERE,
+      ),
+    ).toEqual([]);
+    // (…a nested function with its own Principal parameter is judged against
+    // that parameter; what its caller passes it is the caller's business —
+    // here the outer function, which makes no read itself.)
+    // A destructured Principal parameter has no name to bind to.
+    expect(
+      unscopedReadsForPrincipal(
+        `import { scoped, scopedWhere, type Principal } from '../platform/index';\n` +
+          `export async function list({ kind }: Principal, storeId: string) {\n` +
+          `  return scoped(executor(db).order).findMany({ where: scopedWhere({ kind }, { storeId }) });\n}`,
         HERE,
       ),
     ).toEqual([3]);
