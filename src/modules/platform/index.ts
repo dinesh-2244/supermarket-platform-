@@ -99,7 +99,6 @@ export {
   type Principal,
   type Resource,
   scopedWhere,
-  storeScopeFilter,
   type UserRole,
 } from './authz/index';
 

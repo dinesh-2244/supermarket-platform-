@@ -324,8 +324,15 @@ export function isUnscoped(principal: Principal): boolean {
  * Every store-bound list goes through this rather than hand-written filters:
  * a forgotten filter is an IDOR, and `{}` for an unscoped principal is the only
  * case where "no condition" is correct.
+ *
+ * **Module-private, on purpose.** The fragment is only safe inside the `AND`
+ * that `scopedWhere` builds; exported, it could be wrapped by any function in
+ * this file or re-exported under any name, and no rule about *names* catches
+ * that (OSCAR, PR #50 round 7). So it has no `export`, and a unit test holds
+ * that this identifier appears nowhere in the file but its own definition and
+ * inside `scopedWhere` — the one door stays the one door.
  */
-export function storeScopeFilter(
+function storeScopeFilter(
   principal: Principal,
   field = 'storeId',
 ): Record<string, { in: readonly string[] }> | Record<string, never> {

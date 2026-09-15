@@ -9,7 +9,7 @@ import {
   canAccessStore,
   isUnscoped,
   type Principal,
-  storeScopeFilter,
+  scopedWhere,
 } from '../authz/index';
 import { AuthzError } from '../errors/index';
 
@@ -280,13 +280,19 @@ describe('platform/authz — store scoping helpers', () => {
     expect(canAccessStore(unassignedManager, STORE_A)).toBe(false);
   });
 
-  it('builds a where-fragment that narrows for scoped principals only', () => {
-    expect(storeScopeFilter(superAdmin)).toEqual({});
-    expect(storeScopeFilter(managerA)).toEqual({ storeId: { in: [STORE_A] } });
+  it('builds a where whose scope member narrows for scoped principals only', () => {
+    // The fragment itself is module-private; it is only ever seen as the
+    // first member of the `AND` that `scopedWhere` builds.
+    const scope = (p: Principal, field?: 'storeId' | 'id') => scopedWhere(p, {}, field).AND[0];
+    expect(scope(superAdmin)).toEqual({});
+    expect(scope(managerA)).toEqual({ storeId: { in: [STORE_A] } });
     // A principal with no stores must match nothing — never everything.
-    expect(storeScopeFilter(visitor)).toEqual({ storeId: { in: [] } });
-    expect(storeScopeFilter(shopperA)).toEqual({ storeId: { in: [STORE_A] } });
-    expect(storeScopeFilter(managerA, 'store_id')).toEqual({ store_id: { in: [STORE_A] } });
+    expect(scope(visitor)).toEqual({ storeId: { in: [] } });
+    expect(scope(shopperA)).toEqual({ storeId: { in: [STORE_A] } });
+    expect(scope(managerA, 'id')).toEqual({ id: { in: [STORE_A] } });
+    expect(scopedWhere(managerA, { status: 'PLACED' })).toEqual({
+      AND: [{ storeId: { in: [STORE_A] } }, { status: 'PLACED' }],
+    });
   });
 });
 

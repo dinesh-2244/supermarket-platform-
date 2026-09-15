@@ -155,14 +155,52 @@ export function misexportsScopedWhere(source: string): number[] {
   return [...new Set(lines)].sort((a, b) => a - b);
 }
 
+/** Is `node` inside the declaration of the function named `name`? */
+function withinFunction(node: ts.Node, name: string): boolean {
+  for (let cursor: ts.Node | undefined = node.parent; cursor; cursor = cursor.parent) {
+    if (ts.isFunctionDeclaration(cursor) && cursor.name?.text === name) return true;
+  }
+  return false;
+}
+
+/**
+ * For the file that defines `storeScopeFilter`: every identifier of that name
+ * must be either the name of its own **unexported** function declaration, or
+ * sit inside the declaration of `scopedWhere` (body or signature). Anything
+ * else — an `export` on the definition, a second wrapper, an alias, an export
+ * list, a method — hands the raw fragment out under some other name, which no
+ * rule about the name `scopedWhere` can see (OSCAR round 7).
+ */
+export function misplacesStoreScopeFilter(source: string): number[] {
+  const file = ts.createSourceFile('authz.ts', source, ts.ScriptTarget.Latest, true);
+  const lines: number[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && node.text === 'storeScopeFilter') {
+      const parent = node.parent;
+      const definition =
+        ts.isFunctionDeclaration(parent) &&
+        parent.name === node &&
+        !(parent.modifiers ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+      if (!definition && !withinFunction(node, 'scopedWhere')) {
+        lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return [...new Set(lines)].sort((a, b) => a - b);
+}
+
 describe('repository store scoping', () => {
   const files = moduleFiles(MODULES_DIR).filter(
     (file) => file !== DEFINED_IN && file !== PLATFORM_INDEX,
   );
 
-  it('names storeScopeFilter nowhere outside platform/authz — scopedWhere is the only door', () => {
+  it('names storeScopeFilter nowhere but its definition file — scopedWhere is the only door', () => {
+    // platform/index.ts included: the primitive is module-private and has no
+    // re-export to offer (OSCAR round 7).
     const violations: string[] = [];
-    for (const file of files) {
+    for (const file of [...files, PLATFORM_INDEX]) {
       for (const line of namesStoreScopeFilter(readFileSync(file, 'utf8'))) {
         violations.push(`${relative(process.cwd(), file)}:${line}`);
       }
@@ -300,6 +338,63 @@ describe('repository store scoping', () => {
     expect(misusesScopedWhere(`const q = { scopedWhere };`)).toEqual([1]);
     expect(misusesScopedWhere(`const q = { where: scopedWhere };`)).toEqual([1]);
     expect(misusesScopedWhere(repo(`    where: widen(scopedWhere),`))).toEqual([4]);
+  });
+
+  it('the definition file uses storeScopeFilter only to define it and inside scopedWhere — OSCAR round 7', () => {
+    // Exported, the primitive can be wrapped by any function in its own file
+    // and re-exported under any name — no rule about names catches that. So
+    // it is module-private, and this holds that nothing in the file but its
+    // own definition and the body/signature of `scopedWhere` names it.
+    expect(misplacesStoreScopeFilter(readFileSync(DEFINED_IN, 'utf8'))).toEqual([]);
+
+    // OSCAR's three-file bypass, authz half: a second wrapper beside the
+    // canonical one. (The other two halves — a re-export under an unrelated
+    // name, and `.AND[1]` on it in a repo — are invisible to rules about the
+    // name `scopedWhere`; this is what catches it.)
+    const wrapper =
+      `function storeScopeFilter(p, field = 'storeId') { return {}; }\n` +
+      `export function scopedWhere(p, extra, field = 'storeId') {\n` +
+      `  return { AND: [storeScopeFilter(p, field), extra] };\n` +
+      `}\n` +
+      `export function safeScope(p, extra) {\n` +
+      `  return { AND: [storeScopeFilter(p), extra] };\n` +
+      `}`;
+    expect(misplacesStoreScopeFilter(wrapper)).toEqual([6]);
+
+    // The honest file: a private definition, used once, inside scopedWhere.
+    expect(misplacesStoreScopeFilter(wrapper.split('\nexport function safeScope')[0]!)).toEqual([]);
+    // A type reference inside scopedWhere's own signature is inside scopedWhere.
+    expect(
+      misplacesStoreScopeFilter(
+        `function storeScopeFilter(p) { return {}; }\n` +
+          `export function scopedWhere(p, extra): { AND: [ReturnType<typeof storeScopeFilter>, unknown] } {\n` +
+          `  return { AND: [storeScopeFilter(p), extra] };\n}`,
+      ),
+    ).toEqual([]);
+
+    // Exporting the definition is itself the violation.
+    expect(misplacesStoreScopeFilter(`export function storeScopeFilter(p) { return {}; }`)).toEqual(
+      [1],
+    );
+    // So is handing it out any other way: an alias, an export list, a method.
+    expect(
+      misplacesStoreScopeFilter(
+        `function storeScopeFilter(p) { return {}; }\nexport const scope = storeScopeFilter;`,
+      ),
+    ).toEqual([2]);
+    expect(
+      misplacesStoreScopeFilter(
+        `function storeScopeFilter(p) { return {}; }\nexport { storeScopeFilter as safe };`,
+      ),
+    ).toEqual([2]);
+    expect(
+      misplacesStoreScopeFilter(
+        `function storeScopeFilter(p) { return {}; }\nexport const authz = { scope: (p) => storeScopeFilter(p) };`,
+      ),
+    ).toEqual([2]);
+    // A nested function inside scopedWhere that leaks it out is still inside
+    // scopedWhere lexically — but scopedWhere returning anything other than
+    // the AND shape is rule 2's business at every call site, not this rule's.
   });
 
   it('platform exports scopedWhere under its own name only — OSCAR round 6', () => {
