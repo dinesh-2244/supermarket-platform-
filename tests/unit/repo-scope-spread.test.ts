@@ -282,17 +282,50 @@ function loadJudge(virtual: ReadonlyMap<string, string>): Judge {
   return { program, checker, principal: checker.getDeclaredTypeOfSymbol(principalSymbol) };
 }
 
-/** The parameters of `fn` whose type is a `Principal`, with their bound name ('' when destructured). */
+/** Can a value of `type` be used where a `Principal` is expected? */
+function isPrincipal(type: ts.Type, judge: Judge): boolean {
+  return judge.checker.isTypeAssignableTo(type, judge.principal);
+}
+
+/**
+ * Is `type` a Principal, or a union with a Principal among its members?
+ * `Principal | undefined`, `Principal | null`, `Principal | Other` — OSCAR
+ * round 15 widened the annotation so the forward check said no while every
+ * caller still handed over a real principal. A top type (`unknown`, `any` as
+ * a union member) is not "a Principal among its members": it names nothing.
+ */
+function declaresPrincipal(type: ts.Type, judge: Judge): boolean {
+  if ((type.flags & ts.TypeFlags.Any) !== 0) return false;
+  return (
+    isPrincipal(type, judge) || (type.isUnion() && type.types.some((t) => isPrincipal(t, judge)))
+  );
+}
+
+/**
+ * Could a value of `type` *be* a principal at all — the fail-closed question
+ * for whether a function's reads are judged: `declaresPrincipal`, or any type
+ * a Principal is assignable into (`unknown`, `object`, `{}`). A function typed
+ * that loosely and reading on the value's behalf is judged like one typed
+ * honestly; a helper that never reads passes regardless.
+ */
+function holdsPrincipal(type: ts.Type, judge: Judge): boolean {
+  return declaresPrincipal(type, judge) || judge.checker.isTypeAssignableTo(judge.principal, type);
+}
+
+/** The parameters of `fn` that could carry a `Principal`, with their bound name ('' when destructured). */
 function principalParams(fn: FunctionLike, judge: Judge): string[] {
   return fn.parameters
-    .filter((p) =>
-      judge.checker.isTypeAssignableTo(judge.checker.getTypeAtLocation(p), judge.principal),
-    )
+    .filter((p) => holdsPrincipal(judge.checker.getTypeAtLocation(p), judge))
     .map((p) => (ts.isIdentifier(p.name) ? p.name.text : ''));
 }
 
 function takesPrincipal(fn: FunctionLike, judge: Judge): boolean {
   return principalParams(fn, judge).length > 0;
+}
+
+/** Does `fn` declare a parameter that is, or contains, a Principal? (round 13) */
+function redeclaresPrincipal(fn: FunctionLike, judge: Judge): boolean {
+  return fn.parameters.some((p) => declaresPrincipal(judge.checker.getTypeAtLocation(p), judge));
 }
 
 /**
@@ -389,7 +422,7 @@ export function unscopedReadsForPrincipal(judge: Judge, filePath: string): numbe
         lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
       }
     }
-    if (isFunctionLike(node) && node !== body.parent && takesPrincipal(node, judge)) {
+    if (isFunctionLike(node) && node !== body.parent && redeclaresPrincipal(node, judge)) {
       lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
     }
     ts.forEachChild(node, judgeBody);
@@ -1107,6 +1140,38 @@ describe('repository store scoping', () => {
             `  const read = (principal: P) => scoped(executor(db).order).findMany({ where: scopedWhere(principal, { storeId }) });\n` +
             `  return read({ kind: 'system' });\n}`,
           [4],
+        ],
+        // OSCAR round 15: the annotation widened so a Principal is *one* thing
+        // the parameter can hold. Callers still pass a real principal; the
+        // reverse assignability check is what sees it.
+        [via('Principal | undefined'), [3]],
+        [via('Principal | null'), [3]],
+        [via('Principal | { kind: "anonymous" }'), [3]],
+        [via('unknown'), [3]],
+        [honest('Principal | undefined'), []],
+        // A nested closure with a widened Principal is the round-13 violation;
+        // one with a top type is not — it names no principal — but a read
+        // inside it is still judged against the outer parameter.
+        [
+          `import { scoped, scopedWhere, type Principal } from '../platform/index';\n` +
+            `export async function list(principal: Principal, storeId: string) {\n` +
+            `  const read = (p: Principal | undefined) => scoped(executor(db).order).findMany({ where: scopedWhere(p as Principal, { storeId }) });\n` +
+            `  return read({ kind: 'system' });\n}`,
+          [3],
+        ],
+        [
+          `import { scoped, scopedWhere, type Principal } from '../platform/index';\n` +
+            `export async function list(principal: Principal, storeId: string) {\n` +
+            `  const read = (p: unknown) => scoped(executor(db).order).findMany({ where: scopedWhere(p as Principal, { storeId }) });\n` +
+            `  return read({ kind: 'system' });\n}`,
+          [3],
+        ],
+        [
+          `import { scoped, scopedWhere, type Principal } from '../platform/index';\n` +
+            `export async function list(principal: Principal, storeId: string) {\n` +
+            `  const pick = (entry: unknown) => typeof entry === 'string';\n` +
+            `  return scoped(executor(db).order).findMany({ where: scopedWhere(principal, { storeId }) });\n}`,
+          [],
         ],
         // Not a Principal: a string id. Not judged — a read by id is the
         // service's business to authorize.
