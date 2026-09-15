@@ -9,6 +9,7 @@ import {
   formatActiveWelcomeTitle,
   formatActiveWelcomeTerms,
   formatShopSubtitle,
+  formatContactHubDescription,
   formatCommunityDeliveryNote,
 } from '../../src/app/(storefront)/copy-manifest';
 
@@ -110,6 +111,35 @@ describe('Storefront copy integrity & manifest guard', () => {
     expect(STOREFRONT_COPY_MANIFEST.about.commitments.cards.payAtDoorstep.title).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.about.serviceBoundary.title).toBeTruthy();
     expect(STOREFRONT_COPY_MANIFEST.about.serviceBoundary.description).toBeTruthy();
+
+    // Contact surface
+    expect(STOREFRONT_COPY_MANIFEST.contact.meta.title).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.meta.description).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.hero.badge).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.hero.title).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.hero.subtitle).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.hero.phoneGlyph).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.appNotice.badge).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.appNotice.title).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.appNotice.description).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.appNotice.aboutLinkText).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.appNotice.actionGlyph).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.communityHubs.badge).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.communityHubs.title).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.communityHubs.description).toBeTruthy();
+    expect(formatContactHubDescription('Store 1 Hub')).toContain('Store 1 Hub');
+    expect(STOREFRONT_COPY_MANIFEST.contact.channels.phoneLabel).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.channels.phonePlaceholder).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.channels.emailLabel).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.channels.emailPlaceholder).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.channels.hoursLabel).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.channels.hoursPlaceholder).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.channels.addressLabel).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.channels.addressPlaceholder).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.helpCard.title).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.helpCard.description).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.helpCard.viewOrdersText).toBeTruthy();
+    expect(STOREFRONT_COPY_MANIFEST.contact.helpCard.aboutUsText).toBeTruthy();
 
     // Cart surface
     expect(STOREFRONT_COPY_MANIFEST.cart.meta.title).toBeTruthy();
@@ -373,6 +403,7 @@ describe('Storefront copy integrity & manifest guard', () => {
       'formatActiveWelcomeTitle',
       'formatActiveWelcomeTerms',
       'formatShopSubtitle',
+      'formatContactHubDescription',
       'formatCommunityDeliveryNote',
     ];
 
@@ -525,6 +556,7 @@ describe('Storefront copy integrity & manifest guard', () => {
       'Request Delivery to Your Society →',
       'Browse Product Catalogue →',
     ]),
+    'contact/page.tsx': new Set(['Shop', 'Store →']),
     'cart/page.tsx': new Set([
       ', and is now priced there.',
       '.',
@@ -580,11 +612,14 @@ describe('Storefront copy integrity & manifest guard', () => {
       'Basket',
       'Browse All Products',
       'Choose ▼',
+      'Contact',
+      'Contact Us',
       'Delivering to:',
       'Fresh',
       'M',
       'Munder',
       'Munder Fresh Supermarket Platform. All rights reserved.',
+      'Request a Product',
       'Search',
       'Select Community',
       'Shop',
@@ -611,6 +646,25 @@ describe('Storefront copy integrity & manifest guard', () => {
       '🥦',
     ]),
     'shop/page.tsx': new Set(['This store has no items listed currently.']),
+    'search/page.tsx': new Set([
+      'title="Search Catalogue"',
+      'subtitle="Searching products available for delivery to your community."',
+      'What are you looking for?',
+      'Search',
+      'Type something above to search this shop.',
+      'Nothing matched “',
+      '” at your shop. Try a shorter word, or check our category aisles.',
+    ]),
+    'request-product/page.tsx': new Set(['Requesting for:', '📝']),
+    'request-product/product-request-form.tsx': new Set([
+      '.',
+      '!',
+      '*',
+      'Cancel',
+      'Contact Details (Optional)',
+      'Submitting…',
+      '✓',
+    ]),
     'copy-manifest.ts': new Set([
       '',
       ' ',
@@ -1289,7 +1343,7 @@ describe('Storefront copy integrity & manifest guard', () => {
           return { sanctioned: false, extractedStrings: [unwrapped.getText(sf)] };
         }
 
-        if (name === 'basketCount') {
+        if (name === 'basketCount' || name === 'trimmed') {
           return { sanctioned: true, extractedStrings: [] };
         }
 
@@ -1446,9 +1500,17 @@ describe('Storefront copy integrity & manifest guard', () => {
           }
 
           if (
-            ['community', 'line', 'area', 'notice', 'totals', 'issue', 'shop', 'settings'].includes(
-              rootName,
-            )
+            [
+              'community',
+              'line',
+              'area',
+              'notice',
+              'totals',
+              'issue',
+              'shop',
+              'settings',
+              'store',
+            ].includes(rootName)
           ) {
             return { sanctioned: true, extractedStrings: [] };
           }

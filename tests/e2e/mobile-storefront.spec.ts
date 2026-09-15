@@ -563,11 +563,11 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     // 9. Assert zero horizontal overflow on this viewport
     await assertNoHorizontalScroll(page);
 
-    // 10. Verify fallback treatment for products without images
+    // 10. Verify fallback treatment for products without images (category-aware placeholder)
     await page.goto('/p/sona-masoori-rice-5kg');
-    await expect(page.getByRole('main').getByText('No photo yet')).toBeVisible();
+    await expect(page.getByRole('main').getByTestId('category-placeholder')).toBeVisible();
     await expect(
-      page.getByRole('main').getByText('Product image will appear once added'),
+      page.getByRole('main').getByText(/Product image will appear once added/i),
     ).toBeVisible();
     await assertNoHorizontalScroll(page);
   });
@@ -613,7 +613,7 @@ test.describe.serial('Mobile Storefront Retail Redesign (D1–D7)', () => {
     await page.getByRole('button', { name: /shop store 1/i }).click();
     await expect(page).toHaveURL(/\/$|\/\?/);
 
-    // Add Sona Masoori Rice (clears ₹250 minimum order threshold with a single unit and has high stock across workers)
+    // Add Sona Masoori Rice (clears the ₹200 minimum order threshold with a single unit and has high stock across workers)
     await page.goto('/p/sona-masoori-rice-5kg');
     const addForm = page.locator('form').filter({ hasText: 'Add to basket' });
     await addForm.getByRole('button', { name: 'Add to basket' }).click();

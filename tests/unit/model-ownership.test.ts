@@ -65,6 +65,9 @@ const OWNER: Readonly<Record<string, string>> = {
   posBillingHandoff: 'fulfillment',
   deliveryRecord: 'fulfillment',
 
+  productRequest: 'product-requests',
+  productRequestStatusHistory: 'product-requests',
+
   auditLog: 'platform',
   featureFlag: 'platform',
 };

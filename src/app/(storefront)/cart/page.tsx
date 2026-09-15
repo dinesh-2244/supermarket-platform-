@@ -22,6 +22,7 @@ import { getCommunityConfigForStore } from '../communities';
 import { removeFromCartAction } from '../cart-actions';
 import { CartQuantityStepper } from './cart-quantity-stepper';
 import { noticeSentences } from '../cart-notices';
+import { CategoryPlaceholder } from '../category-placeholder';
 import { STOREFRONT_COPY_MANIFEST } from '../copy-manifest';
 import { ActionForm } from '../form';
 import { rupees, Card, PageHeading } from '../ui';
@@ -422,20 +423,7 @@ function CartRow({
             /* eslint-disable-next-line @next/next/no-img-element */
             <img src={imageUrl} alt="" className="h-full w-full object-contain" loading="lazy" />
           ) : (
-            <svg
-              className="h-8 w-8 text-slate-300"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
-              />
-            </svg>
+            <CategoryPlaceholder productSlug={line.slug} name={line.name} size="sm" />
           )}
         </Link>
       </div>

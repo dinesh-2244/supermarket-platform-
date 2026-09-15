@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { Availability } from '@/modules/inventory';
+import { CategoryPlaceholder } from './category-placeholder';
 import type { ShopItem } from './catalogue';
 import { ProductCardActions } from './product-card-actions';
 import { rupees } from './ui';
@@ -48,22 +49,12 @@ export function ProductCard({
               loading="lazy"
             />
           ) : (
-            <div className="flex h-full w-full items-center justify-center text-slate-300">
-              <svg
-                className="h-12 w-12 text-slate-300"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
-                />
-              </svg>
-            </div>
+            <CategoryPlaceholder
+              categorySlug={item.categorySlug}
+              productSlug={product.slug}
+              name={product.name}
+              size="md"
+            />
           )}
         </Link>
 

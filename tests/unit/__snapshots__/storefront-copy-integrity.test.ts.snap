@@ -75,6 +75,47 @@ exports[`Storefront copy integrity & manifest guard > STOREFRONT_COPY_MANIFEST m
     },
     "subtitleTemplate": "{shortName} · Scheduled Slot Delivery",
   },
+  "contact": {
+    "appNotice": {
+      "aboutLinkText": "Learn more about our community hub delivery model on our About page",
+      "actionGlyph": "→",
+      "badge": "Order Support Status",
+      "description": "A dedicated live order-support channel is not currently active. For details on how our community hubs fulfill orders and schedule delivery slots, please visit our About page.",
+      "title": "No Live Order Support Channel",
+    },
+    "channels": {
+      "addressLabel": "Hub Location",
+      "addressPlaceholder": "Not yet published",
+      "emailLabel": "Email Support",
+      "emailPlaceholder": "Not yet published",
+      "hoursLabel": "Operating Hours",
+      "hoursPlaceholder": "Not yet published",
+      "phoneLabel": "Phone Support",
+      "phonePlaceholder": "Not yet published",
+    },
+    "communityHubs": {
+      "badge": "Community Store Hubs",
+      "description": "Munder Fresh operates dedicated store hubs paired directly with our partner residential communities.",
+      "hubCardTemplate": "Dedicated store hub serving {hubName}. Contact channels and operating hours will be listed here once assigned.",
+      "title": "Our Dedicated Store Hubs",
+    },
+    "helpCard": {
+      "aboutUsText": "About Munder Fresh",
+      "description": "Check your past orders and status updates in your account, or review our operational principles.",
+      "title": "Order Status & Operational Information",
+      "viewOrdersText": "View Past Orders",
+    },
+    "hero": {
+      "badge": "Community Store Hub Directory",
+      "phoneGlyph": "📞",
+      "subtitle": "Community store hub directory and channel status. Dedicated live order-support channels are not currently active.",
+      "title": "Contact Us",
+    },
+    "meta": {
+      "description": "Community store hub directory and support channel status for Munder Fresh. Dedicated live order-support channels are not yet active.",
+      "title": "Contact Us | Munder Fresh Hyperlocal Grocery",
+    },
+  },
   "footer": {
     "brandDescription": "Dedicated hyperlocal grocery shopping for residential communities. Scheduled slot delivery of fresh vegetables, fruits, dairy, staples, and daily household needs.",
     "commitmentsDescription": "Prices and availability are verified from your community's dedicated store. Free delivery options available on meeting order thresholds. Pay via Cash or UPI on delivery.",
@@ -143,6 +184,44 @@ exports[`Storefront copy integrity & manifest guard > STOREFRONT_COPY_MANIFEST m
   },
   "mobileCartBar": {
     "slotNotice": "Scheduled slot delivery",
+  },
+  "productRequest": {
+    "form": {
+      "brandLabel": "Brand (Optional)",
+      "brandPlaceholder": "e.g. Nandini, Fortune, Tata...",
+      "chooseAreaLinkText": "Choose Community Area →",
+      "customerNameLabel": "Your Name (Optional)",
+      "customerNamePlaceholder": "e.g. Priya Sharma",
+      "customerPhoneLabel": "Mobile Number (Optional)",
+      "customerPhonePlaceholder": "10-digit Indian mobile number",
+      "noStoreSelectedPrompt": "Choose your delivery area first so we know which store to ask.",
+      "noteLabel": "Additional Notes or Details (Optional)",
+      "notePlaceholder": "Any specific variety, preference, or detail...",
+      "packSizeLabel": "Pack Size or Weight (Optional)",
+      "packSizePlaceholder": "e.g. 500g, 1kg, 1L, Pack of 4...",
+      "productNameLabel": "Product Name",
+      "productNamePlaceholder": "e.g. Sona Masoori Rice, Greek Yogurt, Basil Leaves...",
+      "submitButton": "Submit Request",
+    },
+    "hero": {
+      "badge": "Resident Catalogue Requests",
+      "subtitle": "Can't find an item in your store catalogue? Tell us what you'd like to see, and our store team will review it.",
+      "title": "Request a Product",
+    },
+    "meta": {
+      "description": "Tell us what grocery items, brands, or daily essentials you would like to see in your community store.",
+      "title": "Request a Product | Munder Fresh Hyperlocal Grocery",
+    },
+    "searchPrompt": {
+      "linkText": "Request a product for your store →",
+      "text": "Can't find what you're looking for?",
+    },
+    "success": {
+      "actionText": "Browse Store Catalogue →",
+      "description": "We've recorded your product request for your community store team to review.",
+      "submitAnotherText": "Request Another Product",
+      "title": "Thanks, we've received your request",
+    },
   },
   "shop": {
     "meta": {

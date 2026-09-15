@@ -139,6 +139,93 @@ export const STOREFRONT_COPY_MANIFEST = {
         'Because we operate dedicated store hubs paired with specific residential partners, we only accept orders from addresses within our serviceable zones.',
     },
   },
+  contact: {
+    meta: {
+      title: 'Contact Us | Munder Fresh Hyperlocal Grocery',
+      description:
+        'Community store hub directory and support channel status for Munder Fresh. Dedicated live order-support channels are not yet active.',
+    },
+    hero: {
+      badge: 'Community Store Hub Directory',
+      title: 'Contact Us',
+      subtitle:
+        'Community store hub directory and channel status. Dedicated live order-support channels are not currently active.',
+      phoneGlyph: '📞',
+    },
+    appNotice: {
+      badge: 'Order Support Status',
+      title: 'No Live Order Support Channel',
+      description:
+        'A dedicated live order-support channel is not currently active. For details on how our community hubs fulfill orders and schedule delivery slots, please visit our About page.',
+      aboutLinkText: 'Learn more about our community hub delivery model on our About page',
+      actionGlyph: '→',
+    },
+    communityHubs: {
+      badge: 'Community Store Hubs',
+      title: 'Our Dedicated Store Hubs',
+      description:
+        'Munder Fresh operates dedicated store hubs paired directly with our partner residential communities.',
+      hubCardTemplate:
+        'Dedicated store hub serving {hubName}. Contact channels and operating hours will be listed here once assigned.',
+    },
+    channels: {
+      phoneLabel: 'Phone Support',
+      phonePlaceholder: 'Not yet published',
+      emailLabel: 'Email Support',
+      emailPlaceholder: 'Not yet published',
+      hoursLabel: 'Operating Hours',
+      hoursPlaceholder: 'Not yet published',
+      addressLabel: 'Hub Location',
+      addressPlaceholder: 'Not yet published',
+    },
+    helpCard: {
+      title: 'Order Status & Operational Information',
+      description:
+        'Check your past orders and status updates in your account, or review our operational principles.',
+      viewOrdersText: 'View Past Orders',
+      aboutUsText: 'About Munder Fresh',
+    },
+  },
+  productRequest: {
+    meta: {
+      title: 'Request a Product | Munder Fresh Hyperlocal Grocery',
+      description:
+        'Tell us what grocery items, brands, or daily essentials you would like to see in your community store.',
+    },
+    hero: {
+      badge: 'Resident Catalogue Requests',
+      title: 'Request a Product',
+      subtitle:
+        "Can't find an item in your store catalogue? Tell us what you'd like to see, and our store team will review it.",
+    },
+    form: {
+      productNameLabel: 'Product Name',
+      productNamePlaceholder: 'e.g. Sona Masoori Rice, Greek Yogurt, Basil Leaves...',
+      brandLabel: 'Brand (Optional)',
+      brandPlaceholder: 'e.g. Nandini, Fortune, Tata...',
+      packSizeLabel: 'Pack Size or Weight (Optional)',
+      packSizePlaceholder: 'e.g. 500g, 1kg, 1L, Pack of 4...',
+      noteLabel: 'Additional Notes or Details (Optional)',
+      notePlaceholder: 'Any specific variety, preference, or detail...',
+      customerNameLabel: 'Your Name (Optional)',
+      customerNamePlaceholder: 'e.g. Priya Sharma',
+      customerPhoneLabel: 'Mobile Number (Optional)',
+      customerPhonePlaceholder: '10-digit Indian mobile number',
+      submitButton: 'Submit Request',
+      noStoreSelectedPrompt: 'Choose your delivery area first so we know which store to ask.',
+      chooseAreaLinkText: 'Choose Community Area →',
+    },
+    success: {
+      title: "Thanks, we've received your request",
+      description: "We've recorded your product request for your community store team to review.",
+      actionText: 'Browse Store Catalogue →',
+      submitAnotherText: 'Request Another Product',
+    },
+    searchPrompt: {
+      text: "Can't find what you're looking for?",
+      linkText: 'Request a product for your store →',
+    },
+  },
   cart: {
     meta: {
       title: 'Your basket',
@@ -210,6 +297,12 @@ export function formatShopSubtitle(
   return `${STOREFRONT_COPY_MANIFEST.cart.scheduledSlotBadge} · Delivery ${deliveryFeeFormatted} · Min order ${minOrderFormatted}`;
 }
 
+export function formatContactHubDescription(hubName: string): string {
+  return STOREFRONT_COPY_MANIFEST.contact.communityHubs.hubCardTemplate.replace(
+    '{hubName}',
+    hubName,
+  );
+}
 export function formatCommunityDeliveryNote(minOrderFormatted?: string): string {
   if (minOrderFormatted) {
     return `${STOREFRONT_COPY_MANIFEST.communities.deliveryNoteWithMinOrderPrefix}${minOrderFormatted}`;

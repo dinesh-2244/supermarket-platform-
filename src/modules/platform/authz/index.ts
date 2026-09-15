@@ -80,6 +80,11 @@ export type Action =
   | 'order:transition'
   | 'order:cancel'
   | 'order:confirm-variance'
+  // product requests (per store) — Phase 5.5; no existing grant is touched.
+  // Submitting one is a shopper's act, gated in the module the way the
+  // customers module gates its own writes, not a staff grant.
+  | 'product-request:read'
+  | 'product-request:manage'
   // audit
   | 'audit-log:read';
 
@@ -149,6 +154,10 @@ const SUPER_ADMIN_GRANTS: Readonly<Record<Action, Grant>> = {
   'order:transition': 'global',
   'order:cancel': 'global',
   'order:confirm-variance': 'global',
+  // A request is a shopper's voice: nobody on staff submits one, whatever
+  // their rank. Reading and triaging them is unscoped for a super-admin.
+  'product-request:read': 'global',
+  'product-request:manage': 'global',
   'audit-log:read': 'global',
 };
 
@@ -194,6 +203,10 @@ const STORE_MANAGER_GRANTS: Partial<Readonly<Record<Action, Grant>>> = {
   'order:transition': 'store',
   'order:cancel': 'store',
   'order:confirm-variance': 'store',
+  // Triage — reviewing, planning, declining, marking fulfilled — is a
+  // manager's call, in their own store.
+  'product-request:read': 'store',
+  'product-request:manage': 'store',
   'audit-log:read': 'store',
 };
 
@@ -221,6 +234,8 @@ const STORE_STAFF_GRANTS: Partial<Readonly<Record<Action, Grant>>> = {
   // expressed here rather than in the screen.
   'order:read': 'store',
   'order:transition': 'store',
+  // Staff can see what shoppers are asking for; triage stays with the manager.
+  'product-request:read': 'store',
 };
 
 /**

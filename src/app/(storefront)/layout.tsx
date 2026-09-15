@@ -83,6 +83,13 @@ export default async function StorefrontLayout({
               </Link>
 
               <Link
+                href="/contact"
+                className="inline-flex text-xs font-semibold text-slate-700 hover:text-emerald-800 px-1.5 sm:px-2 py-1.5 rounded-lg hover:bg-slate-100 transition min-h-[44px] items-center"
+              >
+                Contact
+              </Link>
+
+              <Link
                 href="/cart"
                 className="relative inline-flex items-center gap-1 rounded-full bg-emerald-700 px-2.5 sm:px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 transition min-h-[44px]"
                 aria-label={`Basket${basketCount > 0 ? ` (${basketCount})` : ''}`}
@@ -292,6 +299,16 @@ export default async function StorefrontLayout({
                 <li>
                   <Link href="/account" className="hover:text-emerald-800">
                     Account & Past Orders
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/contact" className="hover:text-emerald-800">
+                    Contact Us
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/request-product" className="hover:text-emerald-800">
+                    Request a Product
                   </Link>
                 </li>
               </ul>
