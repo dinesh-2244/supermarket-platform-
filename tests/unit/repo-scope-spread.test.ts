@@ -226,21 +226,67 @@ function isFunctionLike(node: ts.Node): node is FunctionLike {
   );
 }
 
-/** The names of a function's `Principal`-typed parameters (plain identifiers only). */
-function principalParams(fn: FunctionLike): string[] {
+/**
+ * A Program over the repository files (plus any virtual fixture files), and
+ * the canonical `Principal` type from platform/authz. "Principal-typed" is
+ * decided by the TypeChecker — `isTypeAssignableTo(paramType, Principal)` —
+ * never by the spelling of an annotation: `type P = Principal`, an imported
+ * alias, or a structurally identical type all resolve to the same thing
+ * (OSCAR round 14; the same discipline as round 11 for `scopedWhere`).
+ */
+interface Judge {
+  readonly program: ts.Program;
+  readonly checker: ts.TypeChecker;
+  readonly principal: ts.Type;
+}
+
+function loadJudge(virtual: ReadonlyMap<string, string>): Judge {
+  const config = ts.getParsedCommandLineOfConfigFile(
+    join(process.cwd(), 'tsconfig.json'),
+    {},
+    {
+      ...ts.sys,
+      onUnRecoverableConfigFileDiagnostic: (d) => {
+        throw new Error(ts.flattenDiagnosticMessageText(d.messageText, '\n'));
+      },
+    },
+  );
+  if (config === undefined) throw new Error('tsconfig.json did not parse');
+  const options: ts.CompilerOptions = { ...config.options, noEmit: true };
+  const host = ts.createCompilerHost(options);
+  const realReadFile = host.readFile.bind(host);
+  const realFileExists = host.fileExists.bind(host);
+  host.readFile = (f) => virtual.get(f) ?? realReadFile(f);
+  host.fileExists = (f) => virtual.has(f) || realFileExists(f);
+  const roots = [
+    ...moduleFiles(MODULES_DIR).filter((f) => f.endsWith(`${sep}repo.ts`)),
+    DEFINED_IN,
+    ...virtual.keys(),
+  ];
+  const program = ts.createProgram(roots, options, host);
+  const checker = program.getTypeChecker();
+  const authz = program.getSourceFile(DEFINED_IN);
+  if (authz === undefined) throw new Error('platform/authz/index.ts is not in the program');
+  const moduleSymbol = checker.getSymbolAtLocation(authz);
+  const principalSymbol =
+    moduleSymbol === undefined
+      ? undefined
+      : checker.getExportsOfModule(moduleSymbol).find((sym) => sym.name === 'Principal');
+  if (principalSymbol === undefined) throw new Error('platform/authz exports no Principal');
+  return { program, checker, principal: checker.getDeclaredTypeOfSymbol(principalSymbol) };
+}
+
+/** The parameters of `fn` whose type is a `Principal`, with their bound name ('' when destructured). */
+function principalParams(fn: FunctionLike, judge: Judge): string[] {
   return fn.parameters
-    .filter(
-      (p) =>
-        p.type !== undefined &&
-        ts.isTypeReferenceNode(p.type) &&
-        ts.isIdentifier(p.type.typeName) &&
-        p.type.typeName.text === 'Principal',
+    .filter((p) =>
+      judge.checker.isTypeAssignableTo(judge.checker.getTypeAtLocation(p), judge.principal),
     )
     .map((p) => (ts.isIdentifier(p.name) ? p.name.text : ''));
 }
 
-function takesPrincipal(fn: FunctionLike): boolean {
-  return principalParams(fn).length > 0;
+function takesPrincipal(fn: FunctionLike, judge: Judge): boolean {
+  return principalParams(fn, judge).length > 0;
 }
 
 /**
@@ -280,25 +326,27 @@ function redeclaredWithin(body: ts.Node, name: string): boolean {
 
 /**
  * For a repository file: inside every function — declaration, expression,
- * arrow or method — that takes a `Principal`, each call to a read method
- * (`findMany`, `findFirst`, `count`, `groupBy`, `aggregate`) must be made on
- * `scoped(…)` and its argument must carry a `where:` whose initializer **is**
- * a `scopedWhere(…)` call — not merely present: `where: { storeId } as never`
- * satisfies the brand, because `never` is assignable to anything, and no type
- * can refuse a deliberate cast (OSCAR round 9). A read made any other way on
- * a principal's behalf is one that could have left the scope out (round 8).
- * The call's first argument must be the enclosing function's own `Principal`
- * parameter, by binding (round 12), and no function nested inside may
- * declare a `Principal` of its own — a closure that does re-binds scope to
- * whatever its caller passes (round 13). Reads in functions without a
- * principal — by id, by token — are not store-scoped reads and are not
- * judged here.
+ * arrow or method — that takes a `Principal` (as the TypeChecker sees it),
+ * each call to a read method (`findMany`, `findFirst`, `count`, `groupBy`,
+ * `aggregate`) must be made on `scoped(…)` and its argument must carry a
+ * `where:` whose initializer **is** a genuine `scopedWhere(…)` call — not
+ * merely present: `where: { storeId } as never` satisfies the brand, because
+ * `never` is assignable to anything, and no type can refuse a deliberate cast
+ * (round 9). The call's first argument must be the enclosing function's own
+ * `Principal` parameter, by binding (round 12), and no function nested inside
+ * may declare a `Principal` of its own — a closure that does re-binds scope
+ * to whatever its caller passes (round 13). Reads in functions without a
+ * principal — by id, by token — are not store-scoped reads and are not judged
+ * here.
  */
-export function unscopedReadsForPrincipal(source: string, fromFile: string): number[] {
-  const file = ts.createSourceFile(fromFile, source, ts.ScriptTarget.Latest, true);
-  const names = genuineScopedWhereBindings(file, fromFile);
+export function unscopedReadsForPrincipal(judge: Judge, filePath: string): number[] {
+  const file = judge.program.getSourceFile(filePath);
+  if (file === undefined) throw new Error(`${filePath} is not in the program`);
+  const names = genuineScopedWhereBindings(file, filePath);
   const lines: number[] = [];
-  const judge = (node: ts.Node): void => {
+  let body: ts.Node = file;
+  let principals = new Set<string>();
+  const judgeBody = (node: ts.Node): void => {
     if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
@@ -325,11 +373,6 @@ export function unscopedReadsForPrincipal(source: string, fromFile: string): num
           : undefined;
       const whereIsScopedWhere =
         call !== undefined && ts.isIdentifier(call.expression) && names.has(call.expression.text);
-      // The right function in the right place, with the right value: its first
-      // argument is the enclosing function's own Principal parameter — by
-      // binding, not spelling. Not a literal (`{ kind: 'system' }` scopes
-      // nothing — OSCAR round 12), not another variable, not a call result,
-      // and not a name the body has redeclared.
       const first = call?.arguments[0];
       const withOwnPrincipal =
         first !== undefined &&
@@ -340,31 +383,40 @@ export function unscopedReadsForPrincipal(source: string, fromFile: string): num
         lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
       }
     }
-    // A function nested inside a principal-taking one must not declare a
-    // Principal of its own: whatever its caller hands it replaces the outer
-    // principal for every read inside — `(principal: Principal) => …` called
-    // with `{ kind: 'system' }` (OSCAR round 13). There is no reason for a
-    // scoped-read helper to re-declare what it can close over, so the nested
-    // parameter is the violation, and its body is still judged against the
-    // outer function's own parameter.
-    if (isFunctionLike(node) && node !== body.parent && takesPrincipal(node)) {
+    if (isFunctionLike(node) && node !== body.parent && takesPrincipal(node, judge)) {
       lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
     }
-    ts.forEachChild(node, judge);
+    ts.forEachChild(node, judgeBody);
   };
-  let body: ts.Node = file;
-  let principals = new Set<string>();
   const visit = (node: ts.Node): void => {
-    if (isFunctionLike(node) && takesPrincipal(node) && node.body !== undefined) {
+    if (isFunctionLike(node) && takesPrincipal(node, judge) && node.body !== undefined) {
       body = node.body;
-      principals = new Set(principalParams(node).filter((n) => n !== ''));
-      judge(node.body);
+      principals = new Set(principalParams(node, judge).filter((n) => n !== ''));
+      judgeBody(node.body);
       return;
     }
     ts.forEachChild(node, visit);
   };
   visit(file);
   return [...new Set(lines)].sort((a, b) => a - b);
+}
+
+/**
+ * Judge snippet fixtures: each becomes a virtual repository file under
+ * src/modules/orders/ (so `../platform/index` resolves and the checker sees
+ * the real `Principal`), all in one Program.
+ */
+function judgeSnippets(
+  cases: readonly (readonly [source: string, expected: readonly number[]])[],
+  companions: ReadonlyMap<string, string> = new Map(),
+): void {
+  const at = (i: number): string => join(MODULES_DIR, 'orders', `fixture-${i}.ts`);
+  const judge = loadJudge(
+    new Map([...companions, ...cases.map(([source], i) => [at(i), source] as const)]),
+  );
+  cases.forEach(([source, expected], i) => {
+    expect(unscopedReadsForPrincipal(judge, at(i)), `fixture ${i}:\n${source}`).toEqual(expected);
+  });
 }
 
 /**
@@ -618,8 +670,9 @@ describe('repository store scoping', () => {
     // not compile) and this rule, which holds that a repository function
     // taking a `Principal` makes no read except through `scoped(...)`.
     const violations: string[] = [];
+    const judge = loadJudge(new Map());
     for (const file of moduleFiles(MODULES_DIR).filter((f) => f.endsWith('/repo.ts'))) {
-      for (const line of unscopedReadsForPrincipal(readFileSync(file, 'utf8'), file)) {
+      for (const line of unscopedReadsForPrincipal(judge, file)) {
         violations.push(`${relative(process.cwd(), file)}:${line}`);
       }
     }
@@ -630,225 +683,167 @@ describe('repository store scoping', () => {
       `export async function count(principal: Principal, storeId: string, db?: DbExecutor) {\n` +
       `${body}\n}`;
     // OSCAR's round-8 case: the scope simply left out.
-    expect(
-      unscopedReadsForPrincipal(
-        fn(`  return executor(db).order.groupBy({ by: ['status'], where: { storeId } });`),
-        HERE,
-      ),
-    ).toEqual([3]);
     // The honest shape.
-    expect(
-      unscopedReadsForPrincipal(
-        fn(
-          `  return scoped(executor(db).order).groupBy({ by: ['status'], where: scopedWhere(principal, { storeId }) });`,
-        ),
-        HERE,
-      ),
-    ).toEqual([]);
     // Scoped delegate, but the where forgotten (tsc refuses this too).
-    expect(
-      unscopedReadsForPrincipal(
-        fn(`  return scoped(executor(db).order).findMany({ take: 5 });`),
-        HERE,
-      ),
-    ).toEqual([3]);
     // Every read method, on a transaction or the client, not only executor(db).
-    for (const m of ['findMany', 'findFirst', 'count', 'groupBy', 'aggregate']) {
-      expect(
-        unscopedReadsForPrincipal(fn(`  return prisma.order.${m}({ where: { storeId } });`), HERE),
-      ).toEqual([3]);
-      expect(
-        unscopedReadsForPrincipal(
-          fn(`  return tx.order.${m}({ where: scopedWhere(principal, { storeId }) });`),
-          HERE,
-        ),
-      ).toEqual([3]);
-    }
+    const everyMethod = ['findMany', 'findFirst', 'count', 'groupBy', 'aggregate'].flatMap((m) => [
+      [fn(`  return prisma.order.${m}({ where: { storeId } });`), [3]] as const,
+      [fn(`  return tx.order.${m}({ where: scopedWhere(principal, { storeId }) });`), [3]] as const,
+    ]);
     // OSCAR round 9: `as never` is assignable to anything, so the brand alone
     // cannot stop a deliberate cast. The where must BE the scopedWhere call.
-    expect(
-      unscopedReadsForPrincipal(
-        fn(
-          `  return scoped(executor(db).order).groupBy({ by: ['status'], where: { storeId } as never });`,
-        ),
-        HERE,
-      ),
-    ).toEqual([3]);
-    expect(
-      unscopedReadsForPrincipal(
-        fn(`  return scoped(executor(db).order).findMany({ where: { storeId } as any });`),
-        HERE,
-      ),
-    ).toEqual([3]);
-    expect(
-      unscopedReadsForPrincipal(
-        fn(
-          `  return scoped(executor(db).order).findMany({ where: scopedWhere(principal, { storeId }) as never });`,
-        ),
-        HERE,
-      ),
-    ).toEqual([3]);
-    expect(
-      unscopedReadsForPrincipal(
-        fn(
-          `  const w = scopedWhere(principal, { storeId });\n  return scoped(executor(db).order).findMany({ where: w });`,
-        ),
-        HERE,
-      ),
-    ).toEqual([4]);
-    expect(
-      unscopedReadsForPrincipal(
-        fn(
-          `  return scoped(executor(db).order).findMany({ where: (scopedWhere(principal, { storeId })) });`,
-        ),
-        HERE,
-      ),
-    ).toEqual([3]);
     // Arrow functions, function expressions and methods that take a principal
     // are judged the same way as declarations.
     const arrow =
       `import { scoped, scopedWhere, type Principal } from '../platform/index';\n` +
       `export const count = async (principal: Principal, storeId: string) =>\n` +
       `  scoped(executor(db).order).count({ where: { storeId } as never });`;
-    expect(unscopedReadsForPrincipal(arrow, HERE)).toEqual([3]);
     const expression =
       `export const list = async function (principal: Principal) {\n` +
       `  return executor(db).order.findMany({ where: { storeId: 'x' } });\n};`;
-    expect(unscopedReadsForPrincipal(expression, HERE)).toEqual([2]);
     const method =
       `export const repo = {\n` +
       `  async list(principal: Principal) {\n` +
       `    return scoped(executor(db).order).findMany({ where: { storeId: 'x' } as never });\n` +
       `  },\n};`;
-    expect(unscopedReadsForPrincipal(method, HERE)).toEqual([3]);
     const honestArrow =
       `import { scoped, scopedWhere, type Principal } from '../platform/index';\n` +
       `export const count = async (principal: Principal, storeId: string) =>\n` +
       `  scoped(executor(db).order).count({ where: scopedWhere(principal, { storeId }) });`;
-    expect(unscopedReadsForPrincipal(honestArrow, HERE)).toEqual([]);
     // A nested arrow inside a principal-taking function reads on its behalf.
-    expect(
-      unscopedReadsForPrincipal(
-        fn(
-          `  const read = () => executor(db).order.findMany({ where: { storeId } });\n  return read();`,
-        ),
-        HERE,
-      ),
-    ).toEqual([3]);
 
     // OSCAR round 12: the genuine helper, in the right place, with the wrong
     // principal. `{ kind: 'system' }` is unscoped; the caller's own is what
     // the read is on behalf of.
-    expect(
-      unscopedReadsForPrincipal(
-        fn(
-          `  return scoped(executor(db).order).findMany({ where: scopedWhere({ kind: 'system' }, { storeId }) });`,
-        ),
-        HERE,
-      ),
-    ).toEqual([3]);
-    expect(
-      unscopedReadsForPrincipal(
-        fn(
-          `  return scoped(executor(db).order).findMany({ where: scopedWhere(SYSTEM, { storeId }) });`,
-        ),
-        HERE,
-      ),
-    ).toEqual([3]);
-    expect(
-      unscopedReadsForPrincipal(
-        fn(
-          `  return scoped(executor(db).order).findMany({ where: scopedWhere(principalFor(storeId), { storeId }) });`,
-        ),
-        HERE,
-      ),
-    ).toEqual([3]);
-    expect(
-      unscopedReadsForPrincipal(
-        fn(
-          `  const principal2 = principal;\n  return scoped(executor(db).order).findMany({ where: scopedWhere(principal2, { storeId }) });`,
-        ),
-        HERE,
-      ),
-    ).toEqual([4]);
     // The parameter's name, redeclared in the body: the guard does not work
     // out which one the call means, and refuses.
-    expect(
-      unscopedReadsForPrincipal(
-        fn(
-          `  const principal = { kind: 'system' } as const;\n  return scoped(executor(db).order).findMany({ where: scopedWhere(principal, { storeId }) });`,
-        ),
-        HERE,
-      ),
-    ).toEqual([4]);
     // OSCAR round 13: a nested closure that declares its OWN Principal, called
     // with a literal — the outer manager's principal is discarded. The nested
     // parameter is the violation (line 3); the read inside is judged against
     // the outer function's parameter, which the closure has shadowed (line 3).
-    expect(
-      unscopedReadsForPrincipal(
+    // A nested closure that closes over the outer principal is fine.
+    // A nested function that declares a Principal but reads nothing is still a
+    // violation: the shape itself is what re-binds scope.
+    // A destructured Principal parameter has no name to bind to.
+
+    // A read in a helper the principal-taking function calls is that helper's
+    // business; a function without a principal (a read by id) is not covered.
+    // Two reads in one function: each judged.
+    judgeSnippets([
+      [fn(`  return executor(db).order.groupBy({ by: ['status'], where: { storeId } });`), [3]],
+      [
+        fn(
+          `  return scoped(executor(db).order).groupBy({ by: ['status'], where: scopedWhere(principal, { storeId }) });`,
+        ),
+        [],
+      ],
+      [fn(`  return scoped(executor(db).order).findMany({ take: 5 });`), [3]],
+      [
+        fn(
+          `  return scoped(executor(db).order).groupBy({ by: ['status'], where: { storeId } as never });`,
+        ),
+        [3],
+      ],
+      [fn(`  return scoped(executor(db).order).findMany({ where: { storeId } as any });`), [3]],
+      [
+        fn(
+          `  return scoped(executor(db).order).findMany({ where: scopedWhere(principal, { storeId }) as never });`,
+        ),
+        [3],
+      ],
+      [
+        fn(
+          `  const w = scopedWhere(principal, { storeId });\n  return scoped(executor(db).order).findMany({ where: w });`,
+        ),
+        [4],
+      ],
+      [
+        fn(
+          `  return scoped(executor(db).order).findMany({ where: (scopedWhere(principal, { storeId })) });`,
+        ),
+        [3],
+      ],
+      [arrow, [3]],
+      [expression, [2]],
+      [method, [3]],
+      [honestArrow, []],
+      [
+        fn(
+          `  const read = () => executor(db).order.findMany({ where: { storeId } });\n  return read();`,
+        ),
+        [3],
+      ],
+      [
+        fn(
+          `  return scoped(executor(db).order).findMany({ where: scopedWhere({ kind: 'system' }, { storeId }) });`,
+        ),
+        [3],
+      ],
+      [
+        fn(
+          `  return scoped(executor(db).order).findMany({ where: scopedWhere(SYSTEM, { storeId }) });`,
+        ),
+        [3],
+      ],
+      [
+        fn(
+          `  return scoped(executor(db).order).findMany({ where: scopedWhere(principalFor(storeId), { storeId }) });`,
+        ),
+        [3],
+      ],
+      [
+        fn(
+          `  const principal2 = principal;\n  return scoped(executor(db).order).findMany({ where: scopedWhere(principal2, { storeId }) });`,
+        ),
+        [4],
+      ],
+      [
+        fn(
+          `  const principal = { kind: 'system' } as const;\n  return scoped(executor(db).order).findMany({ where: scopedWhere(principal, { storeId }) });`,
+        ),
+        [4],
+      ],
+      [
         fn(
           `  const read = (principal: Principal) => scoped(executor(db).order).findMany({ where: scopedWhere(principal, { storeId }) });\n` +
             `  return read({ kind: 'system' });`,
         ),
-        HERE,
-      ),
-    ).toEqual([3]);
-    expect(
-      unscopedReadsForPrincipal(
+        [3],
+      ],
+      [
         fn(
           `  const read = (p: Principal) => scoped(executor(db).order).findMany({ where: scopedWhere(p, { storeId }) });\n` +
             `  return read({ kind: 'system' });`,
         ),
-        HERE,
-      ),
-    ).toEqual([3]);
-    // A nested closure that closes over the outer principal is fine.
-    expect(
-      unscopedReadsForPrincipal(
+        [3],
+      ],
+      [
         fn(
           `  const read = () => scoped(executor(db).order).findMany({ where: scopedWhere(principal, { storeId }) });\n` +
             `  return read();`,
         ),
-        HERE,
-      ),
-    ).toEqual([]);
-    // A nested function that declares a Principal but reads nothing is still a
-    // violation: the shape itself is what re-binds scope.
-    expect(
-      unscopedReadsForPrincipal(
-        fn(`  const noop = (principal: Principal) => principal;\n  return noop(principal);`),
-        HERE,
-      ),
-    ).toEqual([3]);
-    // A destructured Principal parameter has no name to bind to.
-    expect(
-      unscopedReadsForPrincipal(
+        [],
+      ],
+      [fn(`  const noop = (principal: Principal) => principal;\n  return noop(principal);`), [3]],
+      [
         `import { scoped, scopedWhere, type Principal } from '../platform/index';\n` +
           `export async function list({ kind }: Principal, storeId: string) {\n` +
           `  return scoped(executor(db).order).findMany({ where: scopedWhere({ kind }, { storeId }) });\n}`,
-        HERE,
-      ),
-    ).toEqual([3]);
-
-    // A read in a helper the principal-taking function calls is that helper's
-    // business; a function without a principal (a read by id) is not covered.
-    expect(
-      unscopedReadsForPrincipal(
+        [3],
+      ],
+      [
         `export async function findZone(id: string, db?: DbExecutor) {\n  return executor(db).deliveryZone.findUnique({ where: { id } });\n}`,
-        HERE,
-      ),
-    ).toEqual([]);
-    // Two reads in one function: each judged.
-    expect(
-      unscopedReadsForPrincipal(
+        [],
+      ],
+      [
         fn(
           `  const a = await scoped(executor(db).order).findMany({ where: scopedWhere(principal, {}) });\n` +
             `  const b = await executor(db).order.count({ where: { storeId } });\n  return [a, b];`,
         ),
-        HERE,
-      ),
-    ).toEqual([4]);
+        [4],
+      ],
+      ...everyMethod,
+    ]);
   });
 
   it('the brand and the scoped delegate are named nowhere outside platform', () => {
@@ -1025,7 +1020,6 @@ describe('repository store scoping', () => {
     // Rule 2: the name is a counterfeit at its import and at its use.
     expect(misusesScopedWhere(aliasedHelper, HERE)).toEqual([2, 4]);
     // Rule 5: the read's where is not the genuine scopedWhere.
-    expect(unscopedReadsForPrincipal(aliasedHelper, HERE)).toEqual([4]);
 
     // The genuine import under the genuine name from the genuine module.
     const genuine = aliasedHelper.replace(
@@ -1033,7 +1027,6 @@ describe('repository store scoping', () => {
       `import { scopedWhere } from '../platform/index';`,
     );
     expect(misusesScopedWhere(genuine, HERE)).toEqual([]);
-    expect(unscopedReadsForPrincipal(genuine, HERE)).toEqual([]);
 
     // Same remote name, wrong module: still a counterfeit.
     const wrongModule = aliasedHelper.replace(
@@ -1041,7 +1034,6 @@ describe('repository store scoping', () => {
       `import { scopedWhere } from './scope-helper';`,
     );
     expect(misusesScopedWhere(wrongModule, HERE)).toEqual([2, 4]);
-    expect(unscopedReadsForPrincipal(wrongModule, HERE)).toEqual([4]);
     // Right module, imported under an alias: the alias is judged as the
     // genuine function (rule 5 accepts it), the alias itself is reported (round 5).
     const aliasOfGenuine = aliasedHelper
@@ -1051,14 +1043,80 @@ describe('repository store scoping', () => {
       )
       .replace('where: scopedWhere(', 'where: sw(');
     expect(misusesScopedWhere(aliasOfGenuine, HERE)).toEqual([2]);
-    expect(unscopedReadsForPrincipal(aliasOfGenuine, HERE)).toEqual([]);
     // A local declaration under the name, with no import at all.
     const local =
       `export function scopedWhere(p, x) { return x as never; }\n` +
       `export async function list(principal: Principal) {\n` +
       `  return scoped(executor(db).order).findMany({ where: scopedWhere(principal, {}) });\n}`;
     expect(misusesScopedWhere(local, HERE)).toEqual([1, 3]);
-    expect(unscopedReadsForPrincipal(local, HERE)).toEqual([3]);
+    judgeSnippets([
+      [aliasedHelper, [4]],
+      [genuine, []],
+      [wrongModule, [4]],
+      [aliasOfGenuine, []],
+      [local, [3]],
+    ]);
+  });
+
+  it('a Principal is a Principal however it is spelled — OSCAR round 14', () => {
+    // The guard asks the TypeChecker whether a parameter's type is assignable
+    // to the real `Principal`; an alias, an imported alias, or a structurally
+    // identical type all count, so the function is judged like any other —
+    // and OSCAR's literal argument is what fails it.
+    const via = (annotation: string, prelude = ''): string =>
+      `import { scoped, scopedWhere, type Principal } from '../platform/index';\n` +
+      prelude +
+      `export async function list(principal: ${annotation}, storeId: string) {\n` +
+      `  return scoped(executor(db).order).findMany({ where: scopedWhere({ kind: 'system' }, { storeId }) });\n` +
+      `}`;
+    const honest = (annotation: string, prelude = ''): string =>
+      via(annotation, prelude).replace(
+        `scopedWhere({ kind: 'system' }, { storeId })`,
+        `scopedWhere(principal, { storeId })`,
+      );
+    judgeSnippets(
+      [
+        // OSCAR's exact case: a local alias hides the parameter from a text match.
+        [via('P', `type P = Principal;\n`), [4]],
+        [honest('P', `type P = Principal;\n`), []],
+        // An imported alias.
+        [via('P', `import type { P } from './principal-alias';\n`), [4]],
+        [honest('P', `import type { P } from './principal-alias';\n`), []],
+        // A structurally identical type, never named Principal at all.
+        [
+          via(
+            'Anyone',
+            `type Anyone = { readonly kind: 'system' } | { readonly kind: 'customer'; readonly customerId: string | null; readonly storeId: string | null } | { readonly kind: 'user'; readonly userId: string; readonly role: 'SUPER_ADMIN' | 'STORE_MANAGER' | 'STORE_STAFF'; readonly storeId: string | null };\n`,
+          ),
+          [4],
+        ],
+        // A narrower type is still a Principal.
+        [via(`Extract<Principal, { kind: 'user' }>`), [3]],
+        // Unannotated, the parameter is `any` — assignable, so judged.
+        [via('any'), [3]],
+        // A nested closure re-declaring the alias is the round-13 violation.
+        [
+          `import { scoped, scopedWhere, type Principal } from '../platform/index';\ntype P = Principal;\n` +
+            `export async function list(principal: P, storeId: string) {\n` +
+            `  const read = (principal: P) => scoped(executor(db).order).findMany({ where: scopedWhere(principal, { storeId }) });\n` +
+            `  return read({ kind: 'system' });\n}`,
+          [4],
+        ],
+        // Not a Principal: a string id. Not judged — a read by id is the
+        // service's business to authorize.
+        [
+          `import { type Principal } from '../platform/index';\n` +
+            `export async function byId(id: string) {\n  return executor(db).order.findFirst({ where: { id } });\n}`,
+          [],
+        ],
+      ],
+      new Map([
+        [
+          join(MODULES_DIR, 'orders', 'principal-alias.ts'),
+          `import type { Principal } from '../platform/index';\nexport type P = Principal;\n`,
+        ],
+      ]),
+    );
   });
 
   it('platform exports scopedWhere under its own name only — OSCAR round 6', () => {
