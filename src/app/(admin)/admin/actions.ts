@@ -252,17 +252,48 @@ export async function updateStoreAction(_state: ActionState, form: FormData): Pr
 export async function updateSettingsAction(_state: ActionState, form: FormData): Promise<string> {
   return run(async () => {
     const principal = await requirePrincipal();
+
+    // The form displays/inputs rupees with decimals (Delivery fee (₹), Minimum order (₹), Variance cap (₹)).
+    // If rupee inputs are present, strictly parse to integer paise before reading paise.
+    // If BOTH old paise key and new rupee key are present in the same submission, reject as ambiguous.
+    const moneyPairs = [
+      { rupeeKey: 'deliveryFee', paiseKey: 'deliveryFeePaise', label: 'Delivery fee' },
+      { rupeeKey: 'minOrder', paiseKey: 'minOrderPaise', label: 'Minimum order' },
+      {
+        rupeeKey: 'priceVarianceAbsCap',
+        paiseKey: 'priceVarianceAbsCapPaise',
+        label: 'Variance cap',
+      },
+    ] as const;
+
+    for (const { rupeeKey, paiseKey, label } of moneyPairs) {
+      const hasRupees = form.has(rupeeKey);
+      const hasPaise = form.has(paiseKey);
+
+      if (hasRupees && hasPaise) {
+        throw new ValidationError(
+          `Cannot specify both ${rupeeKey} (rupees) and ${paiseKey} (paise) for ${label}`,
+          { field: rupeeKey, conflictingField: paiseKey },
+        );
+      }
+
+      if (hasRupees) {
+        const paise = parseRupeesToPaise(text(form, rupeeKey), rupeeKey, label);
+        form.set(paiseKey, String(paise));
+      }
+    }
+
     const substitutionPolicy = text(form, 'substitutionPolicy');
     await updateSettings(principal, text(form, 'storeId'), {
-      deliveryFeePaise: int(form, 'deliveryFeePaise'),
-      minOrderPaise: int(form, 'minOrderPaise'),
-      slotLengthMinutes: int(form, 'slotLengthMinutes'),
-      slotCapacity: int(form, 'slotCapacity'),
-      openMinuteOfDay: int(form, 'openMinuteOfDay'),
-      closeMinuteOfDay: int(form, 'closeMinuteOfDay'),
-      priceVariancePercentBp: int(form, 'priceVariancePercentBp'),
-      priceVarianceAbsCapPaise: int(form, 'priceVarianceAbsCapPaise'),
-      lowStockThreshold: int(form, 'lowStockThreshold'),
+      deliveryFeePaise: int(form, 'deliveryFeePaise', 'Delivery fee'),
+      minOrderPaise: int(form, 'minOrderPaise', 'Minimum order'),
+      slotLengthMinutes: int(form, 'slotLengthMinutes', 'Slot length'),
+      slotCapacity: int(form, 'slotCapacity', 'Slot capacity'),
+      openMinuteOfDay: int(form, 'openMinuteOfDay', 'Opens at'),
+      closeMinuteOfDay: int(form, 'closeMinuteOfDay', 'Closes at'),
+      priceVariancePercentBp: int(form, 'priceVariancePercentBp', 'Price variance'),
+      priceVarianceAbsCapPaise: int(form, 'priceVarianceAbsCapPaise', 'Variance cap'),
+      lowStockThreshold: int(form, 'lowStockThreshold', 'Low-stock threshold'),
       isAcceptingOrders: checked(form, 'isAcceptingOrders'),
       ...(substitutionPolicy === 'NONE' ||
       substitutionPolicy === 'ASK_CUSTOMER' ||
@@ -469,12 +500,25 @@ export async function setPriceAction(_state: ActionState, form: FormData): Promi
 
     // The form displays/inputs rupees with decimals (MRP (₹) and Selling price (₹)).
     // If rupee inputs are present, strictly parse to integer paise before reading paise.
-    if (form.has('mrp') && !form.has('mrpPaise')) {
+    // If BOTH old paise key and new rupee key are present in the same submission, reject as ambiguous.
+    if (form.has('mrp') && form.has('mrpPaise')) {
+      throw new ValidationError('Cannot specify both mrp (rupees) and mrpPaise (paise) for MRP', {
+        field: 'mrp',
+        conflictingField: 'mrpPaise',
+      });
+    }
+    if (form.has('mrp')) {
       const paise = parseRupeesToPaise(text(form, 'mrp'), 'mrp', 'MRP');
       form.set('mrpPaise', String(paise));
     }
 
-    if (form.has('sellingPrice') && !form.has('sellingPricePaise')) {
+    if (form.has('sellingPrice') && form.has('sellingPricePaise')) {
+      throw new ValidationError(
+        'Cannot specify both sellingPrice (rupees) and sellingPricePaise (paise) for Selling price',
+        { field: 'sellingPrice', conflictingField: 'sellingPricePaise' },
+      );
+    }
+    if (form.has('sellingPrice')) {
       const paise = parseRupeesToPaise(text(form, 'sellingPrice'), 'sellingPrice', 'Selling price');
       form.set('sellingPricePaise', String(paise));
     }

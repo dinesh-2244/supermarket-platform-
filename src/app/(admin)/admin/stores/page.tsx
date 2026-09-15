@@ -49,7 +49,7 @@ export default async function StoresPage({
     <div className="space-y-6">
       <PageHeading
         title="Stores & settings"
-        subtitle="Per-store business settings. Money is stored in paise; these fields are paise too."
+        subtitle="Per-store business settings. Values are entered in rupees and stored internally in paise."
       />
 
       <StoreSwitcher stores={stores} storeId={storeId} basePath="/admin/stores" />
@@ -130,17 +130,21 @@ export default async function StoresPage({
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Field
-              label={`Delivery fee (paise) — ${formatPaise(settings.deliveryFeePaise)}`}
-              name="deliveryFeePaise"
+              label={`Delivery fee (₹) — currently ${formatPaise(settings.deliveryFeePaise)}`}
+              name="deliveryFee"
               type="number"
-              defaultValue={settings.deliveryFeePaise}
+              step="0.01"
+              min="0"
+              defaultValue={(settings.deliveryFeePaise / 100).toFixed(2)}
               width="w-full"
             />
             <Field
-              label={`Minimum order (paise) — ${formatPaise(settings.minOrderPaise)}`}
-              name="minOrderPaise"
+              label={`Minimum order (₹) — currently ${formatPaise(settings.minOrderPaise)}`}
+              name="minOrder"
               type="number"
-              defaultValue={settings.minOrderPaise}
+              step="0.01"
+              min="0"
+              defaultValue={(settings.minOrderPaise / 100).toFixed(2)}
               width="w-full"
             />
             <Field
@@ -179,10 +183,12 @@ export default async function StoresPage({
               width="w-full"
             />
             <Field
-              label="Variance cap (paise)"
-              name="priceVarianceAbsCapPaise"
+              label={`Variance cap (₹) — currently ${formatPaise(settings.priceVarianceAbsCapPaise)}`}
+              name="priceVarianceAbsCap"
               type="number"
-              defaultValue={settings.priceVarianceAbsCapPaise}
+              step="0.01"
+              min="0"
+              defaultValue={(settings.priceVarianceAbsCapPaise / 100).toFixed(2)}
               width="w-full"
             />
             <Field
