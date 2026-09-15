@@ -465,6 +465,21 @@ describe('opening hours — only windows inside them are offered', () => {
     // and is offered.
     expect(wholeDay.map((s) => s.toISOString())).toContain('2026-03-29T23:00:00.000Z');
 
+    // The fall-back's repeated hour: the window from 01:00 BST to 01:00 GMT is
+    // a real hour, but the clock reads 01:00 at both ends and cannot tell it
+    // from an empty one. It is not offered; the windows either side are.
+    const repeated = slotGrid({
+      ...hours,
+      timeZone: 'Europe/London',
+      openMinuteOfDay: 0,
+      closeMinuteOfDay: 1440,
+      from: new Date('2026-10-24T23:00:00Z'), // 00:00 BST, 25 October
+    });
+    const iso = repeated.map((s) => s.toISOString());
+    expect(iso).toContain('2026-10-24T23:00:00.000Z'); // 00:00–01:00 BST
+    expect(iso).not.toContain('2026-10-25T00:00:00.000Z'); // 01:00 BST → 01:00 GMT
+    expect(iso).toContain('2026-10-25T01:00:00.000Z'); // 01:00–02:00 GMT
+
     // A window that ends exactly at midnight belongs to its own day.
     const toMidnight = slotGrid({
       ...hours,

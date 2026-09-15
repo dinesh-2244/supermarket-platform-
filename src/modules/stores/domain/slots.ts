@@ -218,8 +218,9 @@ function insideHours(
   const date = localDate(start, timeZone);
   const rawEnd = wallClockMinute(end, timeZone);
   if (rawEnd === 0) {
-    // Exactly midnight: the one that closes this date, not a later one.
-    return localDate(end - MINUTE_MS, timeZone) === date && MINUTES_PER_DAY <= closeMinuteOfDay;
+    // Exactly midnight. A length divides the day, so this can only be the
+    // midnight that closes the start's date — and 1440 has to be inside hours.
+    return MINUTES_PER_DAY <= closeMinuteOfDay;
   }
   return localDate(end, timeZone) === date && rawEnd > opensAt && rawEnd <= closeMinuteOfDay;
 }
